@@ -874,45 +874,44 @@ function StaffCallModal({ isOpen, onClose, sessionId }: StaffCallModalProps) {
   if (!isOpen) return null;
 
   // Show minimal indicator for connecting/connected states
+  // Positioned to align with right side of main content (1100px centered container)
+  // Same position as staff-call-btn would be
   if (callStatus === 'connecting' || callStatus === 'connected') {
     return (
       <>
         <div style={{
           position: 'fixed',
           top: '16px',
-          left: '16px',
+          right: 'max(24px, calc(50% - 550px))', // Align with right edge of 1100px centered container
           zIndex: 1000,
           backgroundColor: 'white',
-          borderRadius: '12px',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-          padding: '12px 16px',
+          borderRadius: '10px',
+          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08)',
+          padding: '8px 14px',
           display: 'flex',
           alignItems: 'center',
-          gap: '12px',
-          border: '1px solid #e5e7eb',
+          gap: '10px',
         }}>
+          {/* Status indicator dot - matches staff-call-btn style */}
           <div style={{
-            width: '10px',
-            height: '10px',
+            width: '6px',
+            height: '6px',
             borderRadius: '50%',
             backgroundColor: callStatus === 'connected' ? '#22c55e' : '#f59e0b',
-            animation: 'pulse 2s infinite',
           }} />
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontSize: '16px', fontWeight: 500, color: '#1f2937' }}>
-              {callStatus === 'connected' ? '통화중' : '연결중'}
+          <span style={{ fontSize: '13px', fontWeight: 500, color: '#191f28' }}>
+            {callStatus === 'connected' ? '통화중' : '연결중'}
+          </span>
+          {callStatus === 'connected' && (
+            <span style={{ fontSize: '13px', color: '#6b7684', fontFamily: 'monospace' }}>
+              {formatDuration(callDuration)}
             </span>
-            {callStatus === 'connected' && (
-              <span style={{ fontSize: '16px', color: '#6b7280', fontFamily: 'monospace' }}>
-                {formatDuration(callDuration)}
-              </span>
-            )}
-          </div>
+          )}
           <button
             onClick={handleClose}
             style={{
-              width: '36px',
-              height: '36px',
+              width: '28px',
+              height: '28px',
               borderRadius: '50%',
               backgroundColor: '#ef4444',
               border: 'none',
@@ -920,24 +919,16 @@ function StaffCallModal({ isOpen, onClose, sessionId }: StaffCallModalProps) {
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              transition: 'background-color 0.2s',
+              marginLeft: '4px',
             }}
-            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#dc2626'}
-            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#ef4444'}
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <line x1="18" y1="6" x2="6" y2="18"></line>
               <line x1="6" y1="6" x2="18" y2="18"></line>
             </svg>
           </button>
         </div>
         <audio ref={remoteAudioRef} autoPlay playsInline style={{ display: 'none' }} />
-        <style>{`
-          @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-          }
-        `}</style>
       </>
     );
   }

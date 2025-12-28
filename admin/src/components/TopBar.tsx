@@ -44,16 +44,16 @@ export default function TopBar({ profile }: TopBarProps) {
 
   return (
     <header className="bg-white text-gray-900 border-b border-gray-200">
-      <div className="flex items-center justify-between px-6 h-14">
+      <div className="flex items-center justify-between px-6 h-16">
         {/* Logo */}
         <div className="flex items-center gap-8">
           <Link href="/dashboard" className="flex items-center">
             <Image
               src="/logo.png"
               alt="HiO Admin"
-              width={100}
-              height={40}
-              className="h-8 w-auto"
+              width={200}
+              height={60}
+              className="h-[60px] w-auto"
               priority
             />
           </Link>
