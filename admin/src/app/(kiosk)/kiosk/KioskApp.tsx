@@ -762,7 +762,8 @@ function StaffCallModal({ isOpen, onClose, sessionId }: StaffCallModalProps) {
               await pc.addIceCandidate(candidate);
             }
             pendingCandidatesRef.current = [];
-            setCallStatus('connecting');
+            // Don't set 'connecting' here - onconnectionstatechange will handle status updates
+            // Setting it here can overwrite 'connected' if connection established quickly
           } else if (payload.type === 'ice-candidate' && payload.candidate) {
             if (pc.remoteDescription) {
               await pc.addIceCandidate(payload.candidate);

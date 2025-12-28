@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
 import { Profile } from '@/types/database';
 import { useState } from 'react';
@@ -42,12 +43,19 @@ export default function TopBar({ profile }: TopBarProps) {
   const links = isSuperAdmin ? superAdminLinks : projectAdminLinks;
 
   return (
-    <header className="bg-gray-900 text-white">
+    <header className="bg-white text-gray-900 border-b border-gray-200">
       <div className="flex items-center justify-between px-6 h-14">
         {/* Logo */}
         <div className="flex items-center gap-8">
-          <Link href="/dashboard" className="text-xl font-bold">
-            HiO Admin
+          <Link href="/dashboard" className="flex items-center">
+            <Image
+              src="/logo.png"
+              alt="HiO Admin"
+              width={100}
+              height={40}
+              className="h-8 w-auto"
+              priority
+            />
           </Link>
 
           {/* Navigation */}
@@ -61,8 +69,8 @@ export default function TopBar({ profile }: TopBarProps) {
                   href={link.href}
                   className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
                     isActive
-                      ? 'bg-gray-700 text-white'
-                      : 'text-gray-300 hover:bg-gray-800 hover:text-white'
+                      ? 'bg-gray-900 text-white'
+                      : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
                   }`}
                 >
                   {link.label}
@@ -76,19 +84,19 @@ export default function TopBar({ profile }: TopBarProps) {
         <div className="relative">
           <button
             onClick={() => setShowUserMenu(!showUserMenu)}
-            className="flex items-center gap-2 px-3 py-2 rounded-md hover:bg-gray-800 transition-colors"
+            className="flex items-center gap-2 px-3 py-2 rounded-md hover:bg-gray-100 transition-colors"
           >
-            <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-sm font-medium">
+            <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-sm font-medium text-white">
               {(profile.full_name || profile.email)[0].toUpperCase()}
             </div>
             <div className="text-left hidden sm:block">
               <p className="text-sm font-medium">{profile.full_name || profile.email}</p>
-              <p className="text-xs text-gray-400">
+              <p className="text-xs text-gray-500">
                 {isSuperAdmin ? 'Super Admin' : 'Project Admin'}
                 {profile.project && ` - ${profile.project.name}`}
               </p>
             </div>
-            <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
             </svg>
           </button>

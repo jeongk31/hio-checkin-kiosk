@@ -16,6 +16,10 @@ const geistMono = localFont({
 export const metadata: Metadata = {
   title: "HiO Kiosk",
   description: "Hotel check-in kiosk management system",
+  icons: {
+    icon: "/logo.png",
+    apple: "/logo.png",
+  },
 };
 
 export default function RootLayout({
