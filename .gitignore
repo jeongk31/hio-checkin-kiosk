@@ -37,3 +37,8 @@ yarn-error.log*
 .vscode/
 *.swp
 *.swo
+
+# Documents and screenshots (not for deployment)
+*.pdf
+Screenshot*.png
+details.txt
