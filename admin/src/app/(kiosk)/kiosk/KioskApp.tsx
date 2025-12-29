@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
+import Image from 'next/image';
 import { Kiosk } from '@/types/database';
 import { createClient } from '@/lib/supabase/client';
 import {
@@ -510,12 +511,13 @@ export default function KioskApp({ kiosk, content, paymentResult }: KioskAppProp
         console.log('[Kiosk] Video session created successfully:', session);
         setCurrentSessionId(session.id);
 
-        // Broadcast the incoming call to the project's voice call channel
-        const channelName = `voice-calls-${kiosk.project_id}`;
-        console.log('[Kiosk] Broadcasting incoming call to channel:', channelName);
+        // Broadcast the incoming call to the super admin channel
+        // Super admin listens on this channel to receive calls from all kiosks
+        const superAdminChannel = 'voice-calls-super-admin';
+        console.log('[Kiosk] Broadcasting incoming call to super admin channel:', superAdminChannel);
         console.log('[Kiosk] Session data:', JSON.stringify(session));
 
-        const broadcastChannel = supabase.channel(channelName);
+        const broadcastChannel = supabase.channel(superAdminChannel);
         broadcastChannel.subscribe(async (status) => {
           console.log('[Kiosk] Broadcast channel status:', status);
           if (status === 'SUBSCRIBED') {
@@ -1297,7 +1299,7 @@ function StartScreen({ goToScreen, t, openStaffModal, callProps }: { goToScreen:
         <TopButtonRow onStaffCall={openStaffModal} callStatus={callProps.callStatus} callDuration={callProps.callDuration} onEndCall={callProps.onEndCall} isCallActive={callProps.isCallActive} />
         <div className="container">
           <div className="logo">
-            <h1>HiO</h1>
+            <Image src="/logo.png" alt="HiO" width={200} height={80} className="logo-image" />
           </div>
           <div className="welcome-message">
             <h2>{t('start_welcome_title')}</h2>
@@ -1394,7 +1396,7 @@ function CheckinReservationScreen({
           <NavArrow direction="left" label="이전" onClick={() => goToScreen('start')} disabled={isValidating} />
           <NavArrow direction="right" label={isValidating ? '확인 중...' : '다음'} onClick={handleNext} disabled={!reservationNumber.trim() || isValidating} />
           <div className="logo">
-            <h1>HiO</h1>
+            <Image src="/logo.png" alt="HiO" width={200} height={80} className="logo-image" />
           </div>
           <h2 className="screen-title">{t('checkin_title')}</h2>
           <p className="screen-description">
@@ -1479,7 +1481,7 @@ function ConsentScreen({
           <NavArrow direction="left" label="이전" onClick={handleBack} />
           <NavArrow direction="right" label="다음" onClick={handleNext} disabled={!agreed || !signature.trim()} />
           <div className="logo">
-            <h1>HiO</h1>
+            <Image src="/logo.png" alt="HiO" width={200} height={80} className="logo-image" />
           </div>
           <h2 className="screen-title">{t('consent_title')}</h2>
           <p className="screen-description">
@@ -1799,7 +1801,7 @@ function IDVerificationScreen({
           <div className="container">
             <NavArrow direction="left" label="이전" onClick={handleBack} />
             <NavArrow direction="right" label="인증 시작" onClick={handleStartVerification} />
-            <div className="logo"><h1>HiO</h1></div>
+            <div className="logo"><Image src="/logo.png" alt="HiO" width={200} height={80} className="logo-image" /></div>
             <h2 className="screen-title">{screenTitle}</h2>
             <div className="verification-intro" style={{ whiteSpace: 'pre-wrap' }}>
               {t('verification_description')}
@@ -1827,7 +1829,7 @@ function IDVerificationScreen({
           <div className="container">
             <NavArrow direction="left" label="이전" onClick={handleBack} />
             <NavArrow direction="right" label="다시 시도" onClick={handleRetry} />
-            <div className="logo"><h1>HiO</h1></div>
+            <div className="logo"><Image src="/logo.png" alt="HiO" width={200} height={80} className="logo-image" /></div>
             <h2 className="screen-title">인증 실패</h2>
             <div style={{ textAlign: 'center', padding: '20px' }}>
               <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#dc2626" strokeWidth="2" style={{ marginBottom: '12px' }}>
@@ -1850,7 +1852,7 @@ function IDVerificationScreen({
         <div className="screen-wrapper">
           <TopButtonRow onStaffCall={openStaffModal} callStatus={callProps.callStatus} callDuration={callProps.callDuration} onEndCall={callProps.onEndCall} isCallActive={callProps.isCallActive} />
           <div className="container">
-            <div className="logo"><h1>HiO</h1></div>
+            <div className="logo"><Image src="/logo.png" alt="HiO" width={200} height={80} className="logo-image" /></div>
             <h2 className="screen-title">인증 완료</h2>
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '40px 20px' }}>
               <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2" style={{ marginBottom: '16px' }}>
@@ -1873,7 +1875,7 @@ function IDVerificationScreen({
         <div className="screen-wrapper">
           <TopButtonRow onStaffCall={openStaffModal} callStatus={callProps.callStatus} callDuration={callProps.callDuration} onEndCall={callProps.onEndCall} isCallActive={callProps.isCallActive} />
           <div className="container">
-            <div className="logo"><h1>HiO</h1></div>
+            <div className="logo"><Image src="/logo.png" alt="HiO" width={200} height={80} className="logo-image" /></div>
             <h2 className="screen-title">{screenTitle}</h2>
             <div className="verification-progress">
               <span className="current-guest">{currentGuest}번째</span> / {guestCount}명 인증
@@ -1897,7 +1899,7 @@ function IDVerificationScreen({
         <TopButtonRow onStaffCall={openStaffModal} callStatus={callProps.callStatus} callDuration={callProps.callDuration} onEndCall={callProps.onEndCall} isCallActive={callProps.isCallActive} />
         <div className="container">
           <NavArrow direction="left" label="이전" onClick={handleBack} />
-          <div className="logo"><h1>HiO</h1></div>
+          <div className="logo"><Image src="/logo.png" alt="HiO" width={200} height={80} className="logo-image" /></div>
           <h2 className="screen-title">{screenTitle}</h2>
           <div className="verification-progress">
             <span className="current-guest">{currentGuest}번째</span> / {guestCount}명 인증
@@ -2148,7 +2150,7 @@ function HotelInfoScreen({
           <TopButtonRow onStaffCall={openStaffModal} callStatus={callProps.callStatus} callDuration={callProps.callDuration} onEndCall={callProps.onEndCall} isCallActive={callProps.isCallActive} />
           <div className="container">
             <div className="logo">
-              <h1>HiO</h1>
+              <Image src="/logo.png" alt="HiO" width={200} height={80} className="logo-image" />
             </div>
             <h2 className="screen-title">{screenTitle}</h2>
             <div style={{ textAlign: 'center', padding: '20px' }}>
@@ -2168,7 +2170,7 @@ function HotelInfoScreen({
           <div className="container">
             <NavArrow direction="right" label="확인" onClick={handleComplete} />
             <div className="logo">
-              <h1>HiO</h1>
+              <Image src="/logo.png" alt="HiO" width={200} height={80} className="logo-image" />
             </div>
             <h2 className="screen-title">{screenTitle}</h2>
             <div style={{ textAlign: 'center', padding: '20px' }}>
@@ -2189,7 +2191,7 @@ function HotelInfoScreen({
           <NavArrow direction="right" label="완료" onClick={handleComplete} />
 
           <div className="logo">
-            <h1>HiO</h1>
+            <Image src="/logo.png" alt="HiO" width={200} height={80} className="logo-image" />
           </div>
 
           <h2 className="screen-title">{screenTitle}</h2>
@@ -2409,7 +2411,7 @@ function RoomSelectionScreen({
           <TopButtonRow onStaffCall={openStaffModal} callStatus={callProps.callStatus} callDuration={callProps.callDuration} onEndCall={callProps.onEndCall} isCallActive={callProps.isCallActive} />
           <div className="container">
             <div className="logo">
-              <h1>HiO</h1>
+              <Image src="/logo.png" alt="HiO" width={200} height={80} className="logo-image" />
             </div>
             <div style={{ textAlign: 'center', padding: '20px' }}>
               <p>객실 정보를 불러오는 중...</p>
@@ -2428,7 +2430,7 @@ function RoomSelectionScreen({
           <NavArrow direction="left" label="이전" onClick={() => goToScreen('start')} />
           <NavArrow direction="right" label="다음" onClick={handleNext} disabled={!selected || availableRoomTypes.length === 0} />
           <div className="logo">
-            <h1>HiO</h1>
+            <Image src="/logo.png" alt="HiO" width={200} height={80} className="logo-image" />
           </div>
           <h2 className="screen-title">{t('walkin_title')}</h2>
           <p className="screen-description">
@@ -2537,7 +2539,7 @@ function PaymentConfirmScreen({
         <div className="container">
           <NavArrow direction="left" label="이전" onClick={() => goToScreen('walkin-id-verification')} />
           <div className="logo">
-            <h1>HiO</h1>
+            <Image src="/logo.png" alt="HiO" width={200} height={80} className="logo-image" />
           </div>
           <h2 className="screen-title">{t('walkin_title')}</h2>
           <p className="screen-description">
@@ -2652,7 +2654,7 @@ function PaymentProcessScreen({
           <TopButtonRow onStaffCall={openStaffModal} callStatus={callProps.callStatus} callDuration={callProps.callDuration} onEndCall={callProps.onEndCall} isCallActive={callProps.isCallActive} />
           <div className="container">
             <div className="logo">
-              <h1>HiO</h1>
+              <Image src="/logo.png" alt="HiO" width={200} height={80} className="logo-image" />
             </div>
             <h2 className="screen-title">결제 완료</h2>
             <div style={{ textAlign: 'center', padding: '20px' }}>
@@ -2679,7 +2681,7 @@ function PaymentProcessScreen({
             <NavArrow direction="left" label="이전" onClick={() => { setPaymentState('idle'); goToScreen('payment-confirm'); }} />
             <NavArrow direction="right" label="다시 시도" onClick={handleRetry} />
             <div className="logo">
-              <h1>HiO</h1>
+              <Image src="/logo.png" alt="HiO" width={200} height={80} className="logo-image" />
             </div>
             <h2 className="screen-title">결제 실패</h2>
             <div style={{ textAlign: 'center', padding: '20px' }}>
@@ -2708,7 +2710,7 @@ function PaymentProcessScreen({
           <TopButtonRow onStaffCall={openStaffModal} callStatus={callProps.callStatus} callDuration={callProps.callDuration} onEndCall={callProps.onEndCall} isCallActive={callProps.isCallActive} />
           <div className="container">
             <div className="logo">
-              <h1>HiO</h1>
+              <Image src="/logo.png" alt="HiO" width={200} height={80} className="logo-image" />
             </div>
             <h2 className="screen-title">{t('walkin_title')}</h2>
             <div style={{ textAlign: 'center', padding: '20px' }}>
@@ -2732,7 +2734,7 @@ function PaymentProcessScreen({
           <NavArrow direction="left" label="이전" onClick={() => goToScreen('payment-confirm')} />
           <NavArrow direction="right" label="결제하기" onClick={handlePayment} />
           <div className="logo">
-            <h1>HiO</h1>
+            <Image src="/logo.png" alt="HiO" width={200} height={80} className="logo-image" />
           </div>
           <h2 className="screen-title">{t('walkin_title')}</h2>
           <p className="screen-description">결제를 진행해 주세요</p>
@@ -2768,7 +2770,7 @@ function CheckoutScreen({ goToScreen, t, openStaffModal, callProps }: { goToScre
         <div className="container">
           <NavArrow direction="right" label="완료" onClick={handleComplete} />
           <div className="logo">
-            <h1>HiO</h1>
+            <Image src="/logo.png" alt="HiO" width={200} height={80} className="logo-image" />
           </div>
           <h2 className="screen-title">{t('checkout_title')}</h2>
           <div className="checkout-message">

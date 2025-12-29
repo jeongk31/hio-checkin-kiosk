@@ -15,12 +15,14 @@ interface ProjectSelectorProps {
   projects: Project[];
   selectedProjectId: string;
   onProjectChange: (projectId: string) => void;
+  showAllOption?: boolean;
 }
 
 export default function ProjectSelector({
   projects,
   selectedProjectId,
   onProjectChange,
+  showAllOption = false,
 }: ProjectSelectorProps) {
   const [typeFilter, setTypeFilter] = useState('');
   const [provinceFilter, setProvinceFilter] = useState('');
@@ -123,7 +125,8 @@ export default function ProjectSelector({
             onChange={(e) => onProjectChange(e.target.value)}
             className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm bg-white"
           >
-            <option value="">프로젝트 선택 (선택)</option>
+            {showAllOption && <option value="all">전체</option>}
+            <option value="">프로젝트 선택</option>
             {filteredProjects.map((project) => {
               const settings = project.settings as ProjectSettings | null;
               return (
@@ -140,7 +143,24 @@ export default function ProjectSelector({
       </div>
 
       {/* Selected Project Badge */}
-      {selectedProject && (
+      {selectedProjectId === 'all' ? (
+        <div className="p-4 bg-gray-50">
+          <div className="flex items-start gap-3 p-3 bg-white border-2 border-purple-500 rounded-lg">
+            <span className="flex items-center justify-center w-8 h-8 bg-purple-100 text-purple-600 rounded-full font-bold">
+              ★
+            </span>
+            <div className="flex-1 min-w-0">
+              <div className="text-xs text-gray-500 mb-0.5">선택된 프로젝트</div>
+              <div className="font-semibold text-gray-900 truncate">
+                전체 프로젝트
+              </div>
+              <div className="text-sm text-gray-600 mt-1">
+                모든 프로젝트의 데이터를 표시합니다
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : selectedProject && (
         <div className="p-4 bg-gray-50">
           <div className="flex items-start gap-3 p-3 bg-white border-2 border-blue-500 rounded-lg">
             <span className="flex items-center justify-center w-8 h-8 bg-blue-100 text-blue-600 rounded-full font-bold">

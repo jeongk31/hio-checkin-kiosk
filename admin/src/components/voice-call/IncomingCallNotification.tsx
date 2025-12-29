@@ -1,10 +1,10 @@
 'use client';
 
 import { useState } from 'react';
-import { useVoiceCallContext } from '@/contexts/VoiceCallContext';
+import { useRequiredVoiceCallContext } from '@/contexts/VoiceCallContext';
 
 export default function IncomingCallNotification() {
-  const { status, kioskInfo, answerCall, declineCall } = useVoiceCallContext();
+  const { status, kioskInfo, answerCall, declineCall } = useRequiredVoiceCallContext();
   const [isAnswering, setIsAnswering] = useState(false);
 
   // Show popup only for incoming calls

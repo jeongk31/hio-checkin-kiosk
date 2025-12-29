@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useVoiceCallContext } from '@/contexts/VoiceCallContext';
+import { useRequiredVoiceCallContext } from '@/contexts/VoiceCallContext';
 
 function formatDuration(seconds: number): string {
   const mins = Math.floor(seconds / 60);
@@ -10,7 +10,7 @@ function formatDuration(seconds: number): string {
 }
 
 export default function ActiveCallOverlay() {
-  const { status, kioskInfo, callDuration, endCall, error } = useVoiceCallContext();
+  const { status, kioskInfo, callDuration, endCall, error } = useRequiredVoiceCallContext();
   const [isMinimized, setIsMinimized] = useState(false);
 
   // Only show for active call states

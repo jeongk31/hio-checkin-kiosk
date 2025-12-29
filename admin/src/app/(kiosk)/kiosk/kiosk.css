@@ -249,17 +249,16 @@
 
 /* 로고 */
 .logo {
-  text-align: center;
+  display: flex;
+  justify-content: center;
+  align-items: center;
   margin-bottom: 16px;
 }
 
-.logo h1 {
-  color: var(--primary);
-  font-size: 40px;
-  font-weight: 700;
-  letter-spacing: -1px;
-  margin: 0;
-  text-transform: none;
+.logo-image {
+  height: 80px;
+  width: auto;
+  object-fit: contain;
 }
 
 /* 시작 화면 */

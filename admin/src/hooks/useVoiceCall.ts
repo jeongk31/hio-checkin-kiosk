@@ -30,6 +30,18 @@ interface UseVoiceCallOptions {
 export function useVoiceCall(options: UseVoiceCallOptions = {}) {
   const { onStatusChange, onError, onCallEnded, onRemoteStream } = options;
 
+  // Use refs for callbacks to avoid stale closures
+  const onStatusChangeRef = useRef(onStatusChange);
+  const onErrorRef = useRef(onError);
+  const onCallEndedRef = useRef(onCallEnded);
+  const onRemoteStreamRef = useRef(onRemoteStream);
+
+  // Keep refs updated with latest callbacks
+  onStatusChangeRef.current = onStatusChange;
+  onErrorRef.current = onError;
+  onCallEndedRef.current = onCallEnded;
+  onRemoteStreamRef.current = onRemoteStream;
+
   const supabaseRef = useRef(createClient());
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
@@ -54,16 +66,16 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
     } catch (error) {
       if (error instanceof DOMException) {
         if (error.name === 'NotAllowedError') {
-          onError?.('마이크 권한이 필요합니다. 브라우저 설정에서 마이크 권한을 허용해주세요.');
+          onErrorRef.current?.('마이크 권한이 필요합니다. 브라우저 설정에서 마이크 권한을 허용해주세요.');
         } else if (error.name === 'NotFoundError') {
-          onError?.('마이크를 찾을 수 없습니다. 마이크가 연결되어 있는지 확인해주세요.');
+          onErrorRef.current?.('마이크를 찾을 수 없습니다. 마이크가 연결되어 있는지 확인해주세요.');
         } else {
-          onError?.(`마이크 오류: ${error.message}`);
+          onErrorRef.current?.(`마이크 오류: ${error.message}`);
         }
       }
       return null;
     }
-  }, [onError]);
+  }, []);
 
   // Create RTCPeerConnection
   const createPeerConnection = useCallback((): RTCPeerConnection => {
@@ -86,7 +98,7 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
       console.log('[Manager] Received remote track');
       const [remoteStream] = event.streams;
       remoteStreamRef.current = remoteStream;
-      onRemoteStream?.(remoteStream);
+      onRemoteStreamRef.current?.(remoteStream);
     };
 
     pc.onconnectionstatechange = () => {
@@ -94,16 +106,16 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
       switch (pc.connectionState) {
         case 'connected':
           console.log('[Manager] Call connected!');
-          onStatusChange?.('connected');
+          onStatusChangeRef.current?.('connected');
           break;
         case 'disconnected':
         case 'failed':
           console.log('[Manager] Connection failed or disconnected');
-          onError?.('연결이 끊어졌습니다.');
-          onStatusChange?.('failed');
+          onErrorRef.current?.('연결이 끊어졌습니다.');
+          onStatusChangeRef.current?.('failed');
           break;
         case 'closed':
-          onStatusChange?.('ended');
+          onStatusChangeRef.current?.('ended');
           break;
       }
     };
@@ -111,8 +123,8 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
     pc.oniceconnectionstatechange = () => {
       console.log('[Manager] ICE connection state:', pc.iceConnectionState);
       if (pc.iceConnectionState === 'failed') {
-        onError?.('네트워크 연결에 실패했습니다. 다시 시도해주세요.');
-        onStatusChange?.('failed');
+        onErrorRef.current?.('네트워크 연결에 실패했습니다. 다시 시도해주세요.');
+        onStatusChangeRef.current?.('failed');
       }
     };
 
@@ -122,115 +134,13 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
 
     peerConnectionRef.current = pc;
     return pc;
-  }, [onStatusChange, onError, onRemoteStream]);
+  }, []);
 
-  // Handle signaling messages
-  const handleSignalingMessage = useCallback(async (payload: SignalingMessage) => {
-    console.log('[Manager] 📥 handleSignalingMessage:', payload.type);
-    const pc = peerConnectionRef.current;
-    if (!pc) {
-      console.log('[Manager] No peer connection for signaling');
-      return;
-    }
-
-    switch (payload.type) {
-      case 'offer':
-        try {
-          console.log('[Manager] Received offer, setting remote description');
-          await pc.setRemoteDescription({ type: 'offer', sdp: payload.sdp });
-          console.log('[Manager] Remote description set, pending candidates:', pendingCandidatesRef.current.length);
-          // Add any pending ICE candidates
-          for (const candidate of pendingCandidatesRef.current) {
-            console.log('[Manager] Adding pending ICE candidate');
-            await pc.addIceCandidate(candidate);
-          }
-          pendingCandidatesRef.current = [];
-          // Create and send answer
-          console.log('[Manager] Creating answer');
-          const answer = await pc.createAnswer();
-          console.log('[Manager] Setting local description');
-          await pc.setLocalDescription(answer);
-          console.log('[Manager] Local description set, ICE gathering state:', pc.iceGatheringState);
-          console.log('[Manager] Sending answer, channel available:', !!channelRef.current);
-          channelRef.current?.send({
-            type: 'broadcast',
-            event: 'signaling',
-            payload: { type: 'answer', sdp: answer.sdp } as SignalingMessage,
-          });
-          onStatusChange?.('connecting');
-        } catch (err) {
-          console.error('[Manager] Error processing offer:', err);
-        }
-        break;
-
-      case 'answer':
-        console.log('[Manager] Received answer, setting remote description');
-        await pc.setRemoteDescription({ type: 'answer', sdp: payload.sdp });
-        // Add any pending ICE candidates
-        for (const candidate of pendingCandidatesRef.current) {
-          await pc.addIceCandidate(candidate);
-        }
-        pendingCandidatesRef.current = [];
-        onStatusChange?.('connecting');
-        break;
-
-      case 'ice-candidate':
-        console.log('[Manager] Received ICE candidate');
-        if (pc.remoteDescription) {
-          await pc.addIceCandidate(payload.candidate);
-        } else {
-          // Queue the candidate until we have the remote description
-          console.log('[Manager] Queuing ICE candidate (no remote description yet)');
-          pendingCandidatesRef.current.push(payload.candidate);
-        }
-        break;
-
-      case 'call-answered':
-        console.log('[Manager] Kiosk acknowledged call-answered, re-sending offer...');
-        console.log('[Manager] Current connection state:', pc.connectionState);
-        console.log('[Manager] Current signaling state:', pc.signalingState);
-        console.log('[Manager] Has local description:', !!pc.localDescription);
-        console.log('[Manager] Channel ref available:', !!channelRef.current);
-        // Re-send the offer now that kiosk is subscribed to the channel
-        if (pc.localDescription?.sdp) {
-          console.log('[Manager] 📤 RE-SENDING SDP offer to kiosk, offer length:', pc.localDescription.sdp.length);
-          const sendResult = channelRef.current?.send({
-            type: 'broadcast',
-            event: 'signaling',
-            payload: { type: 'offer', sdp: pc.localDescription.sdp } as SignalingMessage,
-          });
-          console.log('[Manager] Offer re-send result:', sendResult);
-        } else {
-          console.log('[Manager] ⚠️ WARNING: No local description to re-send!');
-        }
-        onStatusChange?.('connecting');
-        break;
-
-      case 'call-ended':
-        onCallEnded?.(payload.reason);
-        cleanup();
-        break;
-    }
-  }, [onStatusChange, onCallEnded]);
-
-  // Setup signaling channel
-  const setupSignalingChannel = useCallback((sessionId: string): RealtimeChannel => {
-    const supabase = supabaseRef.current;
-    const channelName = `voice-call-${sessionId}`;
-    const channel = supabase.channel(channelName);
-
-    channel.on('broadcast', { event: 'signaling' }, ({ payload }) => {
-      handleSignalingMessage(payload as SignalingMessage);
-    });
-
-    channelRef.current = channel;
-    sessionIdRef.current = sessionId;
-    return channel;
-  }, [handleSignalingMessage]);
-
-  // Initiate a call (create offer)
+  // Initiate a call (create offer) - manager → kiosk flow
   const initiateCall = useCallback(async (sessionId: string): Promise<boolean> => {
     try {
+      console.log('[Manager] initiateCall starting, sessionId:', sessionId);
+
       // Get microphone access
       const stream = await requestMicrophone();
       if (!stream) return false;
@@ -243,8 +153,61 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
         pc.addTrack(track, stream);
       });
 
-      // Setup signaling channel
-      const channel = setupSignalingChannel(sessionId);
+      // Setup signaling channel with INLINE handler (avoids stale closure issues)
+      const supabase = supabaseRef.current;
+      const channelName = `voice-call-${sessionId}`;
+      console.log('[Manager] Setting up signaling channel:', channelName);
+
+      const channel = supabase.channel(channelName);
+      channelRef.current = channel;
+      sessionIdRef.current = sessionId;
+
+      // Inline signaling handler with direct access to pc and channel
+      channel.on('broadcast', { event: 'signaling' }, async ({ payload }) => {
+        const msg = payload as SignalingMessage;
+        console.log('[Manager] 📥 Received signaling message:', msg.type);
+
+        if (msg.type === 'call-answered') {
+          console.log('[Manager] Kiosk acknowledged call-answered, re-sending offer...');
+          // Re-send the offer now that kiosk is subscribed to the channel
+          if (pc.localDescription?.sdp) {
+            console.log('[Manager] 📤 RE-SENDING SDP offer to kiosk, length:', pc.localDescription.sdp.length);
+            channel.send({
+              type: 'broadcast',
+              event: 'signaling',
+              payload: { type: 'offer', sdp: pc.localDescription.sdp } as SignalingMessage,
+            });
+          } else {
+            console.log('[Manager] ⚠️ WARNING: No local description to re-send!');
+          }
+          onStatusChangeRef.current?.('connecting');
+        } else if (msg.type === 'answer' && 'sdp' in msg) {
+          console.log('[Manager] Received answer, setting remote description');
+          try {
+            await pc.setRemoteDescription({ type: 'answer', sdp: msg.sdp });
+            // Add any pending ICE candidates
+            for (const candidate of pendingCandidatesRef.current) {
+              await pc.addIceCandidate(candidate);
+            }
+            pendingCandidatesRef.current = [];
+            onStatusChangeRef.current?.('connecting');
+          } catch (err) {
+            console.error('[Manager] Error setting remote description:', err);
+          }
+        } else if (msg.type === 'ice-candidate' && 'candidate' in msg) {
+          console.log('[Manager] Received ICE candidate');
+          if (pc.remoteDescription) {
+            await pc.addIceCandidate(msg.candidate);
+          } else {
+            console.log('[Manager] Queuing ICE candidate (no remote description yet)');
+            pendingCandidatesRef.current.push(msg.candidate);
+          }
+        } else if (msg.type === 'call-ended') {
+          console.log('[Manager] Kiosk ended call');
+          onCallEndedRef.current?.(msg.reason);
+          cleanup();
+        }
+      });
 
       // Subscribe and send offer
       await new Promise<void>((resolve, reject) => {
@@ -281,11 +244,12 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
       return true;
     } catch (error) {
       console.error('Failed to initiate call:', error);
-      onError?.('통화를 시작할 수 없습니다. 다시 시도해주세요.');
+      onErrorRef.current?.('통화를 시작할 수 없습니다. 다시 시도해주세요.');
       cleanup();
       return false;
     }
-  }, [requestMicrophone, createPeerConnection, setupSignalingChannel, onError]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requestMicrophone, createPeerConnection]);
 
   // Answer an incoming call (kiosk → manager flow)
   const answerCall = useCallback(async (sessionId: string): Promise<boolean> => {
@@ -350,10 +314,10 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
               payload: { type: 'answer', sdp: answer.sdp } as SignalingMessage,
             });
             console.log('[Manager] 📤 Answer sent to kiosk');
-            onStatusChange?.('connecting');
+            onStatusChangeRef.current?.('connecting');
           } catch (err) {
             console.error('[Manager] Error processing offer:', err);
-            onError?.('통화 연결에 실패했습니다.');
+            onErrorRef.current?.('통화 연결에 실패했습니다.');
           }
         } else if (msg.type === 'ice-candidate' && 'candidate' in msg) {
           console.log('[Manager] Received ICE candidate');
@@ -365,7 +329,7 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
           }
         } else if (msg.type === 'call-ended') {
           console.log('[Manager] Kiosk ended call');
-          onCallEnded?.(msg.reason);
+          onCallEndedRef.current?.(msg.reason);
           cleanup();
         }
       });
@@ -397,12 +361,12 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
       return true;
     } catch (error) {
       console.error('[Manager] Failed to answer call:', error);
-      onError?.('통화에 응답할 수 없습니다. 다시 시도해주세요.');
+      onErrorRef.current?.('통화에 응답할 수 없습니다. 다시 시도해주세요.');
       cleanup();
       return false;
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [requestMicrophone, createPeerConnection, onStatusChange, onError, onCallEnded]);
+  }, [requestMicrophone, createPeerConnection]);
 
   // End the call
   const endCall = useCallback((reason: 'declined' | 'ended' | 'timeout' | 'error' = 'ended') => {
@@ -414,8 +378,9 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
     });
 
     cleanup();
-    onStatusChange?.('ended');
-  }, [onStatusChange]);
+    onStatusChangeRef.current?.('ended');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Cleanup all resources
   const cleanup = useCallback(() => {

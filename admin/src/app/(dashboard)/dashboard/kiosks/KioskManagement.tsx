@@ -59,7 +59,7 @@ export default function KioskManagement({
   const [projects] = useState<Project[]>(initialProjects);
   const [kiosks, setKiosks] = useState<Kiosk[]>(initialKiosks);
   const [selectedProjectId, setSelectedProjectId] = useState<string>(
-    currentProjectId || initialProjects[0]?.id || ''
+    isSuperAdmin ? 'all' : (currentProjectId || initialProjects[0]?.id || '')
   );
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
@@ -123,11 +123,14 @@ export default function KioskManagement({
   }, [refreshKiosks]);
 
   const getProjectKiosks = (projectId: string) => {
+    if (projectId === 'all') {
+      return kiosks;
+    }
     return kiosks.filter((k) => k.project_id === projectId);
   };
 
   const selectedProject = projects.find((p) => p.id === selectedProjectId);
-  const projectKiosks = selectedProject ? getProjectKiosks(selectedProjectId) : [];
+  const projectKiosks = selectedProjectId === 'all' ? kiosks : (selectedProject ? getProjectKiosks(selectedProjectId) : []);
 
   return (
     <div className="h-full flex flex-col">
@@ -136,11 +139,12 @@ export default function KioskManagement({
           <div className="flex items-center justify-between">
             <h1 className="text-xl font-bold text-gray-900">키오스크 모니터링</h1>
           </div>
-          {isSuperAdmin && projects.length > 1 && (
+          {isSuperAdmin && (
             <ProjectSelector
               projects={projects}
               selectedProjectId={selectedProjectId}
               onProjectChange={setSelectedProjectId}
+              showAllOption={true}
             />
           )}
           <div className="flex items-center gap-4">
@@ -287,10 +291,14 @@ function KioskLivePreview({
   const [isCalling, setIsCalling] = useState(false);
   const lastFrameTimeRef = useRef<number>(0);
 
-  const { callKiosk, status: callStatus } = useVoiceCallContext();
+  // Only super_admin has access to VoiceCallContext (returns null for others)
+  const voiceCallContext = useVoiceCallContext();
+  const callKiosk = voiceCallContext?.callKiosk;
+  const callStatus = voiceCallContext?.status ?? 'idle';
   const isInCall = callStatus !== 'idle';
 
   const handleCallKiosk = async () => {
+    if (!callKiosk) return;
     setIsCalling(true);
     try {
       await callKiosk(kiosk.id);
@@ -377,8 +385,8 @@ function KioskLivePreview({
         <div className="flex items-center gap-2">
           {isActuallyOnline && (
             <>
-              {/* Only project managers (not super admin) can call kiosks */}
-              {!isSuperAdmin && (
+              {/* Only super admin can call kiosks */}
+              {isSuperAdmin && (
                 <button
                   onClick={handleCallKiosk}
                   disabled={isCalling || isInCall}

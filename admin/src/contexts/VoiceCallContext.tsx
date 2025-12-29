@@ -124,19 +124,17 @@ export function VoiceCallProvider({ children, profile }: VoiceCallProviderProps)
   // Subscribe to incoming calls from kiosks using broadcast (more reliable than postgres_changes)
   useEffect(() => {
     const supabase = supabaseRef.current;
-    const projectId = profile.project_id;
 
-    console.log('[Manager] Profile:', { id: profile.id, role: profile.role, project_id: projectId });
+    console.log('[Manager] Profile:', { id: profile.id, role: profile.role, project_id: profile.project_id });
 
-    // For super_admin, we would need to subscribe to all projects
-    // For now, only subscribe to the manager's project
-    if (!projectId && profile.role !== 'super_admin') {
-      console.log('[Manager] No project_id, skipping voice call subscription');
+    // Only super_admin can receive calls from kiosks
+    if (profile.role !== 'super_admin') {
+      console.log('[Manager] Not super_admin, skipping voice call subscription');
       return;
     }
 
-    // Channel name based on project
-    const channelName = `voice-calls-${projectId || 'all'}`;
+    // Super admin subscribes to the dedicated super admin channel
+    const channelName = 'voice-calls-super-admin';
     console.log('[Manager] Subscribing to voice call channel:', channelName);
 
     let isActive = true;
@@ -187,7 +185,7 @@ export function VoiceCallProvider({ children, profile }: VoiceCallProviderProps)
       console.log('[Manager] Unsubscribing from voice call channel');
       supabase.removeChannel(channel);
     };
-  }, [profile.project_id, profile.role, fetchKioskInfo]);
+  }, [profile.role, fetchKioskInfo]);
 
   // Manager calls a kiosk
   const callKiosk = useCallback(async (kioskId: string) => {
@@ -382,8 +380,14 @@ export function VoiceCallProvider({ children, profile }: VoiceCallProviderProps)
 
 export function useVoiceCallContext() {
   const context = useContext(VoiceCallContext);
+  // Return null when not in a VoiceCallProvider (e.g., for non-super_admin users)
+  return context;
+}
+
+export function useRequiredVoiceCallContext() {
+  const context = useContext(VoiceCallContext);
   if (!context) {
-    throw new Error('useVoiceCallContext must be used within a VoiceCallProvider');
+    throw new Error('useRequiredVoiceCallContext must be used within a VoiceCallProvider');
   }
   return context;
 }

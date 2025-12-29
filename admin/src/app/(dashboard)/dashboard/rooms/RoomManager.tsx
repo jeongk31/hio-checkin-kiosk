@@ -90,7 +90,7 @@ export default function RoomManager({
   initialProject,
 }: RoomManagerProps) {
   const [activeTab, setActiveTab] = useState<Tab>('today');
-  const [selectedProjectId, setSelectedProjectId] = useState(defaultProjectId || '');
+  const [selectedProjectId, setSelectedProjectId] = useState(isSuperAdmin ? 'all' : (defaultProjectId || ''));
   const [roomTypes, setRoomTypes] = useState<RoomType[]>(initialRoomTypes);
   const [reservations, setReservations] = useState<Reservation[]>(initialReservations);
   const [rooms, setRooms] = useState<Room[]>(initialRooms);
@@ -169,8 +169,18 @@ export default function RoomManager({
 
   const handleProjectChange = async (projectId: string) => {
     setSelectedProjectId(projectId);
-    setLoading(true);
     setHistoryReservations([]);
+
+    // When "all" is selected, restore initial data (all projects)
+    if (projectId === 'all') {
+      setRoomTypes(initialRoomTypes);
+      setReservations(initialReservations);
+      setRooms(initialRooms);
+      setResetTime((initialProject?.settings?.daily_reset_time as string) || '11:00');
+      return;
+    }
+
+    setLoading(true);
 
     try {
       const [roomTypesRes, reservationsRes, roomsRes, projectRes] = await Promise.all([
@@ -630,11 +640,12 @@ export default function RoomManager({
       </div>
 
       {/* Project Selector for super admin */}
-      {isSuperAdmin && projects && projects.length > 1 && (
+      {isSuperAdmin && projects && (
         <ProjectSelector
           projects={projects as DatabaseProject[]}
           selectedProjectId={selectedProjectId}
           onProjectChange={handleProjectChange}
+          showAllOption={true}
         />
       )}
 
