@@ -1,6 +1,39 @@
-import { createServiceClient } from '@/lib/supabase/server';
+import { query, queryOne, execute } from '@/lib/db';
 import { getCurrentProfile } from '@/lib/auth';
 import { NextResponse } from 'next/server';
+
+interface RoomType {
+  id: string;
+  project_id: string;
+  name: string;
+  description: string | null;
+  base_price: number | null;
+  capacity: number | null;
+  amenities: string[] | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface Reservation {
+  id: string;
+  project_id: string;
+  room_type_id: string | null;
+  reservation_number: string;
+  guest_name: string | null;
+  guest_phone: string | null;
+  guest_email: string | null;
+  guest_count: number;
+  check_in_date: string;
+  check_out_date: string;
+  room_number: string | null;
+  status: string;
+  source: string | null;
+  notes: string | null;
+  total_price: number | null;
+  created_at: string;
+  updated_at: string;
+  room_type?: RoomType | null;
+}
 
 export async function GET(request: Request) {
   try {
@@ -18,47 +51,69 @@ export async function GET(request: Request) {
     const reservationNumber = searchParams.get('reservationNumber');
     const limit = searchParams.get('limit');
 
-    const supabase = await createServiceClient();
-
-    let query = supabase
-      .from('reservations')
-      .select('*, room_type:room_types(*)')
-      .order('check_in_date', { ascending: false })
-      .order('created_at', { ascending: false });
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+    let paramIndex = 1;
 
     if (profile.role === 'super_admin') {
-      if (projectId) {
-        query = query.eq('project_id', projectId);
+      if (projectId && projectId !== 'all') {
+        conditions.push(`r.project_id = $${paramIndex++}`);
+        params.push(projectId);
       }
     } else {
-      query = query.eq('project_id', profile.project_id);
+      conditions.push(`r.project_id = $${paramIndex++}`);
+      params.push(profile.project_id);
     }
 
     if (checkInDate) {
-      query = query.eq('check_in_date', checkInDate);
+      conditions.push(`r.check_in_date = $${paramIndex++}`);
+      params.push(checkInDate);
     }
 
     if (beforeDate) {
-      query = query.lt('check_in_date', beforeDate);
+      conditions.push(`r.check_in_date < $${paramIndex++}`);
+      params.push(beforeDate);
     }
 
     if (status) {
-      query = query.eq('status', status);
+      conditions.push(`r.status = $${paramIndex++}`);
+      params.push(status);
     }
 
     if (reservationNumber) {
-      query = query.ilike('reservation_number', `%${reservationNumber}%`);
+      conditions.push(`r.reservation_number ILIKE $${paramIndex++}`);
+      params.push(`%${reservationNumber}%`);
     }
 
-    if (limit) {
-      query = query.limit(parseInt(limit));
-    }
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const limitClause = limit ? `LIMIT ${parseInt(limit)}` : '';
 
-    const { data, error } = await query;
+    const sql = `
+      SELECT 
+        r.*,
+        CASE WHEN rt.id IS NOT NULL THEN
+          jsonb_build_object(
+            'id', rt.id,
+            'project_id', rt.project_id,
+            'name', rt.name,
+            'description', rt.description,
+            'base_price', rt.base_price,
+            'max_guests', rt.max_guests,
+            'images', rt.images,
+            'is_active', rt.is_active,
+            'display_order', rt.display_order,
+            'created_at', rt.created_at,
+            'updated_at', rt.updated_at
+          )
+        ELSE NULL END as room_type
+      FROM reservations r
+      LEFT JOIN room_types rt ON r.room_type_id = rt.id
+      ${whereClause}
+      ORDER BY r.check_in_date DESC, r.created_at DESC
+      ${limitClause}
+    `;
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
-    }
+    const data = await query<Reservation>(sql, params);
 
     return NextResponse.json({ reservations: data });
   } catch (error) {
@@ -109,37 +164,39 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Cannot create reservations for other projects' }, { status: 403 });
     }
 
-    const supabase = await createServiceClient();
+    try {
+      const data = await queryOne<Reservation>(`
+        INSERT INTO reservations (
+          project_id, room_type_id, reservation_number, guest_name, guest_phone,
+          guest_email, guest_count, check_in_date, check_out_date, room_number,
+          source, notes, total_price, status
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+        RETURNING *
+      `, [
+        targetProjectId,
+        roomTypeId || null,
+        reservationNumber,
+        guestName || null,
+        guestPhone || null,
+        guestEmail || null,
+        guestCount || 1,
+        checkInDate,
+        checkOutDate,
+        roomNumber || null,
+        source || null,
+        notes || null,
+        totalPrice || null,
+        inputStatus || 'pending',
+      ]);
 
-    const { data, error } = await supabase
-      .from('reservations')
-      .insert({
-        project_id: targetProjectId,
-        room_type_id: roomTypeId || null,
-        reservation_number: reservationNumber,
-        guest_name: guestName || null,
-        guest_phone: guestPhone || null,
-        guest_email: guestEmail || null,
-        guest_count: guestCount || 1,
-        check_in_date: checkInDate,
-        check_out_date: checkOutDate,
-        room_number: roomNumber || null,
-        source: source || null,
-        notes: notes || null,
-        total_price: totalPrice || null,
-        status: inputStatus || 'pending',
-      })
-      .select()
-      .single();
-
-    if (error) {
-      if (error.message.includes('duplicate key')) {
+      return NextResponse.json({ success: true, reservation: data });
+    } catch (err) {
+      const error = err as Error;
+      if (error.message.includes('duplicate key') || error.message.includes('unique constraint')) {
         return NextResponse.json({ error: '이미 존재하는 예약번호입니다' }, { status: 400 });
       }
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
-
-    return NextResponse.json({ success: true, reservation: data });
   } catch (error) {
     console.error('Error creating reservation:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
@@ -185,32 +242,81 @@ export async function PUT(request: Request) {
       return NextResponse.json({ error: 'Cannot update reservations for other projects' }, { status: 403 });
     }
 
-    const supabase = await createServiceClient();
+    const setClauses: string[] = [];
+    const params: unknown[] = [];
+    let paramIndex = 1;
 
-    const updateData: Record<string, unknown> = {};
-    if (roomTypeId !== undefined) updateData.room_type_id = roomTypeId;
-    if (reservationNumber !== undefined) updateData.reservation_number = reservationNumber;
-    if (guestName !== undefined) updateData.guest_name = guestName;
-    if (guestPhone !== undefined) updateData.guest_phone = guestPhone;
-    if (guestEmail !== undefined) updateData.guest_email = guestEmail;
-    if (guestCount !== undefined) updateData.guest_count = guestCount;
-    if (checkInDate !== undefined) updateData.check_in_date = checkInDate;
-    if (checkOutDate !== undefined) updateData.check_out_date = checkOutDate;
-    if (roomNumber !== undefined) updateData.room_number = roomNumber;
-    if (status !== undefined) updateData.status = status;
-    if (source !== undefined) updateData.source = source;
-    if (notes !== undefined) updateData.notes = notes;
-    if (totalPrice !== undefined) updateData.total_price = totalPrice;
+    if (roomTypeId !== undefined) {
+      setClauses.push(`room_type_id = $${paramIndex++}`);
+      params.push(roomTypeId);
+    }
+    if (reservationNumber !== undefined) {
+      setClauses.push(`reservation_number = $${paramIndex++}`);
+      params.push(reservationNumber);
+    }
+    if (guestName !== undefined) {
+      setClauses.push(`guest_name = $${paramIndex++}`);
+      params.push(guestName);
+    }
+    if (guestPhone !== undefined) {
+      setClauses.push(`guest_phone = $${paramIndex++}`);
+      params.push(guestPhone);
+    }
+    if (guestEmail !== undefined) {
+      setClauses.push(`guest_email = $${paramIndex++}`);
+      params.push(guestEmail);
+    }
+    if (guestCount !== undefined) {
+      setClauses.push(`guest_count = $${paramIndex++}`);
+      params.push(guestCount);
+    }
+    if (checkInDate !== undefined) {
+      setClauses.push(`check_in_date = $${paramIndex++}`);
+      params.push(checkInDate);
+    }
+    if (checkOutDate !== undefined) {
+      setClauses.push(`check_out_date = $${paramIndex++}`);
+      params.push(checkOutDate);
+    }
+    if (roomNumber !== undefined) {
+      setClauses.push(`room_number = $${paramIndex++}`);
+      params.push(roomNumber);
+    }
+    if (status !== undefined) {
+      setClauses.push(`status = $${paramIndex++}`);
+      params.push(status);
+    }
+    if (source !== undefined) {
+      setClauses.push(`source = $${paramIndex++}`);
+      params.push(source);
+    }
+    if (notes !== undefined) {
+      setClauses.push(`notes = $${paramIndex++}`);
+      params.push(notes);
+    }
+    if (totalPrice !== undefined) {
+      setClauses.push(`total_price = $${paramIndex++}`);
+      params.push(totalPrice);
+    }
 
-    const { data, error } = await supabase
-      .from('reservations')
-      .update(updateData)
-      .eq('id', id)
-      .select()
-      .single();
+    if (setClauses.length === 0) {
+      return NextResponse.json({ error: 'No fields to update' }, { status: 400 });
+    }
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
+    setClauses.push(`updated_at = NOW()`);
+    params.push(id);
+
+    const sql = `
+      UPDATE reservations
+      SET ${setClauses.join(', ')}
+      WHERE id = $${paramIndex}
+      RETURNING *
+    `;
+
+    const data = await queryOne<Reservation>(sql, params);
+
+    if (!data) {
+      return NextResponse.json({ error: 'Reservation not found' }, { status: 404 });
     }
 
     return NextResponse.json({ success: true, reservation: data });
@@ -243,15 +349,10 @@ export async function DELETE(request: Request) {
       return NextResponse.json({ error: 'Cannot delete reservations for other projects' }, { status: 403 });
     }
 
-    const supabase = await createServiceClient();
+    const result = await execute('DELETE FROM reservations WHERE id = $1', [id]);
 
-    const { error } = await supabase
-      .from('reservations')
-      .delete()
-      .eq('id', id);
-
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
+    if (result.rowCount === 0) {
+      return NextResponse.json({ error: 'Reservation not found' }, { status: 404 });
     }
 
     return NextResponse.json({ success: true });

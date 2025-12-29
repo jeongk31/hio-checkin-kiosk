@@ -1,7 +1,6 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
-import { createClient } from '@/lib/supabase/client';
 import { useVoiceCall, CallStatus } from '@/hooks/useVoiceCall';
 import type { Profile, VideoSession } from '@/types/database';
 
@@ -43,7 +42,6 @@ export function VoiceCallProvider({ children, profile }: VoiceCallProviderProps)
     error: null,
   });
 
-  const supabaseRef = useRef(createClient());
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
   const durationIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const callStartTimeRef = useRef<Date | null>(null);
@@ -104,15 +102,19 @@ export function VoiceCallProvider({ children, profile }: VoiceCallProviderProps)
     });
   }, []);
 
-  // Fetch kiosk info
+  // Fetch kiosk info via API
   const fetchKioskInfo = useCallback(async (kioskId: string): Promise<KioskInfo | null> => {
-    const { data } = await supabaseRef.current
-      .from('kiosks')
-      .select('id, name, location')
-      .eq('id', kioskId)
-      .single();
-
-    return data;
+    try {
+      const response = await fetch(`/api/kiosks/${kioskId}`);
+      if (response.ok) {
+        const data = await response.json();
+        return { id: data.id, name: data.name, location: data.location };
+      }
+      return null;
+    } catch (error) {
+      console.error('Error fetching kiosk info:', error);
+      return null;
+    }
   }, []);
 
   // Use a ref to track status without causing re-subscriptions
@@ -121,10 +123,8 @@ export function VoiceCallProvider({ children, profile }: VoiceCallProviderProps)
     statusRef.current = state.status;
   }, [state.status]);
 
-  // Subscribe to incoming calls from kiosks using broadcast (more reliable than postgres_changes)
+  // Poll for incoming calls (replaces Supabase Realtime)
   useEffect(() => {
-    const supabase = supabaseRef.current;
-
     console.log('[Manager] Profile:', { id: profile.id, role: profile.role, project_id: profile.project_id });
 
     // Only super_admin can receive calls from kiosks
@@ -133,57 +133,47 @@ export function VoiceCallProvider({ children, profile }: VoiceCallProviderProps)
       return;
     }
 
-    // Super admin subscribes to the dedicated super admin channel
-    const channelName = 'voice-calls-super-admin';
-    console.log('[Manager] Subscribing to voice call channel:', channelName);
-
+    console.log('[Manager] Starting incoming call polling...');
     let isActive = true;
 
-    const channel = supabase
-      .channel(channelName)
-      .on(
-        'broadcast',
-        { event: 'incoming-call' },
-        async (payload) => {
-          if (!isActive) return;
-          console.log('[Manager] Broadcast received:', payload);
-          const { session } = payload.payload as { session: VideoSession };
+    const pollForIncomingCalls = async () => {
+      if (!isActive) return;
+      
+      try {
+        // Poll for waiting video sessions
+        const response = await fetch('/api/video-sessions?status=waiting&caller_type=kiosk');
+        if (response.ok) {
+          const data = await response.json();
+          const waitingSessions = data.sessions || [];
+          
+          // Find first waiting session that we haven't already processed
+          if (waitingSessions.length > 0 && statusRef.current === 'idle') {
+            const session = waitingSessions[0];
+            console.log('[Manager] Incoming call from kiosk:', session);
+            const kioskInfo = await fetchKioskInfo(session.kiosk_id);
 
-          if (!session) {
-            console.log('[Manager] No session in payload');
-            return;
+            setState((prev) => ({
+              ...prev,
+              status: 'incoming',
+              currentSession: session,
+              kioskInfo,
+              error: null,
+            }));
           }
-
-          // Only handle if not already in a call (use ref to avoid stale closure)
-          if (statusRef.current !== 'idle') {
-            console.log('[Manager] Ignoring - already in call. Status:', statusRef.current);
-            return;
-          }
-
-          console.log('[Manager] Incoming call from kiosk:', session);
-          const kioskInfo = await fetchKioskInfo(session.kiosk_id);
-
-          setState((prev) => ({
-            ...prev,
-            status: 'incoming',
-            currentSession: session,
-            kioskInfo,
-            error: null,
-          }));
         }
-      )
-      .subscribe((status) => {
-        if (!isActive) return;
-        console.log('[Manager] Voice call channel status:', status);
-        if (status === 'SUBSCRIBED') {
-          console.log('[Manager] ✅ Ready to receive incoming calls on:', channelName);
-        }
-      });
+      } catch (error) {
+        console.error('[Manager] Error polling for incoming calls:', error);
+      }
+    };
+
+    // Poll every 2 seconds
+    const interval = setInterval(pollForIncomingCalls, 2000);
+    pollForIncomingCalls(); // Initial poll
 
     return () => {
       isActive = false;
-      console.log('[Manager] Unsubscribing from voice call channel');
-      supabase.removeChannel(channel);
+      console.log('[Manager] Stopping incoming call polling');
+      clearInterval(interval);
     };
   }, [profile.role, fetchKioskInfo]);
 
@@ -194,8 +184,6 @@ export function VoiceCallProvider({ children, profile }: VoiceCallProviderProps)
       return;
     }
 
-    const supabase = supabaseRef.current;
-
     // Get kiosk info first
     const kioskInfo = await fetchKioskInfo(kioskId);
     if (!kioskInfo) {
@@ -203,77 +191,46 @@ export function VoiceCallProvider({ children, profile }: VoiceCallProviderProps)
       return;
     }
 
-    // Get kiosk's project_id
-    const { data: kiosk } = await supabase
-      .from('kiosks')
-      .select('project_id')
-      .eq('id', kioskId)
-      .single();
+    try {
+      // Create video session via API
+      const response = await fetch('/api/video-sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          kioskId,
+          staffUserId: profile.id,
+          callerType: 'manager',
+        }),
+      });
 
-    if (!kiosk) {
-      setState((prev) => ({ ...prev, error: '키오스크를 찾을 수 없습니다.' }));
-      return;
-    }
+      if (!response.ok) {
+        throw new Error('Failed to create video session');
+      }
 
-    // Create video session
-    const { data: session, error } = await supabase
-      .from('video_sessions')
-      .insert({
-        kiosk_id: kioskId,
-        project_id: kiosk.project_id,
-        staff_user_id: profile.id,
-        room_name: `voice-${kioskId}-${Date.now()}`,
-        status: 'waiting',
-        caller_type: 'manager',
-      })
-      .select()
-      .single();
+      const { session } = await response.json();
 
-    if (error || !session) {
+      setState((prev) => ({
+        ...prev,
+        status: 'outgoing',
+        currentSession: session,
+        kioskInfo,
+        error: null,
+      }));
+
+      // Initiate the call
+      const success = await voiceCall.initiateCall(session.id);
+      if (!success) {
+        // Cleanup the session
+        await fetch('/api/video-sessions', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: session.id, status: 'ended' }),
+        });
+        resetState();
+      }
+    } catch (error) {
       console.error('Failed to create session:', error);
       setState((prev) => ({ ...prev, error: '통화를 시작할 수 없습니다.' }));
-      return;
-    }
-
-    // Broadcast to kiosk that there's an incoming call
-    const channelName = `kiosk-incoming-call-${kioskId}`;
-    const kioskChannel = supabase.channel(channelName);
-
-    // Subscribe and send broadcast
-    await new Promise<void>((resolve) => {
-      kioskChannel.subscribe(async (status) => {
-        if (status === 'SUBSCRIBED') {
-          console.log('[Manager] Channel subscribed, sending broadcast to kiosk:', kioskId);
-          await kioskChannel.send({
-            type: 'broadcast',
-            event: 'incoming-call',
-            payload: { session },
-          });
-          console.log('[Manager] Broadcast sent');
-          resolve();
-        }
-      });
-    });
-
-    // Clean up channel after a delay
-    setTimeout(() => {
-      supabase.removeChannel(kioskChannel);
-    }, 1000);
-
-    setState((prev) => ({
-      ...prev,
-      status: 'outgoing',
-      currentSession: session,
-      kioskInfo,
-      error: null,
-    }));
-
-    // Initiate the call
-    const success = await voiceCall.initiateCall(session.id);
-    if (!success) {
-      // Cleanup the session
-      await supabase.from('video_sessions').update({ status: 'ended' }).eq('id', session.id);
-      resetState();
     }
   }, [state.status, profile.id, fetchKioskInfo, voiceCall, resetState]);
 
@@ -288,16 +245,17 @@ export function VoiceCallProvider({ children, profile }: VoiceCallProviderProps)
     }
 
     console.log('[Manager] Answering call, session:', state.currentSession.id);
-    const supabase = supabaseRef.current;
 
-    // Update session status
-    await supabase
-      .from('video_sessions')
-      .update({
+    // Update session status via API
+    await fetch('/api/video-sessions', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: state.currentSession.id,
         status: 'connected',
-        staff_user_id: profile.id,
-      })
-      .eq('id', state.currentSession.id);
+        staffUserId: profile.id,
+      }),
+    });
 
     // Answer the call - this will send 'call-answered' signal
     console.log('[Manager] Calling voiceCall.answerCall...');
@@ -306,19 +264,21 @@ export function VoiceCallProvider({ children, profile }: VoiceCallProviderProps)
     if (!success) {
       resetState();
     }
-  }, [state.currentSession, profile.id, voiceCall, resetState]);
+  }, [state.currentSession, state, profile.id, voiceCall, resetState]);
 
   // Decline an incoming call
   const declineCall = useCallback(async () => {
     if (!state.currentSession) return;
 
-    const supabase = supabaseRef.current;
-
-    // Update session status
-    await supabase
-      .from('video_sessions')
-      .update({ status: 'ended' })
-      .eq('id', state.currentSession.id);
+    // Update session status via API
+    await fetch('/api/video-sessions', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: state.currentSession.id,
+        status: 'ended',
+      }),
+    });
 
     voiceCall.endCall('declined');
     resetState();
@@ -328,17 +288,16 @@ export function VoiceCallProvider({ children, profile }: VoiceCallProviderProps)
   const endCall = useCallback(() => {
     if (!state.currentSession) return;
 
-    const supabase = supabaseRef.current;
-
-    // Update session status
-    supabase
-      .from('video_sessions')
-      .update({
+    // Update session status via API
+    fetch('/api/video-sessions', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: state.currentSession.id,
         status: 'ended',
-        ended_at: new Date().toISOString(),
-      })
-      .eq('id', state.currentSession.id)
-      .then(() => {});
+        endedAt: new Date().toISOString(),
+      }),
+    });
 
     voiceCall.endCall('ended');
     resetState();

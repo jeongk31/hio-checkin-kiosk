@@ -1,6 +1,16 @@
-import { createServiceClient } from '@/lib/supabase/server';
+import { queryOne, execute } from '@/lib/db';
 import { getCurrentProfile } from '@/lib/auth';
 import { NextResponse } from 'next/server';
+
+interface Project {
+  id: string;
+  name: string;
+  slug: string;
+  is_active: boolean;
+  settings: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+}
 
 export async function POST(request: Request) {
   try {
@@ -21,8 +31,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Name is required' }, { status: 400 });
     }
 
-    const supabase = await createServiceClient();
-
     // Auto-generate slug from name
     const slug = name
       .toLowerCase()
@@ -30,24 +38,22 @@ export async function POST(request: Request) {
       .replace(/^-|-$/g, '')
       + '-' + Date.now().toString(36);
 
-    // Create project with type and location in settings
-    const { data, error } = await supabase
-      .from('projects')
-      .insert({
-        name,
-        slug,
-        is_active: true,
-        settings: {
-          type: projectType || '호텔',
-          province: province || '',
-          location: province || '',
-        },
-      })
-      .select()
-      .single();
+    const settings = {
+      type: projectType || '호텔',
+      province: province || '',
+      location: province || '',
+    };
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
+    // Create project with type and location in settings
+    const project = await queryOne<Project>(
+      `INSERT INTO projects (name, slug, is_active, settings)
+       VALUES ($1, $2, true, $3)
+       RETURNING *`,
+      [name, slug, JSON.stringify(settings)]
+    );
+
+    if (!project) {
+      return NextResponse.json({ error: 'Failed to create project' }, { status: 400 });
     }
 
     // Create default content for the project
@@ -101,16 +107,23 @@ export async function POST(request: Request) {
       { key: 'walkin_room_description', value: '원하시는 객실을 선택해 주신 후 다음을 눌러주세요' },
     ];
 
-    await supabase.from('kiosk_content').insert(
-      defaultContent.map((item) => ({
-        project_id: data.id,
-        content_key: item.key,
-        content_value: item.value,
-        language: 'ko',
-      }))
+    // Build bulk insert for kiosk_content
+    const values: string[] = [];
+    const params: (string | null)[] = [];
+    let paramIndex = 1;
+
+    for (const item of defaultContent) {
+      values.push(`($${paramIndex++}, $${paramIndex++}, $${paramIndex++}, 'ko')`);
+      params.push(project.id, item.key, item.value);
+    }
+
+    await execute(
+      `INSERT INTO kiosk_content (project_id, content_key, content_value, language)
+       VALUES ${values.join(', ')}`,
+      params
     );
 
-    return NextResponse.json({ success: true, project: data });
+    return NextResponse.json({ success: true, project });
   } catch (error) {
     console.error('Error creating project:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

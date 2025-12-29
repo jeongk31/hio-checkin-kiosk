@@ -1,58 +1,29 @@
-import { createServerClient } from '@supabase/ssr';
-import { createServiceClient } from '@/lib/supabase/server';
+import { signIn, createSession, setSessionCookie } from '@/lib/db/auth';
+import { queryOne } from '@/lib/db';
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
+
+interface ProfileRow {
+  role: string;
+  is_active: boolean;
+}
 
 export async function POST(request: Request) {
   try {
     const { email, password } = await request.json();
-    const cookieStore = await cookies();
 
-    const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        cookies: {
-          getAll() {
-            return cookieStore.getAll();
-          },
-          setAll(cookiesToSet) {
-            cookiesToSet.forEach(({ name, value, options }) =>
-              cookieStore.set(name, value, options)
-            );
-          },
-        },
-      }
+    // Sign in user
+    const { userId, error: signInError } = await signIn(email, password);
+
+    if (signInError || !userId) {
+      return NextResponse.json({ error: signInError || 'Login failed' }, { status: 401 });
+    }
+
+    // Get profile to check if active and get role
+    const profile = await queryOne<ProfileRow>(
+      'SELECT role, is_active FROM profiles WHERE user_id = $1',
+      [userId]
     );
-
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 401 });
-    }
-
-    if (!data.session) {
-      return NextResponse.json({ error: 'No session created' }, { status: 401 });
-    }
-
-    // Use service client to bypass RLS for profile check
-    const serviceClient = await createServiceClient();
-    const { data: profile, error: profileError } = await serviceClient
-      .from('profiles')
-      .select('role, is_active')
-      .eq('user_id', data.user.id)
-      .single();
-
-    if (profileError) {
-      console.error('Profile query error:', profileError);
-      return NextResponse.json(
-        { error: `Profile error: ${profileError.message}` },
-        { status: 403 }
-      );
-    }
 
     if (!profile) {
       return NextResponse.json({ error: 'Profile not found' }, { status: 403 });
@@ -61,6 +32,20 @@ export async function POST(request: Request) {
     if (!profile.is_active) {
       return NextResponse.json({ error: 'Account is not active' }, { status: 403 });
     }
+
+    // Create session and set cookie
+    const token = await createSession(userId);
+    await setSessionCookie(token);
+
+    // Set role cookie for middleware (for role-based routing)
+    const cookieStore = await cookies();
+    cookieStore.set('user_role', profile.role, {
+      httpOnly: true,
+      secure: false, // Allow HTTP for local network access
+      sameSite: 'lax',
+      maxAge: 7 * 24 * 60 * 60, // 7 days
+      path: '/',
+    });
 
     // Determine redirect URL based on role
     const redirectUrl = profile.role === 'kiosk' ? '/kiosk' : '/dashboard';

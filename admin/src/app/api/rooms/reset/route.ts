@@ -1,4 +1,4 @@
-import { createServiceClient } from '@/lib/supabase/server';
+﻿import { query, execute } from '@/lib/db';
 import { getCurrentProfile } from '@/lib/auth';
 import { NextResponse } from 'next/server';
 
@@ -35,50 +35,40 @@ export async function POST(request: Request) {
       ? projectId
       : (profile?.project_id || projectId);
 
-    if (!targetProjectId) {
-      return NextResponse.json({ error: 'Project ID is required' }, { status: 400 });
+    if (!targetProjectId || targetProjectId === 'all') {
+      return NextResponse.json({ error: 'Specific Project ID is required for room reset' }, { status: 400 });
     }
 
-    const supabase = await createServiceClient();
     const today = new Date().toISOString().split('T')[0];
 
     // 1. Count rooms before deletion
-    const { data: existingRooms, error: countError } = await supabase
-      .from('rooms')
-      .select('id')
-      .eq('project_id', targetProjectId);
+    const existingRooms = await query<{ id: string }>(
+      'SELECT id FROM rooms WHERE project_id = $1',
+      [targetProjectId]
+    );
 
-    if (countError) {
-      return NextResponse.json({ error: countError.message }, { status: 400 });
-    }
-
-    const roomCount = existingRooms?.length || 0;
+    const roomCount = existingRooms.length;
 
     // 2. Delete ALL rooms for this project
-    const { error: deleteRoomsError } = await supabase
-      .from('rooms')
-      .delete()
-      .eq('project_id', targetProjectId);
+    const deleteResult = await execute(
+      'DELETE FROM rooms WHERE project_id = $1',
+      [targetProjectId]
+    );
 
-    if (deleteRoomsError) {
-      console.error('Error deleting rooms:', deleteRoomsError);
-      return NextResponse.json({ error: deleteRoomsError.message }, { status: 400 });
+    if (deleteResult.rowCount === null) {
+      console.error('Error deleting rooms');
     }
 
     // 3. Update all checked_in reservations to checked_out
-    const { data: checkedOutReservations, error: reservationsError } = await supabase
-      .from('reservations')
-      .update({ status: 'checked_out' })
-      .eq('project_id', targetProjectId)
-      .eq('status', 'checked_in')
-      .lte('check_out_date', today)
-      .select();
+    const checkedOutReservations = await query<{ id: string }>(
+      `UPDATE reservations 
+       SET status = 'checked_out', updated_at = NOW()
+       WHERE project_id = $1 AND status = 'checked_in' AND check_out_date <= $2
+       RETURNING id`,
+      [targetProjectId, today]
+    );
 
-    if (reservationsError) {
-      console.error('Error updating reservations:', reservationsError);
-    }
-
-    const checkoutCount = checkedOutReservations?.length || 0;
+    const checkoutCount = checkedOutReservations.length;
 
     return NextResponse.json({
       success: true,

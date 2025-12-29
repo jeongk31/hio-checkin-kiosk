@@ -7,7 +7,7 @@ export interface Project {
   name: string;
   slug: string;
   logo_url: string | null;
-  settings: Record<string, unknown>;
+  settings: Record<string, unknown> | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;
@@ -39,15 +39,15 @@ export interface Kiosk {
   settings: Record<string, unknown>;
   created_at: string;
   updated_at: string;
-  project?: Project;
-  profile?: Profile;
+  project?: Project | null;
+  profile?: Profile | null;
 }
 
 export interface KioskContent {
   id: string;
   project_id: string;
   content_key: string;
-  content_value: string;
+  content_value: string | null;
   language: string;
   created_at: string;
   updated_at: string;
@@ -64,7 +64,12 @@ export interface VideoSession {
   started_at: string;
   ended_at: string | null;
   notes: string | null;
-  kiosk?: Kiosk;
+  kiosk?: Kiosk | null | {
+    id: string;
+    name: string;
+    project_id: string;
+    project?: { id: string; name: string } | null;
+  };
 }
 
 export interface CheckinSession {

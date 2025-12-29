@@ -1,4 +1,5 @@
-import { createServiceClient } from '@/lib/supabase/server';
+import { adminCreateUser, adminDeleteUser } from '@/lib/db/auth';
+import { query, queryOne, execute } from '@/lib/db';
 import { getCurrentProfile } from '@/lib/auth';
 import { NextResponse } from 'next/server';
 
@@ -31,60 +32,62 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
-    const supabase = await createServiceClient();
-
     // Create auth user
-    const { data: authData, error: authError } =
-      await supabase.auth.admin.createUser({
-        email,
-        password,
-        email_confirm: true,
-      });
+    const { user: authUser, error: authError } = await adminCreateUser(email, password);
 
-    if (authError) {
-      return NextResponse.json({ error: authError.message }, { status: 400 });
+    if (authError || !authUser) {
+      return NextResponse.json({ error: authError || 'Failed to create user' }, { status: 400 });
     }
 
-    // Insert or update the profile (trigger may not fire for admin API)
-    const { data: profileData, error: profileError } = await supabase
-      .from('profiles')
-      .upsert({
-        user_id: authData.user.id,
-        email,
-        full_name: fullName,
-        role,
-        project_id: projectId || null,
-        is_active: true,
-      }, {
-        onConflict: 'user_id',
-      })
-      .select()
-      .single();
+    // Insert or update the profile
+    const existingProfile = await queryOne(
+      'SELECT id FROM profiles WHERE user_id = $1',
+      [authUser.id]
+    );
 
-    if (profileError) {
+    let profileData;
+    if (existingProfile) {
+      // Update existing profile
+      const rows = await query(
+        `UPDATE profiles 
+         SET email = $1, full_name = $2, role = $3, project_id = $4, is_active = true
+         WHERE user_id = $5
+         RETURNING *`,
+        [email, fullName, role, projectId || null, authUser.id]
+      );
+      profileData = rows[0];
+    } else {
+      // Insert new profile
+      const rows = await query(
+        `INSERT INTO profiles (user_id, email, full_name, role, project_id, is_active)
+         VALUES ($1, $2, $3, $4, $5, true)
+         RETURNING *`,
+        [authUser.id, email, fullName, role, projectId || null]
+      );
+      profileData = rows[0];
+    }
+
+    if (!profileData) {
       // Cleanup: delete the auth user if profile update fails
-      await supabase.auth.admin.deleteUser(authData.user.id);
-      return NextResponse.json({ error: profileError.message }, { status: 400 });
+      await adminDeleteUser(authUser.id);
+      return NextResponse.json({ error: 'Failed to create profile' }, { status: 400 });
     }
 
     // If role is kiosk, automatically create a kiosk entry
     if (role === 'kiosk' && projectId) {
-      const { error: kioskError } = await supabase
-        .from('kiosks')
-        .insert({
-          project_id: projectId,
-          profile_id: profileData.id,
-          name: fullName || email,
-          status: 'offline',
-        });
-
-      if (kioskError) {
+      try {
+        await execute(
+          `INSERT INTO kiosks (project_id, profile_id, name, status)
+           VALUES ($1, $2, $3, 'offline')`,
+          [projectId, (profileData as { id: string }).id, fullName || email]
+        );
+      } catch (kioskError) {
         console.error('Error creating kiosk:', kioskError);
         // Don't fail the whole operation, kiosk entry is supplementary
       }
     }
 
-    return NextResponse.json({ success: true, userId: authData.user.id });
+    return NextResponse.json({ success: true, userId: authUser.id });
   } catch (error) {
     console.error('Error creating account:', error);
     return NextResponse.json(

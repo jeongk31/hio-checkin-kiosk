@@ -2,10 +2,15 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Project } from '@/types/database';
+
+interface SimpleProject {
+  id: string;
+  name: string;
+  is_active: boolean;
+}
 
 interface ProjectActionsProps {
-  project: Project;
+  project: SimpleProject;
 }
 
 export default function ProjectActions({ project }: ProjectActionsProps) {

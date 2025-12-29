@@ -1,25 +1,53 @@
 import { getCurrentProfile } from '@/lib/auth';
-import { createServiceClient } from '@/lib/supabase/server';
+import { query } from '@/lib/db';
 import { redirect } from 'next/navigation';
+
+interface CheckinSession {
+  id: string;
+  project_id: string;
+  kiosk_id: string;
+  guest_phone: string | null;
+  guest_email: string | null;
+  guest_count: number;
+  room_number: string | null;
+  status: string;
+  started_at: string;
+  completed_at: string | null;
+  kiosk: {
+    id: string;
+    name: string;
+    project: {
+      id: string;
+      name: string;
+    } | null;
+  } | null;
+}
 
 export default async function SessionsPage() {
   const profile = await getCurrentProfile();
   if (!profile) redirect('/login');
 
-  const supabase = await createServiceClient();
   const isSuperAdmin = profile.role === 'super_admin';
 
-  let query = supabase
-    .from('checkin_sessions')
-    .select('*, kiosk:kiosks(*, project:projects(*))')
-    .order('started_at', { ascending: false })
-    .limit(100);
-
-  if (!isSuperAdmin) {
-    query = query.eq('project_id', profile.project_id);
-  }
-
-  const { data: sessions } = await query;
+  const sessionsSQL = `
+    SELECT 
+      cs.*,
+      json_build_object(
+        'id', k.id,
+        'name', k.name,
+        'project', json_build_object('id', p.id, 'name', p.name)
+      ) as kiosk
+    FROM checkin_sessions cs
+    LEFT JOIN kiosks k ON cs.kiosk_id = k.id
+    LEFT JOIN projects p ON k.project_id = p.id
+    ${!isSuperAdmin ? 'WHERE cs.project_id = $1' : ''}
+    ORDER BY cs.started_at DESC
+    LIMIT 100
+  `;
+  const sessions = await query<CheckinSession>(
+    sessionsSQL,
+    !isSuperAdmin ? [profile.project_id] : []
+  );
 
   const statusLabels: Record<string, { label: string; class: string }> = {
     in_progress: { label: '진행중', class: 'bg-blue-100 text-blue-800' },

@@ -1,36 +1,148 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Hotel Check-in Kiosk System
 
-## Getting Started
+A self-service hotel check-in kiosk system built with Next.js and PostgreSQL.
 
-First, run the development server:
+## Features
+
+- **Multi-tenant Support**: Multiple hotels/projects with separate data
+- **Role-based Access Control**: Super Admin, Project Admin, and Kiosk users
+- **Room Management**: Room types, individual rooms, daily availability
+- **Reservation System**: Reservation validation and check-in tracking
+- **Identity Verification**: Integration with ID verification services
+- **Payment Integration**: Support for payment processing
+- **Voice/Video Calls**: WebRTC-based communication between kiosk and staff
+
+## Tech Stack
+
+- **Frontend**: Next.js 14 with App Router
+- **Database**: PostgreSQL
+- **Authentication**: JWT-based sessions
+- **Styling**: Tailwind CSS
+
+## Prerequisites
+
+- Node.js 18+
+- PostgreSQL 14+
+- npm or yarn
+
+## Setup
+
+### 1. Create PostgreSQL Database
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+# Connect to PostgreSQL
+psql -U postgres
+
+# Create database and user
+CREATE DATABASE kiosk;
+CREATE USER orange WITH PASSWORD '00oo00oo';
+GRANT ALL PRIVILEGES ON DATABASE kiosk TO orange;
+\c kiosk
+GRANT ALL ON SCHEMA public TO orange;
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### 2. Install Dependencies
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+cd admin
+npm install
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### 3. Configure Environment
 
-## Learn More
+Copy the example environment file:
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+cp .env.example .env.local
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Edit `.env.local` with your settings:
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```env
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5432
+POSTGRES_DATABASE=kiosk
+POSTGRES_USER=orange
+POSTGRES_PASSWORD=00oo00oo
+JWT_SECRET=your-super-secret-jwt-key-change-in-production
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+```
 
-## Deploy on Vercel
+### 4. Initialize Database
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+From the project root:
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```bash
+# Install dependencies for setup script
+npm install pg bcryptjs
+
+# Run database setup (creates tables and admin user)
+node setup-db.js
+```
+
+Or manually apply the schema:
+
+```bash
+psql -U orange -d kiosk -f database/schema.sql
+cd admin
+node scripts/seed-db.js
+```
+
+### 5. Start Development Server
+
+```bash
+cd admin
+npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000) in your browser.
+
+## Default Admin Account
+
+- **Email**: admin@admin.com
+- **Password**: admin123
+
+## Project Structure
+
+```
+admin/
+├── src/
+│   ├── app/                  # Next.js App Router pages
+│   │   ├── (auth)/          # Authentication pages
+│   │   ├── (dashboard)/     # Admin dashboard
+│   │   ├── (kiosk)/         # Kiosk interface
+│   │   └── api/             # API routes
+│   ├── components/          # React components
+│   ├── contexts/            # React contexts
+│   ├── hooks/               # Custom hooks
+│   ├── lib/                 # Utilities
+│   │   ├── db/             # Database utilities
+│   │   └── auth.ts         # Authentication helpers
+│   └── types/              # TypeScript types
+├── public/                  # Static assets
+└── database/
+    └── schema.sql          # Database schema
+```
+
+## API Routes
+
+| Route | Method | Description |
+|-------|--------|-------------|
+| `/api/auth/login` | POST | User login |
+| `/api/auth/logout` | POST | User logout |
+| `/api/projects` | GET | List projects |
+| `/api/rooms` | GET/POST/PUT/DELETE | Manage rooms |
+| `/api/room-types` | GET/POST/PUT/DELETE | Manage room types |
+| `/api/reservations` | GET/POST/PUT/DELETE | Manage reservations |
+| `/api/profiles` | GET | List user profiles |
+| `/api/accounts/create` | POST | Create user account |
+
+## User Roles
+
+1. **Super Admin**: Full access to all projects and settings
+2. **Project Admin**: Access to their assigned project only
+3. **Kiosk**: Limited access for kiosk device interface
+
+## License
+
+Private - All rights reserved

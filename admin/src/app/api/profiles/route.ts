@@ -1,6 +1,16 @@
-import { createServiceClient } from '@/lib/supabase/server';
+import { query } from '@/lib/db';
 import { getCurrentProfile } from '@/lib/auth';
 import { NextResponse } from 'next/server';
+
+interface Profile {
+  id: string;
+  email: string;
+  role: string;
+  project_id: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
 
 export async function GET(request: Request) {
   try {
@@ -14,34 +24,36 @@ export async function GET(request: Request) {
     const projectId = searchParams.get('projectId');
     const role = searchParams.get('role');
 
-    const supabase = await createServiceClient();
-
-    let query = supabase
-      .from('profiles')
-      .select('*')
-      .eq('is_active', true)
-      .order('email');
+    // Build dynamic query with conditions
+    const conditions: string[] = ['is_active = true'];
+    const params: (string | null)[] = [];
+    let paramIndex = 1;
 
     if (projectId) {
-      query = query.eq('project_id', projectId);
+      conditions.push(`project_id = $${paramIndex++}`);
+      params.push(projectId);
     }
 
     if (role) {
-      query = query.eq('role', role);
+      conditions.push(`role = $${paramIndex++}`);
+      params.push(role);
     }
 
     // Project admins can only see profiles in their project
     if (profile.role === 'project_admin') {
-      query = query.eq('project_id', profile.project_id);
+      conditions.push(`project_id = $${paramIndex++}`);
+      params.push(profile.project_id);
     }
 
-    const { data, error } = await query;
+    const sql = `
+      SELECT * FROM profiles
+      WHERE ${conditions.join(' AND ')}
+      ORDER BY email
+    `;
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
-    }
+    const profiles = await query<Profile>(sql, params);
 
-    return NextResponse.json({ profiles: data });
+    return NextResponse.json({ profiles });
   } catch (error) {
     console.error('Error fetching profiles:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

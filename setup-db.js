@@ -1,70 +1,87 @@
-const { createClient } = require('@supabase/supabase-js');
+const { Pool } = require('pg');
+const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
-const supabaseUrl = 'https://kweempebrdlubrllfwmm.supabase.co';
-const serviceRoleKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt3ZWVtcGVicmRsdWJybGxmd21tIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2NTg5MzYyNSwiZXhwIjoyMDgxNDY5NjI1fQ.NDlOvEukGTGdjEnJ4_ruYVxD7lt6e9dEYRwCo6wXIO8';
-
-const supabase = createClient(supabaseUrl, serviceRoleKey, {
-  auth: {
-    autoRefreshToken: false,
-    persistSession: false,
-  },
+const pool = new Pool({
+  host: process.env.POSTGRES_HOST || 'localhost',
+  port: parseInt(process.env.POSTGRES_PORT || '5432'),
+  database: process.env.POSTGRES_DATABASE || 'kiosk',
+  user: process.env.POSTGRES_USER || 'orange',
+  password: process.env.POSTGRES_PASSWORD || '00oo00oo',
 });
 
 async function main() {
-  console.log('Creating admin user...');
+  console.log('Setting up database...\n');
 
-  // Create admin user
-  const { data: user, error: userError } = await supabase.auth.admin.createUser({
-    email: 'admin@admin.com',
-    password: 'admin123',
-    email_confirm: true,
-  });
-
-  if (userError) {
-    if (userError.message.includes('already been registered')) {
-      console.log('User already exists, fetching...');
-      const { data: users } = await supabase.auth.admin.listUsers();
-      const existingUser = users?.users?.find(u => u.email === 'admin@admin.com');
-      if (existingUser) {
-        console.log('User ID:', existingUser.id);
-
-        // Update profile to super_admin
-        const { error: updateError } = await supabase
-          .from('profiles')
-          .update({ role: 'super_admin', full_name: 'Super Admin' })
-          .eq('user_id', existingUser.id);
-
-        if (updateError) {
-          console.error('Error updating profile:', updateError.message);
-        } else {
-          console.log('Profile updated to super_admin');
-        }
-      }
-    } else {
-      console.error('Error creating user:', userError.message);
+  try {
+    // Read and execute schema
+    const schemaPath = path.join(__dirname, 'database', 'schema.sql');
+    if (fs.existsSync(schemaPath)) {
+      console.log('Applying database schema...');
+      const schema = fs.readFileSync(schemaPath, 'utf8');
+      await pool.query(schema);
+      console.log('Schema applied successfully!\n');
     }
-    return;
+
+    // Check if admin user exists
+    const existingUser = await pool.query(
+      "SELECT * FROM users WHERE email = 'admin@admin.com'"
+    );
+
+    let userId;
+
+    if (existingUser.rows.length > 0) {
+      console.log('Admin user already exists');
+      userId = existingUser.rows[0].id;
+    } else {
+      // Create admin user
+      console.log('Creating admin user...');
+      const passwordHash = await bcrypt.hash('admin123', 12);
+      userId = crypto.randomUUID();
+
+      await pool.query(
+        'INSERT INTO users (id, email, password_hash) VALUES ($1, $2, $3)',
+        [userId, 'admin@admin.com', passwordHash]
+      );
+      console.log('Admin user created with ID:', userId);
+    }
+
+    // Check if profile exists
+    const existingProfile = await pool.query(
+      'SELECT * FROM profiles WHERE user_id = $1',
+      [userId]
+    );
+
+    if (existingProfile.rows.length > 0) {
+      // Update to super_admin
+      await pool.query(
+        "UPDATE profiles SET role = 'super_admin', full_name = 'Super Admin' WHERE user_id = $1",
+        [userId]
+      );
+      console.log('Profile updated to super_admin');
+    } else {
+      // Create profile
+      await pool.query(
+        `INSERT INTO profiles (user_id, email, full_name, role, is_active)
+         VALUES ($1, 'admin@admin.com', 'Super Admin', 'super_admin', true)`,
+        [userId]
+      );
+      console.log('Profile created as super_admin');
+    }
+
+    console.log('\n✅ Setup complete!');
+    console.log('─────────────────────────────────');
+    console.log('Email:    admin@admin.com');
+    console.log('Password: admin123');
+    console.log('─────────────────────────────────');
+  } catch (error) {
+    console.error('Error:', error.message);
+    console.error(error.stack);
+  } finally {
+    await pool.end();
   }
-
-  console.log('User created with ID:', user.user.id);
-
-  // Update the profile to super_admin
-  const { error: updateError } = await supabase
-    .from('profiles')
-    .update({ role: 'super_admin', full_name: 'Super Admin' })
-    .eq('user_id', user.user.id);
-
-  if (updateError) {
-    console.error('Error updating profile:', updateError.message);
-  } else {
-    console.log('Profile updated to super_admin');
-  }
-
-  console.log('\n✅ Admin account created successfully!');
-  console.log('Email: admin@admin.com');
-  console.log('Password: admin123');
 }
 
-main().catch(console.error);
+main();

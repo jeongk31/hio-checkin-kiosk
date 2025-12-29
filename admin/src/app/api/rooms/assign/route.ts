@@ -1,6 +1,44 @@
-import { createServiceClient } from '@/lib/supabase/server';
+﻿import { queryOne } from '@/lib/db';
 import { getCurrentProfile } from '@/lib/auth';
 import { NextResponse } from 'next/server';
+
+interface RoomType {
+  id: string;
+  project_id: string;
+  name: string;
+  description: string | null;
+  base_price: number;
+  max_guests: number;
+}
+
+interface Room {
+  id: string;
+  project_id: string;
+  room_type_id: string;
+  room_number: string;
+  floor: string | null;
+  status: string;
+  access_type: string | null;
+  room_password: string | null;
+  key_box_number: string | null;
+  key_box_password: string | null;
+  is_active: boolean;
+  room_type?: RoomType;
+}
+
+interface Reservation {
+  id: string;
+  project_id: string;
+  room_type_id: string;
+  reservation_number: string;
+  guest_name: string | null;
+  guest_count: number;
+  check_in_date: string;
+  check_out_date: string;
+  room_number: string | null;
+  source: string;
+  status: string;
+}
 
 // Generate a unique reservation number for walk-in
 function generateWalkinReservationNumber(): string {
@@ -28,42 +66,38 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Project ID is required' }, { status: 400 });
     }
 
-    const supabase = await createServiceClient();
     const today = new Date().toISOString().split('T')[0];
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let room: any = null;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let existingReservation: any = null;
+    let room: Room | null = null;
+    let existingReservation: Reservation | null = null;
 
     // If a reservation ID or number is provided, check for a pre-assigned reserved room
     if (reservationId || existingReservationNumber) {
       // Look up the existing reservation
-      let reservationQuery = supabase
-        .from('reservations')
-        .select('*')
-        .eq('project_id', targetProjectId);
+      let reservationSql = 'SELECT * FROM reservations WHERE project_id = $1';
+      const reservationParams: (string | null)[] = [targetProjectId];
 
       if (reservationId) {
-        reservationQuery = reservationQuery.eq('id', reservationId);
+        reservationSql += ' AND id = $2';
+        reservationParams.push(reservationId);
       } else {
-        reservationQuery = reservationQuery.eq('reservation_number', existingReservationNumber);
+        reservationSql += ' AND reservation_number = $2';
+        reservationParams.push(existingReservationNumber);
       }
 
-      const { data: reservationData } = await reservationQuery.single();
+      const reservationData = await queryOne<Reservation>(reservationSql, reservationParams);
 
       if (reservationData && reservationData.room_number) {
         existingReservation = reservationData;
 
         // Check if this room exists and is reserved for this reservation
-        const { data: reservedRoom } = await supabase
-          .from('rooms')
-          .select('*, room_type:room_types(*)')
-          .eq('project_id', targetProjectId)
-          .eq('room_number', reservationData.room_number)
-          .eq('status', 'reserved')
-          .eq('is_active', true)
-          .single();
+        const reservedRoom = await queryOne<Room>(
+          `SELECT r.*, row_to_json(rt.*) as room_type
+           FROM rooms r
+           LEFT JOIN room_types rt ON r.room_type_id = rt.id
+           WHERE r.project_id = $1 AND r.room_number = $2 AND r.status = 'reserved' AND r.is_active = true`,
+          [targetProjectId, reservationData.room_number]
+        );
 
         if (reservedRoom) {
           room = reservedRoom;
@@ -73,66 +107,64 @@ export async function POST(request: Request) {
 
     // If no reserved room found, find an available room
     if (!room) {
-      let query = supabase
-        .from('rooms')
-        .select('*, room_type:room_types(*)')
-        .eq('project_id', targetProjectId)
-        .eq('status', 'available')
-        .eq('is_active', true)
-        .order('room_number', { ascending: true })
-        .limit(1);
+      let availableRoomSql = `
+        SELECT r.*, row_to_json(rt.*) as room_type
+        FROM rooms r
+        LEFT JOIN room_types rt ON r.room_type_id = rt.id
+        WHERE r.project_id = $1 AND r.status = 'available' AND r.is_active = true
+      `;
+      const availableRoomParams: (string | null)[] = [targetProjectId];
 
       if (roomTypeId) {
-        query = query.eq('room_type_id', roomTypeId);
+        availableRoomSql += ' AND r.room_type_id = $2';
+        availableRoomParams.push(roomTypeId);
       }
 
-      const { data: rooms, error: fetchError } = await query;
+      availableRoomSql += ' ORDER BY r.room_number ASC LIMIT 1';
 
-      if (fetchError) {
-        return NextResponse.json({ error: fetchError.message }, { status: 400 });
-      }
+      const availableRoom = await queryOne<Room>(availableRoomSql, availableRoomParams);
 
-      if (!rooms || rooms.length === 0) {
+      if (!availableRoom) {
         return NextResponse.json({
           success: false,
           error: '현재 사용 가능한 객실이 없습니다',
         });
       }
 
-      room = rooms[0];
+      room = availableRoom;
     }
 
     // Mark the room as occupied
-    const { data: updatedRoom, error: updateError } = await supabase
-      .from('rooms')
-      .update({ status: 'occupied' })
-      .eq('id', room.id)
-      .select('*, room_type:room_types(*)')
-      .single();
+    const updatedRoom = await queryOne<Room>(
+      `UPDATE rooms SET status = 'occupied', updated_at = NOW() WHERE id = $1
+       RETURNING *`,
+      [room.id]
+    );
 
-    if (updateError) {
-      return NextResponse.json({ error: updateError.message }, { status: 400 });
+    if (!updatedRoom) {
+      return NextResponse.json({ error: 'Failed to update room status' }, { status: 400 });
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let reservation: any = null;
+    // Get room type for the updated room
+    const roomType = await queryOne<RoomType>(
+      'SELECT * FROM room_types WHERE id = $1',
+      [updatedRoom.room_type_id]
+    );
+
+    let reservation: Reservation | null = null;
 
     // If there's an existing reservation, update it to checked_in
     if (existingReservation) {
-      const { data: updatedReservation, error: updateReservationError } = await supabase
-        .from('reservations')
-        .update({
-          status: 'checked_in',
-          room_number: updatedRoom.room_number,
-        })
-        .eq('id', existingReservation.id)
-        .select()
-        .single();
+      const updatedReservation = await queryOne<Reservation>(
+        `UPDATE reservations SET status = 'checked_in', room_number = $1, updated_at = NOW()
+         WHERE id = $2 RETURNING *`,
+        [updatedRoom.room_number, existingReservation.id]
+      );
 
-      if (!updateReservationError) {
+      if (updatedReservation) {
         reservation = updatedReservation;
       } else {
-        console.error('Error updating reservation:', updateReservationError);
+        console.error('Error updating reservation');
       }
     } else {
       // Create a new reservation record for this walk-in booking
@@ -140,25 +172,26 @@ export async function POST(request: Request) {
       const checkInDate = today;
       const finalCheckOutDate = checkOutDate || new Date(new Date().setDate(new Date().getDate() + 1)).toISOString().split('T')[0];
 
-      const { data: newReservation, error: reservationError } = await supabase
-        .from('reservations')
-        .insert({
-          project_id: targetProjectId,
-          room_type_id: updatedRoom.room_type_id,
-          reservation_number: newReservationNumber,
-          guest_name: guestName || null,
-          guest_count: guestCount || 1,
-          check_in_date: checkInDate,
-          check_out_date: finalCheckOutDate,
-          room_number: updatedRoom.room_number,
-          source: 'kiosk_walkin',
-          status: 'checked_in',
-        })
-        .select()
-        .single();
+      const newReservation = await queryOne<Reservation>(
+        `INSERT INTO reservations (project_id, room_type_id, reservation_number, guest_name, guest_count, check_in_date, check_out_date, room_number, source, status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         RETURNING *`,
+        [
+          targetProjectId,
+          updatedRoom.room_type_id,
+          newReservationNumber,
+          guestName || null,
+          guestCount || 1,
+          checkInDate,
+          finalCheckOutDate,
+          updatedRoom.room_number,
+          'kiosk_walkin',
+          'checked_in',
+        ]
+      );
 
-      if (reservationError) {
-        console.error('Error creating reservation:', reservationError);
+      if (!newReservation) {
+        console.error('Error creating reservation');
         // Room was assigned but reservation failed - still return success with warning
       } else {
         reservation = newReservation;
@@ -175,7 +208,7 @@ export async function POST(request: Request) {
         keyBoxNumber: updatedRoom.key_box_number,
         keyBoxPassword: updatedRoom.key_box_password,
         floor: updatedRoom.floor,
-        roomType: updatedRoom.room_type,
+        roomType: roomType,
       },
       reservation: reservation || null,
     });

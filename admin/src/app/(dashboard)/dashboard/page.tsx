@@ -1,5 +1,5 @@
 import { getCurrentProfile } from '@/lib/auth';
-import { createServiceClient } from '@/lib/supabase/server';
+import { query, queryOne } from '@/lib/db';
 import { redirect } from 'next/navigation';
 
 interface RecentCheckin {
@@ -13,11 +13,14 @@ interface RecentCheckin {
   status: string;
 }
 
+interface CountResult {
+  count: number;
+}
+
 export default async function DashboardPage() {
   const profile = await getCurrentProfile();
   if (!profile) redirect('/login');
 
-  const supabase = await createServiceClient();
   const isSuperAdmin = profile.role === 'super_admin';
   const today = new Date().toISOString().split('T')[0];
 
@@ -29,55 +32,55 @@ export default async function DashboardPage() {
   let recentCheckins: RecentCheckin[] = [];
 
   if (isSuperAdmin) {
-    const [projects, kiosks, members, checkins, recent] = await Promise.all([
-      supabase.from('projects').select('id', { count: 'exact' }),
-      supabase.from('kiosks').select('id'),
-      supabase.from('profiles').select('id', { count: 'exact' }),
-      supabase
-        .from('reservations')
-        .select('id', { count: 'exact' })
-        .eq('status', 'checked_in')
-        .eq('check_in_date', today),
-      supabase
-        .from('reservations')
-        .select('id, reservation_number, guest_name, guest_count, room_number, check_in_date, created_at, status')
-        .eq('status', 'checked_in')
-        .order('created_at', { ascending: false })
-        .limit(10),
+    const [projectsResult, kiosksResult, membersResult, checkinsResult, recent] = await Promise.all([
+      queryOne<CountResult>('SELECT COUNT(*)::int as count FROM projects'),
+      queryOne<CountResult>('SELECT COUNT(*)::int as count FROM kiosks'),
+      queryOne<CountResult>('SELECT COUNT(*)::int as count FROM profiles'),
+      queryOne<CountResult>(
+        'SELECT COUNT(*)::int as count FROM reservations WHERE status = $1 AND check_in_date = $2',
+        ['checked_in', today]
+      ),
+      query<RecentCheckin>(
+        `SELECT id, reservation_number, guest_name, guest_count, room_number, check_in_date, created_at, status
+         FROM reservations
+         WHERE status = $1
+         ORDER BY created_at DESC
+         LIMIT 10`,
+        ['checked_in']
+      ),
     ]);
-    projectCount = projects.count || 0;
-    kioskCount = kiosks.data?.length || 0;
-    memberCount = members.count || 0;
-    todayCheckins = checkins.count || 0;
-    recentCheckins = (recent.data || []) as RecentCheckin[];
+    projectCount = projectsResult?.count || 0;
+    kioskCount = kiosksResult?.count || 0;
+    memberCount = membersResult?.count || 0;
+    todayCheckins = checkinsResult?.count || 0;
+    recentCheckins = recent || [];
   } else {
-    const [kiosks, members, checkins, recent] = await Promise.all([
-      supabase
-        .from('kiosks')
-        .select('id')
-        .eq('project_id', profile.project_id),
-      supabase
-        .from('profiles')
-        .select('id', { count: 'exact' })
-        .eq('project_id', profile.project_id),
-      supabase
-        .from('reservations')
-        .select('id', { count: 'exact' })
-        .eq('project_id', profile.project_id)
-        .eq('status', 'checked_in')
-        .eq('check_in_date', today),
-      supabase
-        .from('reservations')
-        .select('id, reservation_number, guest_name, guest_count, room_number, check_in_date, created_at, status')
-        .eq('project_id', profile.project_id)
-        .eq('status', 'checked_in')
-        .order('created_at', { ascending: false })
-        .limit(10),
+    const [kiosksResult, membersResult, checkinsResult, recent] = await Promise.all([
+      queryOne<CountResult>(
+        'SELECT COUNT(*)::int as count FROM kiosks WHERE project_id = $1',
+        [profile.project_id]
+      ),
+      queryOne<CountResult>(
+        'SELECT COUNT(*)::int as count FROM profiles WHERE project_id = $1',
+        [profile.project_id]
+      ),
+      queryOne<CountResult>(
+        'SELECT COUNT(*)::int as count FROM reservations WHERE project_id = $1 AND status = $2 AND check_in_date = $3',
+        [profile.project_id, 'checked_in', today]
+      ),
+      query<RecentCheckin>(
+        `SELECT id, reservation_number, guest_name, guest_count, room_number, check_in_date, created_at, status
+         FROM reservations
+         WHERE project_id = $1 AND status = $2
+         ORDER BY created_at DESC
+         LIMIT 10`,
+        [profile.project_id, 'checked_in']
+      ),
     ]);
-    kioskCount = kiosks.data?.length || 0;
-    memberCount = members.count || 0;
-    todayCheckins = checkins.count || 0;
-    recentCheckins = (recent.data || []) as RecentCheckin[];
+    kioskCount = kiosksResult?.count || 0;
+    memberCount = membersResult?.count || 0;
+    todayCheckins = checkinsResult?.count || 0;
+    recentCheckins = recent || [];
   }
 
   return (

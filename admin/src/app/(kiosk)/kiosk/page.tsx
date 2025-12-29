@@ -1,7 +1,11 @@
 import { getCurrentProfile } from '@/lib/auth';
-import { createServiceClient } from '@/lib/supabase/server';
+import { queryOne, query } from '@/lib/db';
 import { redirect } from 'next/navigation';
 import KioskApp from './KioskApp';
+import { Kiosk } from '@/types/database';
+
+// Force dynamic rendering to prevent hydration issues
+export const dynamic = 'force-dynamic';
 
 interface KioskPageProps {
   searchParams: Promise<{
@@ -13,10 +17,18 @@ interface KioskPageProps {
   }>;
 }
 
+interface KioskContentRow {
+  content_key: string;
+  content_value: string;
+}
+
 export default async function KioskPage({ searchParams }: KioskPageProps) {
   const params = await searchParams;
+  
+  // Get profile - this will be null if not logged in
   const profile = await getCurrentProfile();
 
+  // Redirect to login if no profile
   if (!profile) {
     redirect('/login');
   }
@@ -26,16 +38,14 @@ export default async function KioskPage({ searchParams }: KioskPageProps) {
     redirect('/dashboard');
   }
 
-  // Get the kiosk associated with this profile (using service client to bypass RLS)
-  const supabase = await createServiceClient();
-  const { data: kiosk, error } = await supabase
-    .from('kiosks')
-    .select('*')
-    .eq('profile_id', profile.id)
-    .single();
+  // Get the kiosk associated with this profile
+  const kiosk = await queryOne<Kiosk>(
+    `SELECT * FROM kiosks WHERE profile_id = $1`,
+    [profile.id]
+  );
 
-  if (error || !kiosk) {
-    console.error('Kiosk not found for profile:', profile.id, error);
+  if (!kiosk) {
+    console.error('Kiosk not found for profile:', profile.id);
     return (
       <div className="min-h-screen bg-gray-900 flex items-center justify-center">
         <div className="bg-white p-8 rounded-lg shadow-lg max-w-md text-center">
@@ -58,14 +68,14 @@ export default async function KioskPage({ searchParams }: KioskPageProps) {
   }
 
   // Fetch content for this kiosk's project
-  const { data: contentData } = await supabase
-    .from('kiosk_content')
-    .select('content_key, content_value')
-    .eq('project_id', kiosk.project_id);
+  const contentData = await query<KioskContentRow>(
+    `SELECT content_key, content_value FROM kiosk_content WHERE project_id = $1`,
+    [kiosk.project_id]
+  );
 
   // Convert to a key-value map
   const content: Record<string, string> = {};
-  (contentData || []).forEach((item) => {
+  contentData.forEach((item) => {
     content[item.content_key] = item.content_value;
   });
 

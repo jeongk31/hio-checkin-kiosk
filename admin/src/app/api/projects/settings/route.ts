@@ -1,6 +1,16 @@
-import { createServiceClient } from '@/lib/supabase/server';
+import { query, queryOne } from '@/lib/db';
 import { getCurrentProfile } from '@/lib/auth';
 import { NextResponse } from 'next/server';
+
+interface Project {
+  id: string;
+  name: string;
+  slug: string;
+  is_active: boolean;
+  settings: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+}
 
 // Update project settings (like daily reset time)
 export async function PUT(request: Request) {
@@ -19,8 +29,8 @@ export async function PUT(request: Request) {
 
     const targetProjectId = profile.role === 'super_admin' ? projectId : profile.project_id;
 
-    if (!targetProjectId) {
-      return NextResponse.json({ error: 'Project ID is required' }, { status: 400 });
+    if (!targetProjectId || targetProjectId === 'all') {
+      return NextResponse.json({ error: 'Specific Project ID is required' }, { status: 400 });
     }
 
     // Project admins can only update their own project
@@ -28,37 +38,35 @@ export async function PUT(request: Request) {
       return NextResponse.json({ error: 'Cannot update settings for other projects' }, { status: 403 });
     }
 
-    const supabase = await createServiceClient();
-
     // Get current settings
-    const { data: currentProject, error: fetchError } = await supabase
-      .from('projects')
-      .select('settings')
-      .eq('id', targetProjectId)
-      .single();
+    const currentProject = await queryOne<{ settings: Record<string, unknown> | null }>(
+      'SELECT settings FROM projects WHERE id = $1',
+      [targetProjectId]
+    );
 
-    if (fetchError) {
-      return NextResponse.json({ error: fetchError.message }, { status: 400 });
+    if (!currentProject) {
+      return NextResponse.json({ error: 'Project not found' }, { status: 404 });
     }
 
     // Merge settings
     const mergedSettings = {
-      ...(currentProject?.settings || {}),
+      ...(currentProject.settings || {}),
       ...settings,
     };
 
-    const { data, error } = await supabase
-      .from('projects')
-      .update({ settings: mergedSettings })
-      .eq('id', targetProjectId)
-      .select()
-      .single();
+    const updatedProjects = await query<Project>(
+      `UPDATE projects 
+       SET settings = $1, updated_at = NOW() 
+       WHERE id = $2 
+       RETURNING *`,
+      [JSON.stringify(mergedSettings), targetProjectId]
+    );
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
+    if (updatedProjects.length === 0) {
+      return NextResponse.json({ error: 'Failed to update project' }, { status: 400 });
     }
 
-    return NextResponse.json({ success: true, project: data });
+    return NextResponse.json({ success: true, project: updatedProjects[0] });
   } catch (error) {
     console.error('Error updating project settings:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

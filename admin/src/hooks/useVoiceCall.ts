@@ -1,8 +1,6 @@
 'use client';
 
-import { useRef, useCallback } from 'react';
-import { createClient } from '@/lib/supabase/client';
-import type { RealtimeChannel } from '@supabase/supabase-js';
+import { useRef, useCallback, useEffect } from 'react';
 
 // STUN servers for NAT traversal
 const ICE_SERVERS: RTCIceServer[] = [
@@ -27,6 +25,64 @@ interface UseVoiceCallOptions {
   onRemoteStream?: (stream: MediaStream) => void;
 }
 
+// Simple signaling using polling API (fallback for when WebSocket is not available)
+class SignalingChannel {
+  private sessionId: string;
+  private pollInterval: ReturnType<typeof setInterval> | null = null;
+  private messageHandler: ((msg: SignalingMessage) => void) | null = null;
+  private lastMessageId: number = 0;
+
+  constructor(sessionId: string) {
+    this.sessionId = sessionId;
+  }
+
+  onMessage(handler: (msg: SignalingMessage) => void) {
+    this.messageHandler = handler;
+  }
+
+  async subscribe(): Promise<void> {
+    // Start polling for messages
+    this.pollInterval = setInterval(async () => {
+      try {
+        const response = await fetch(`/api/signaling?sessionId=${this.sessionId}&lastId=${this.lastMessageId}`);
+        if (response.ok) {
+          const data = await response.json();
+          if (data.messages && Array.isArray(data.messages)) {
+            for (const msg of data.messages) {
+              this.lastMessageId = Math.max(this.lastMessageId, msg.id);
+              if (this.messageHandler) {
+                this.messageHandler(msg.payload);
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.error('[Signaling] Poll error:', error);
+      }
+    }, 500); // Poll every 500ms
+  }
+
+  async send(payload: SignalingMessage): Promise<void> {
+    try {
+      await fetch('/api/signaling', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: this.sessionId, payload }),
+      });
+    } catch (error) {
+      console.error('[Signaling] Send error:', error);
+    }
+  }
+
+  close() {
+    if (this.pollInterval) {
+      clearInterval(this.pollInterval);
+      this.pollInterval = null;
+    }
+    this.messageHandler = null;
+  }
+}
+
 export function useVoiceCall(options: UseVoiceCallOptions = {}) {
   const { onStatusChange, onError, onCallEnded, onRemoteStream } = options;
 
@@ -42,17 +98,20 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
   onCallEndedRef.current = onCallEnded;
   onRemoteStreamRef.current = onRemoteStream;
 
-  const supabaseRef = useRef(createClient());
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const remoteStreamRef = useRef<MediaStream | null>(null);
-  const channelRef = useRef<RealtimeChannel | null>(null);
+  const channelRef = useRef<SignalingChannel | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
 
   // Request microphone access
   const requestMicrophone = useCallback(async (): Promise<MediaStream | null> => {
     try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        console.error('getUserMedia not supported');
+        return null;
+      }
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
@@ -84,11 +143,7 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
     pc.onicecandidate = (event) => {
       if (event.candidate && channelRef.current) {
         console.log('[Manager] Sending ICE candidate');
-        channelRef.current.send({
-          type: 'broadcast',
-          event: 'signaling',
-          payload: { type: 'ice-candidate', candidate: event.candidate.toJSON() } as SignalingMessage,
-        });
+        channelRef.current.send({ type: 'ice-candidate', candidate: event.candidate.toJSON() });
       } else if (!event.candidate) {
         console.log('[Manager] ICE gathering complete');
       }
@@ -153,39 +208,29 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
         pc.addTrack(track, stream);
       });
 
-      // Setup signaling channel with INLINE handler (avoids stale closure issues)
-      const supabase = supabaseRef.current;
+      // Setup signaling channel
       const channelName = `voice-call-${sessionId}`;
       console.log('[Manager] Setting up signaling channel:', channelName);
 
-      const channel = supabase.channel(channelName);
+      const channel = new SignalingChannel(sessionId);
       channelRef.current = channel;
       sessionIdRef.current = sessionId;
 
-      // Inline signaling handler with direct access to pc and channel
-      channel.on('broadcast', { event: 'signaling' }, async ({ payload }) => {
-        const msg = payload as SignalingMessage;
+      // Handle incoming messages
+      channel.onMessage(async (msg: SignalingMessage) => {
         console.log('[Manager] 📥 Received signaling message:', msg.type);
 
         if (msg.type === 'call-answered') {
           console.log('[Manager] Kiosk acknowledged call-answered, re-sending offer...');
-          // Re-send the offer now that kiosk is subscribed to the channel
           if (pc.localDescription?.sdp) {
-            console.log('[Manager] 📤 RE-SENDING SDP offer to kiosk, length:', pc.localDescription.sdp.length);
-            channel.send({
-              type: 'broadcast',
-              event: 'signaling',
-              payload: { type: 'offer', sdp: pc.localDescription.sdp } as SignalingMessage,
-            });
-          } else {
-            console.log('[Manager] ⚠️ WARNING: No local description to re-send!');
+            console.log('[Manager] 📤 RE-SENDING SDP offer to kiosk');
+            channel.send({ type: 'offer', sdp: pc.localDescription.sdp });
           }
           onStatusChangeRef.current?.('connecting');
         } else if (msg.type === 'answer' && 'sdp' in msg) {
           console.log('[Manager] Received answer, setting remote description');
           try {
             await pc.setRemoteDescription({ type: 'answer', sdp: msg.sdp });
-            // Add any pending ICE candidates
             for (const candidate of pendingCandidatesRef.current) {
               await pc.addIceCandidate(candidate);
             }
@@ -199,7 +244,7 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
           if (pc.remoteDescription) {
             await pc.addIceCandidate(msg.candidate);
           } else {
-            console.log('[Manager] Queuing ICE candidate (no remote description yet)');
+            console.log('[Manager] Queuing ICE candidate');
             pendingCandidatesRef.current.push(msg.candidate);
           }
         } else if (msg.type === 'call-ended') {
@@ -210,36 +255,15 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
       });
 
       // Subscribe and send offer
-      await new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error('Channel subscription timeout')), 10000);
+      await channel.subscribe();
 
-        channel.subscribe(async (status) => {
-          console.log('[Manager] Signaling channel status:', status);
-          if (status === 'SUBSCRIBED') {
-            clearTimeout(timeout);
-            try {
-              // Create and send offer
-              console.log('[Manager] Creating initial SDP offer...');
-              const offer = await pc.createOffer();
-              await pc.setLocalDescription(offer);
+      // Create and send offer
+      console.log('[Manager] Creating initial SDP offer...');
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
 
-              console.log('[Manager] 📤 Sending initial SDP offer to kiosk, length:', offer.sdp?.length);
-              channel.send({
-                type: 'broadcast',
-                event: 'signaling',
-                payload: { type: 'offer', sdp: offer.sdp } as SignalingMessage,
-              });
-
-              resolve();
-            } catch (err) {
-              reject(err);
-            }
-          } else if (status === 'CHANNEL_ERROR') {
-            clearTimeout(timeout);
-            reject(new Error('Channel error'));
-          }
-        });
-      });
+      console.log('[Manager] 📤 Sending initial SDP offer to kiosk');
+      channel.send({ type: 'offer', sdp: offer.sdp! });
 
       return true;
     } catch (error) {
@@ -273,25 +297,21 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
         pc.addTrack(track, stream);
       });
 
-      // Setup signaling channel with INLINE handler (avoids stale closure issues)
-      const supabase = supabaseRef.current;
+      // Setup signaling channel
       const channelName = `voice-call-${sessionId}`;
       console.log('[Manager] Setting up signaling channel:', channelName);
 
-      const channel = supabase.channel(channelName);
+      const channel = new SignalingChannel(sessionId);
       channelRef.current = channel;
       sessionIdRef.current = sessionId;
 
-      // Inline signaling handler with direct access to pc and channel
-      channel.on('broadcast', { event: 'signaling' }, async ({ payload }) => {
-        const msg = payload as SignalingMessage;
+      // Handle incoming messages
+      channel.onMessage(async (msg: SignalingMessage) => {
         console.log('[Manager] 📥 Received signaling message:', msg.type);
 
         if (msg.type === 'offer' && 'sdp' in msg) {
           try {
             console.log('[Manager] Processing offer from kiosk...');
-            console.log('[Manager] PC signaling state before setRemoteDescription:', pc.signalingState);
-
             await pc.setRemoteDescription({ type: 'offer', sdp: msg.sdp });
             console.log('[Manager] Remote description set');
 
@@ -308,11 +328,7 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
             await pc.setLocalDescription(answer);
             console.log('[Manager] Local description set, sending answer...');
 
-            channel.send({
-              type: 'broadcast',
-              event: 'signaling',
-              payload: { type: 'answer', sdp: answer.sdp } as SignalingMessage,
-            });
+            channel.send({ type: 'answer', sdp: answer.sdp! });
             console.log('[Manager] 📤 Answer sent to kiosk');
             onStatusChangeRef.current?.('connecting');
           } catch (err) {
@@ -324,7 +340,7 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
           if (pc.remoteDescription) {
             await pc.addIceCandidate(msg.candidate);
           } else {
-            console.log('[Manager] Queuing ICE candidate (no remote description yet)');
+            console.log('[Manager] Queuing ICE candidate');
             pendingCandidatesRef.current.push(msg.candidate);
           }
         } else if (msg.type === 'call-ended') {
@@ -335,27 +351,10 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
       });
 
       // Subscribe and send call-answered signal
-      await new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error('Channel subscription timeout')), 10000);
+      await channel.subscribe();
 
-        channel.subscribe((status) => {
-          console.log('[Manager] Answer channel status:', status);
-          if (status === 'SUBSCRIBED') {
-            clearTimeout(timeout);
-            // Send call-answered signal - kiosk will then send offer
-            console.log('[Manager] 📤 Sending call-answered signal to kiosk');
-            channel.send({
-              type: 'broadcast',
-              event: 'signaling',
-              payload: { type: 'call-answered' } as SignalingMessage,
-            });
-            resolve();
-          } else if (status === 'CHANNEL_ERROR') {
-            clearTimeout(timeout);
-            reject(new Error('Channel error'));
-          }
-        });
-      });
+      console.log('[Manager] 📤 Sending call-answered signal to kiosk');
+      channel.send({ type: 'call-answered' });
 
       console.log('[Manager] answerCall setup complete, waiting for offer from kiosk...');
       return true;
@@ -371,11 +370,7 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
   // End the call
   const endCall = useCallback((reason: 'declined' | 'ended' | 'timeout' | 'error' = 'ended') => {
     // Send end signal
-    channelRef.current?.send({
-      type: 'broadcast',
-      event: 'signaling',
-      payload: { type: 'call-ended', reason } as SignalingMessage,
-    });
+    channelRef.current?.send({ type: 'call-ended', reason });
 
     cleanup();
     onStatusChangeRef.current?.('ended');
@@ -392,9 +387,9 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
     peerConnectionRef.current?.close();
     peerConnectionRef.current = null;
 
-    // Remove channel
+    // Close channel
     if (channelRef.current) {
-      supabaseRef.current.removeChannel(channelRef.current);
+      channelRef.current.close();
       channelRef.current = null;
     }
 
@@ -405,6 +400,13 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
     remoteStreamRef.current = null;
     sessionIdRef.current = null;
   }, []);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      cleanup();
+    };
+  }, [cleanup]);
 
   return {
     initiateCall,

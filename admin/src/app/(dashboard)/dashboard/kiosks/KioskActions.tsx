@@ -2,7 +2,6 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { createClient } from '@/lib/supabase/client';
 import { Kiosk } from '@/types/database';
 
 interface KioskActionsProps {
@@ -11,12 +10,24 @@ interface KioskActionsProps {
 
 export default function KioskActions({ kiosk }: KioskActionsProps) {
   const router = useRouter();
-  const supabase = createClient();
 
   const handleDelete = async () => {
     if (!confirm('정말 삭제하시겠습니까?')) return;
-    await supabase.from('kiosks').delete().eq('id', kiosk.id);
-    router.refresh();
+    
+    try {
+      const response = await fetch(`/api/kiosks/${kiosk.id}`, {
+        method: 'DELETE',
+      });
+      
+      if (response.ok) {
+        router.refresh();
+      } else {
+        alert('삭제에 실패했습니다.');
+      }
+    } catch (error) {
+      console.error('Error deleting kiosk:', error);
+      alert('삭제 중 오류가 발생했습니다.');
+    }
   };
 
   return (

@@ -1,6 +1,20 @@
-import { createServiceClient } from '@/lib/supabase/server';
+﻿import { query, queryOne, execute } from '@/lib/db';
 import { getCurrentProfile } from '@/lib/auth';
 import { NextResponse } from 'next/server';
+
+interface RoomType {
+  id: string;
+  project_id: string;
+  name: string;
+  description: string | null;
+  base_price: number;
+  max_guests: number;
+  is_active: boolean;
+  display_order: number;
+  image_url: string | null;
+  created_at: string;
+  updated_at: string;
+}
 
 export async function GET(request: Request) {
   try {
@@ -13,26 +27,23 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const projectId = searchParams.get('projectId');
 
-    const supabase = await createServiceClient();
-
-    let query = supabase
-      .from('room_types')
-      .select('*')
-      .order('display_order', { ascending: true });
+    let sql: string;
+    let params: (string | null)[];
 
     if (profile.role === 'super_admin') {
       if (projectId) {
-        query = query.eq('project_id', projectId);
+        sql = 'SELECT * FROM room_types WHERE project_id = $1 ORDER BY display_order ASC';
+        params = [projectId];
+      } else {
+        sql = 'SELECT * FROM room_types ORDER BY display_order ASC';
+        params = [];
       }
     } else {
-      query = query.eq('project_id', profile.project_id);
+      sql = 'SELECT * FROM room_types WHERE project_id = $1 ORDER BY display_order ASC';
+      params = [profile.project_id];
     }
 
-    const { data, error } = await query;
-
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
-    }
+    const data = await query<RoomType>(sql, params);
 
     return NextResponse.json({ roomTypes: data });
   } catch (error) {
@@ -57,8 +68,8 @@ export async function POST(request: Request) {
 
     const targetProjectId = profile.role === 'super_admin' ? projectId : profile.project_id;
 
-    if (!targetProjectId || !name) {
-      return NextResponse.json({ error: 'Project ID and name are required' }, { status: 400 });
+    if (!targetProjectId || targetProjectId === 'all' || !name) {
+      return NextResponse.json({ error: 'Specific Project ID and name are required' }, { status: 400 });
     }
 
     // Project admins can only create room types for their own project
@@ -66,37 +77,23 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Cannot create room types for other projects' }, { status: 403 });
     }
 
-    const supabase = await createServiceClient();
-
     // Get the highest display_order for this project
-    const { data: existingRoomTypes } = await supabase
-      .from('room_types')
-      .select('display_order')
-      .eq('project_id', targetProjectId)
-      .order('display_order', { ascending: false })
-      .limit(1);
+    const existingRoomType = await queryOne<{ display_order: number }>(
+      'SELECT display_order FROM room_types WHERE project_id = $1 ORDER BY display_order DESC LIMIT 1',
+      [targetProjectId]
+    );
 
-    const displayOrder = existingRoomTypes && existingRoomTypes.length > 0
-      ? existingRoomTypes[0].display_order + 1
-      : 0;
+    const displayOrder = existingRoomType ? existingRoomType.display_order + 1 : 0;
 
-    const { data, error } = await supabase
-      .from('room_types')
-      .insert({
-        project_id: targetProjectId,
-        name,
-        description: description || null,
-        base_price: basePrice || 0,
-        max_guests: maxGuests || 2,
-        display_order: displayOrder,
-        image_url: imageUrl || null,
-      })
-      .select()
-      .single();
+    // Handle images - if imageUrl is provided, wrap in array for jsonb
+    const images = imageUrl ? JSON.stringify([imageUrl]) : '[]';
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
-    }
+    const data = await queryOne<RoomType>(
+      `INSERT INTO room_types (project_id, name, description, base_price, max_guests, display_order, images)
+       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+       RETURNING *`,
+      [targetProjectId, name, description || null, basePrice || 0, maxGuests || 2, displayOrder, images]
+    );
 
     return NextResponse.json({ success: true, roomType: data });
   } catch (error) {
@@ -128,26 +125,52 @@ export async function PUT(request: Request) {
       return NextResponse.json({ error: 'Cannot update room types for other projects' }, { status: 403 });
     }
 
-    const supabase = await createServiceClient();
+    const updates: string[] = [];
+    const values: unknown[] = [];
+    let paramIndex = 1;
 
-    const updateData: Record<string, unknown> = {};
-    if (name !== undefined) updateData.name = name;
-    if (description !== undefined) updateData.description = description;
-    if (basePrice !== undefined) updateData.base_price = basePrice;
-    if (maxGuests !== undefined) updateData.max_guests = maxGuests;
-    if (isActive !== undefined) updateData.is_active = isActive;
-    if (displayOrder !== undefined) updateData.display_order = displayOrder;
-    if (imageUrl !== undefined) updateData.image_url = imageUrl;
+    if (name !== undefined) {
+      updates.push(`name = $${paramIndex++}`);
+      values.push(name);
+    }
+    if (description !== undefined) {
+      updates.push(`description = $${paramIndex++}`);
+      values.push(description);
+    }
+    if (basePrice !== undefined) {
+      updates.push(`base_price = $${paramIndex++}`);
+      values.push(basePrice);
+    }
+    if (maxGuests !== undefined) {
+      updates.push(`max_guests = $${paramIndex++}`);
+      values.push(maxGuests);
+    }
+    if (isActive !== undefined) {
+      updates.push(`is_active = $${paramIndex++}`);
+      values.push(isActive);
+    }
+    if (displayOrder !== undefined) {
+      updates.push(`display_order = $${paramIndex++}`);
+      values.push(displayOrder);
+    }
+    if (imageUrl !== undefined) {
+      updates.push(`image_url = $${paramIndex++}`);
+      values.push(imageUrl);
+    }
 
-    const { data, error } = await supabase
-      .from('room_types')
-      .update(updateData)
-      .eq('id', id)
-      .select()
-      .single();
+    if (updates.length === 0) {
+      return NextResponse.json({ error: 'No fields to update' }, { status: 400 });
+    }
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
+    values.push(id);
+
+    const data = await queryOne<RoomType>(
+      `UPDATE room_types SET ${updates.join(', ')}, updated_at = NOW() WHERE id = $${paramIndex} RETURNING *`,
+      values
+    );
+
+    if (!data) {
+      return NextResponse.json({ error: 'Room type not found' }, { status: 404 });
     }
 
     return NextResponse.json({ success: true, roomType: data });
@@ -180,15 +203,10 @@ export async function DELETE(request: Request) {
       return NextResponse.json({ error: 'Cannot delete room types for other projects' }, { status: 403 });
     }
 
-    const supabase = await createServiceClient();
+    const result = await execute('DELETE FROM room_types WHERE id = $1', [id]);
 
-    const { error } = await supabase
-      .from('room_types')
-      .delete()
-      .eq('id', id);
-
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
+    if (result.rowCount === 0) {
+      return NextResponse.json({ error: 'Room type not found' }, { status: 404 });
     }
 
     return NextResponse.json({ success: true });

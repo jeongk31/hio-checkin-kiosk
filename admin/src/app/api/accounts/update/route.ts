@@ -1,4 +1,5 @@
-import { createServiceClient } from '@/lib/supabase/server';
+import { execute, queryOne } from '@/lib/db';
+import { adminDeleteUser } from '@/lib/db/auth';
 import { getCurrentProfile } from '@/lib/auth';
 import { NextResponse } from 'next/server';
 
@@ -29,15 +30,13 @@ export async function PUT(request: Request) {
       return NextResponse.json({ error: 'Account ID is required' }, { status: 400 });
     }
 
-    const supabase = await createServiceClient();
+    const result = await execute(
+      'UPDATE profiles SET is_active = $1, updated_at = NOW() WHERE id = $2',
+      [isActive, id]
+    );
 
-    const { error } = await supabase
-      .from('profiles')
-      .update({ is_active: isActive })
-      .eq('id', id);
-
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
+    if (result.rowCount === 0) {
+      return NextResponse.json({ error: 'Account not found' }, { status: 404 });
     }
 
     return NextResponse.json({ success: true });
@@ -73,15 +72,21 @@ export async function DELETE(request: Request) {
       return NextResponse.json({ error: 'Account ID is required' }, { status: 400 });
     }
 
-    const supabase = await createServiceClient();
+    // Get the user_id from profile
+    const profileData = await queryOne<{ user_id: string }>(
+      'SELECT user_id FROM profiles WHERE id = $1',
+      [id]
+    );
 
-    const { error } = await supabase
-      .from('profiles')
-      .delete()
-      .eq('id', id);
+    if (!profileData || !profileData.user_id) {
+      return NextResponse.json({ error: 'Profile not found' }, { status: 404 });
+    }
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
+    // Delete the user (this will cascade to profiles via foreign key)
+    const result = await adminDeleteUser(profileData.user_id);
+
+    if (!result.success) {
+      return NextResponse.json({ error: result.error || 'Failed to delete account' }, { status: 400 });
     }
 
     return NextResponse.json({ success: true });

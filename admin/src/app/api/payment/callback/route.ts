@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServiceClient } from '@/lib/supabase/server';
+import { queryOne, execute } from '@/lib/db';
 import { parsePaymentResult } from '@/lib/easycheck';
+
+interface Kiosk {
+  project_id: string;
+}
 
 /**
  * Payment callback handler for KICC EasyCheck
@@ -27,71 +31,75 @@ export async function GET(request: NextRequest) {
   });
 
   try {
-    // Use service client to bypass RLS for callback handling
-    const supabase = await createServiceClient();
-
     // Get project_id from kiosk if available
     let projectId: string | null = null;
     if (kioskId) {
-      const { data: kiosk } = await supabase
-        .from('kiosks')
-        .select('project_id')
-        .eq('id', kioskId)
-        .single();
+      const kiosk = await queryOne<Kiosk>(
+        'SELECT project_id FROM kiosks WHERE id = $1',
+        [kioskId]
+      );
       projectId = kiosk?.project_id || null;
     }
 
     // Store payment record in database
     if (result.success) {
       // Insert successful payment record
-      const { error: insertError } = await supabase
-        .from('payments')
-        .insert({
-          project_id: projectId,
-          transaction_no: transactionNo,
-          approval_num: result.approvalNum,
-          approval_date: result.approvalDate,
-          approval_time: result.approvalTime,
-          card_num: result.cardNum,
-          card_name: result.cardName,
-          amount: result.amount,
-          installment: result.installment,
-          status: 'completed',
-          kiosk_id: kioskId || null,
-          reservation_id: reservationId || null,
-          raw_response: result.rawParams,
-        });
-
-      if (insertError) {
+      try {
+        await execute(
+          `INSERT INTO payments (
+            project_id, transaction_no, approval_num, approval_date, approval_time,
+            card_num, card_name, amount, installment, status, kiosk_id, reservation_id, raw_response
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'completed', $10, $11, $12)`,
+          [
+            projectId,
+            transactionNo,
+            result.approvalNum,
+            result.approvalDate,
+            result.approvalTime,
+            result.cardNum,
+            result.cardName,
+            result.amount,
+            result.installment,
+            kioskId || null,
+            reservationId || null,
+            JSON.stringify(result.rawParams),
+          ]
+        );
+      } catch (insertError) {
         console.error('Error storing payment record:', insertError);
         // Continue anyway - we don't want to block the user flow
       }
 
       // Update reservation status if applicable
       if (reservationId) {
-        await supabase
-          .from('reservations')
-          .update({
-            status: 'paid',
-            payment_status: 'completed',
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', reservationId);
+        await execute(
+          `UPDATE reservations 
+           SET status = 'paid', payment_status = 'completed', updated_at = NOW()
+           WHERE id = $1`,
+          [reservationId]
+        );
       }
     } else {
       // Store failed payment attempt
-      await supabase
-        .from('payments')
-        .insert({
-          project_id: projectId,
-          transaction_no: transactionNo,
-          status: 'failed',
-          error_code: result.errorCode,
-          error_message: result.errorMessage,
-          kiosk_id: kioskId || null,
-          reservation_id: reservationId || null,
-          raw_response: result.rawParams,
-        });
+      try {
+        await execute(
+          `INSERT INTO payments (
+            project_id, transaction_no, status, error_code, error_message,
+            kiosk_id, reservation_id, raw_response
+          ) VALUES ($1, $2, 'failed', $3, $4, $5, $6, $7)`,
+          [
+            projectId,
+            transactionNo,
+            result.errorCode,
+            result.errorMessage,
+            kioskId || null,
+            reservationId || null,
+            JSON.stringify(result.rawParams),
+          ]
+        );
+      } catch (insertError) {
+        console.error('Error storing failed payment record:', insertError);
+      }
     }
   } catch (error) {
     console.error('Error processing payment callback:', error);

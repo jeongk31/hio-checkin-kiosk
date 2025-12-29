@@ -1,12 +1,16 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { createClient } from '@/lib/supabase/client';
-import { KioskContent, Project } from '@/types/database';
+import { KioskContent } from '@/types/database';
+
+interface SimpleProject {
+  id: string;
+  name: string;
+}
 
 interface ContentEditorProps {
   initialContent: KioskContent[];
-  projects: Project[] | null;
+  projects: SimpleProject[] | null;
   defaultProjectId: string | null;
   isSuperAdmin: boolean;
 }
@@ -143,7 +147,6 @@ export default function ContentEditor({
   const [projectId, setProjectId] = useState(defaultProjectId || '');
   const [saving, setSaving] = useState<string | null>(null);
   const [savedKeys, setSavedKeys] = useState<Set<string>>(new Set());
-  const supabase = createClient();
 
   // Convert content array to map
   useEffect(() => {
@@ -155,16 +158,19 @@ export default function ContentEditor({
   }, [initialContent]);
 
   const loadContent = async (pid: string) => {
-    const { data } = await supabase
-      .from('kiosk_content')
-      .select('*')
-      .eq('project_id', pid);
-
-    const contentMap: Record<string, KioskContent> = {};
-    (data || []).forEach(item => {
-      contentMap[item.content_key] = item;
-    });
-    setContent(contentMap);
+    try {
+      const response = await fetch(`/api/content?projectId=${pid}`);
+      if (response.ok) {
+        const data = await response.json();
+        const contentMap: Record<string, KioskContent> = {};
+        (data.content || []).forEach((item: KioskContent) => {
+          contentMap[item.content_key] = item;
+        });
+        setContent(contentMap);
+      }
+    } catch (error) {
+      console.error('Error loading content:', error);
+    }
   };
 
   useEffect(() => {
@@ -350,7 +356,7 @@ function ContentSection({ section, content, onSave, saving, savedKeys }: Content
           <ContentField
             key={field.key}
             field={field}
-            currentValue={content[field.key]?.content_value}
+            currentValue={content[field.key]?.content_value ?? undefined}
             onSave={onSave}
             saving={saving === field.key}
             saved={savedKeys.has(field.key)}

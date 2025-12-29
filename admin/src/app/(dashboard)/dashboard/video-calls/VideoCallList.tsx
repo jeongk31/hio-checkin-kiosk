@@ -1,7 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { createClient } from '@/lib/supabase/client';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { VideoSession } from '@/types/database';
 
 interface VideoCallListProps {
@@ -19,36 +18,36 @@ export default function VideoCallList({
 }: VideoCallListProps) {
   const [waitingSessions, setWaitingSessions] = useState(initialWaitingSessions);
   const [sessions, setSessions] = useState(initialSessions);
-  const supabase = createClient();
+  const lastCheckRef = useRef<string>(new Date().toISOString());
 
-  // Subscribe to real-time updates
-  useEffect(() => {
-    const channel = supabase
-      .channel('video_sessions')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'video_sessions' },
-        (payload) => {
-          if (payload.eventType === 'INSERT') {
-            // Reload to get full kiosk data
-            window.location.reload();
-          } else if (payload.eventType === 'UPDATE') {
-            const updated = payload.new as VideoSession;
-            setWaitingSessions((prev) =>
-              prev.filter((s) => s.id !== updated.id)
-            );
-            setSessions((prev) =>
-              prev.map((s) => (s.id === updated.id ? { ...s, ...updated } : s))
-            );
-          }
+  // Poll for real-time updates
+  const fetchUpdates = useCallback(async () => {
+    try {
+      const response = await fetch(`/api/video-sessions?since=${encodeURIComponent(lastCheckRef.current)}`);
+      if (response.ok) {
+        const data = await response.json();
+        lastCheckRef.current = new Date().toISOString();
+        
+        if (data.waitingSessions) {
+          setWaitingSessions(data.waitingSessions);
         }
-      )
-      .subscribe();
+        if (data.sessions) {
+          setSessions(data.sessions);
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching video session updates:', error);
+    }
+  }, []);
 
+  useEffect(() => {
+    // Poll every 3 seconds for updates
+    const interval = setInterval(fetchUpdates, 3000);
+    
     return () => {
-      supabase.removeChannel(channel);
+      clearInterval(interval);
     };
-  }, [supabase]);
+  }, [fetchUpdates]);
 
   const handleJoinCall = async (session: VideoSession) => {
     try {

@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { Project } from '@/types/database';
 
 const PROJECT_TYPES = ['호텔', '펜션', '캠핑', 'F&B', '기타'] as const;
 
@@ -11,8 +10,14 @@ interface ProjectSettings {
   location?: string;
 }
 
+interface SimpleProject {
+  id: string;
+  name: string;
+  settings?: Record<string, unknown> | null;
+}
+
 interface ProjectSelectorProps {
-  projects: Project[];
+  projects: SimpleProject[];
   selectedProjectId: string;
   onProjectChange: (projectId: string) => void;
   showAllOption?: boolean;

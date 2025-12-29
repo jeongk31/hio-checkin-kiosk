@@ -1,6 +1,12 @@
-import { createServiceClient } from '@/lib/supabase/server';
+import { queryOne, execute } from '@/lib/db';
 import { getCurrentProfile } from '@/lib/auth';
 import { NextResponse } from 'next/server';
+
+interface Kiosk {
+  id: string;
+  project_id: string;
+  profile_id: string | null;
+}
 
 export async function POST(request: Request) {
   try {
@@ -21,16 +27,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Kiosk ID is required' }, { status: 400 });
     }
 
-    const supabase = await createServiceClient();
-
     // Get the kiosk to verify permissions
-    const { data: kiosk, error: kioskError } = await supabase
-      .from('kiosks')
-      .select('*, profile:profiles(*)')
-      .eq('id', kioskId)
-      .single();
+    const kiosk = await queryOne<Kiosk>(
+      'SELECT id, project_id, profile_id FROM kiosks WHERE id = $1',
+      [kioskId]
+    );
 
-    if (kioskError || !kiosk) {
+    if (!kiosk) {
       return NextResponse.json({ error: 'Kiosk not found' }, { status: 404 });
     }
 
@@ -39,27 +42,22 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Cannot logout kiosks from other projects' }, { status: 403 });
     }
 
-    // Send logout signal via Supabase Realtime broadcast
-    const channel = supabase.channel(`kiosk-control-${kioskId}`);
-    await channel.subscribe();
-    await channel.send({
-      type: 'broadcast',
-      event: 'logout',
-      payload: { timestamp: new Date().toISOString() },
-    });
-    await supabase.removeChannel(channel);
-
     // Update kiosk status to offline
-    await supabase
-      .from('kiosks')
-      .update({
-        status: 'offline',
-        last_seen: new Date().toISOString()
-      })
-      .eq('id', kioskId);
+    // The kiosk will detect this status change through polling
+    await execute(
+      `UPDATE kiosks 
+       SET status = 'offline', last_seen = NOW()
+       WHERE id = $1`,
+      [kioskId]
+    );
 
-    // If the kiosk has an associated profile, sign them out by clearing their session
-    // (The kiosk will handle its own logout on the client side upon receiving the signal)
+    // If the kiosk has an associated profile, sign them out by deleting their session
+    if (kiosk.profile_id) {
+      await execute(
+        'DELETE FROM sessions WHERE user_id IN (SELECT user_id FROM profiles WHERE id = $1)',
+        [kiosk.profile_id]
+      );
+    }
 
     return NextResponse.json({ success: true });
   } catch (error) {

@@ -3,6 +3,9 @@ import { getCurrentProfile } from '@/lib/auth';
 import TopBar from '@/components/TopBar';
 import VoiceCallWrapper from '@/components/voice-call/VoiceCallWrapper';
 
+// Force dynamic rendering to prevent hydration issues
+export const dynamic = 'force-dynamic';
+
 export default async function DashboardLayout({
   children,
 }: {
@@ -16,7 +19,7 @@ export default async function DashboardLayout({
 
   // Kiosk accounts shouldn't access admin dashboard
   if (profile.role === 'kiosk') {
-    redirect('/login?error=Access denied');
+    redirect('/login?error=Access%20denied');
   }
 
   return (

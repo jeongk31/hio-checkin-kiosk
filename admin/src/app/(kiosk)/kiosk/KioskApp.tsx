@@ -1,15 +1,228 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { Kiosk } from '@/types/database';
-import { createClient } from '@/lib/supabase/client';
 import {
   launchPayment,
   generateTransactionNo,
   EasyCheckPaymentRequest,
 } from '@/lib/easycheck';
+
+// Helper functions to use fetch API for database operations
+async function updateKiosk(kioskId: string, updates: Record<string, unknown>): Promise<boolean> {
+  try {
+    const response = await fetch('/api/kiosks', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: kioskId, ...updates }),
+      credentials: 'include',
+    });
+    if (response.status === 401 && typeof window !== 'undefined') {
+      window.location.href = '/login';
+      return false;
+    }
+    return response.ok;
+  } catch (error) {
+    console.error('Error updating kiosk:', error);
+    return false;
+  }
+}
+
+async function createVideoSession(data: {
+  kiosk_id: string;
+  project_id: string;
+  room_name: string;
+  status: string;
+  caller_type: string;
+}): Promise<{ id: string; room_name: string } | null> {
+  try {
+    const response = await fetch('/api/video-sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+      credentials: 'include',
+    });
+    
+    if (response.status === 401) {
+      console.error('[Kiosk] Unauthorized: Session expired or invalid');
+      // Redirect to login if session expired
+      if (typeof window !== 'undefined') {
+        window.location.href = '/login';
+      }
+      return null;
+    }
+    
+    if (response.ok) {
+      const result = await response.json();
+      return result.session;
+    }
+    
+    // Log error details
+    const errorText = await response.text();
+    console.error('[Kiosk] Failed to create video session:', response.status, errorText);
+    return null;
+  } catch (error) {
+    console.error('Error creating video session:', error);
+    return null;
+  }
+}
+
+async function updateVideoSession(id: string, updates: Record<string, unknown>): Promise<boolean> {
+  try {
+    const response = await fetch('/api/video-sessions', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, ...updates }),
+      credentials: 'include',
+    });
+    if (response.status === 401 && typeof window !== 'undefined') {
+      window.location.href = '/login';
+      return false;
+    }
+    return response.ok;
+  } catch (error) {
+    console.error('Error updating video session:', error);
+    return false;
+  }
+}
+
+// Helper to poll for control commands
+async function pollControlCommands(): Promise<{ command: string; payload: Record<string, unknown> }[]> {
+  try {
+    const response = await fetch('/api/kiosk-control', {
+      credentials: 'include',
+    });
+    if (response.status === 401 && typeof window !== 'undefined') {
+      window.location.href = '/login';
+      return [];
+    }
+    if (response.ok) {
+      const data = await response.json();
+      return data.commands || [];
+    }
+    return [];
+  } catch (error) {
+    console.error('Error polling control commands:', error);
+    return [];
+  }
+}
+
+// Helper to poll for incoming calls from manager
+async function pollIncomingCalls(kioskId: string): Promise<{ id: string; room_name: string } | null> {
+  try {
+    const response = await fetch(`/api/video-sessions?status=waiting&caller_type=manager&kiosk_id=${kioskId}`, {
+      credentials: 'include',
+    });
+    if (response.status === 401 && typeof window !== 'undefined') {
+      window.location.href = '/login';
+      return null;
+    }
+    if (response.ok) {
+      const data = await response.json();
+      const sessions = data.sessions || [];
+      return sessions[0] || null;
+    }
+    return null;
+  } catch (error) {
+    console.error('Error polling incoming calls:', error);
+    return null;
+  }
+}
+
+// Helper to upload screen frame
+async function uploadScreenFrame(frameData: string): Promise<boolean> {
+  try {
+    const response = await fetch('/api/kiosk-screen', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ frameData }),
+      credentials: 'include',
+    });
+    if (response.status === 401 && typeof window !== 'undefined') {
+      window.location.href = '/login';
+      return false;
+    }
+    return response.ok;
+  } catch (error) {
+    console.error('Error uploading screen frame:', error);
+    return false;
+  }
+}
+
+// Signaling message types for WebRTC
+type SignalingMessage =
+  | { type: 'offer'; sdp: string }
+  | { type: 'answer'; sdp: string }
+  | { type: 'ice-candidate'; candidate: RTCIceCandidateInit }
+  | { type: 'call-answered' }
+  | { type: 'call-ended'; reason: 'declined' | 'ended' | 'timeout' | 'error' };
+
+// Polling-based signaling channel (replaces Supabase Realtime)
+class SignalingChannel {
+  private sessionId: string;
+  private pollInterval: ReturnType<typeof setInterval> | null = null;
+  private messageHandler: ((msg: SignalingMessage) => void) | null = null;
+  private lastMessageId: number = 0;
+
+  constructor(sessionId: string) {
+    this.sessionId = sessionId;
+  }
+
+  onMessage(handler: (msg: SignalingMessage) => void) {
+    this.messageHandler = handler;
+  }
+
+  async subscribe(): Promise<void> {
+    // Start polling for messages
+    this.pollInterval = setInterval(async () => {
+      try {
+        const response = await fetch(`/api/signaling?sessionId=${this.sessionId}&lastId=${this.lastMessageId}`, {
+          credentials: 'include',
+        });
+        if (response.status === 401 && typeof window !== 'undefined') {
+          window.location.href = '/login';
+          return;
+        }
+        if (response.ok) {
+          const data = await response.json();
+          if (data.messages && Array.isArray(data.messages)) {
+            for (const msg of data.messages) {
+              this.lastMessageId = Math.max(this.lastMessageId, msg.id);
+              if (this.messageHandler) {
+                this.messageHandler(msg.payload);
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.error('[Signaling] Poll error:', error);
+      }
+    }, 500);
+  }
+
+  async send(payload: SignalingMessage): Promise<void> {
+    try {
+      await fetch('/api/signaling', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: this.sessionId, payload }),
+        credentials: 'include',
+      });
+    } catch (error) {
+      console.error('[Signaling] Send error:', error);
+    }
+  }
+
+  close() {
+    if (this.pollInterval) {
+      clearInterval(this.pollInterval);
+      this.pollInterval = null;
+    }
+    this.messageHandler = null;
+  }
+}
 
 // Payment result from URL callback
 interface PaymentResult {
@@ -185,7 +398,6 @@ export default function KioskApp({ kiosk, content, paymentResult }: KioskAppProp
   const [incomingCallSession, setIncomingCallSession] = useState<{ id: string; room_name: string } | null>(null);
   const [showIncomingCall, setShowIncomingCall] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
-  const supabase = useMemo(() => createClient(), []);
 
   // Handle payment result from URL callback (returned from EasyCheck app)
   useEffect(() => {
@@ -208,105 +420,74 @@ export default function KioskApp({ kiosk, content, paymentResult }: KioskAppProp
     }
   }, [paymentResult, router]);
 
-  // Listen for remote logout signal from admin
-  const controlChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
-
+  // Poll for remote logout/control signals from admin
   useEffect(() => {
     if (!kiosk) return;
 
-    // Reuse existing channel if available (handles StrictMode remount)
-    if (controlChannelRef.current) {
-      return;
-    }
+    let isActive = true;
 
-    const channelName = `kiosk-control-${kiosk.id}`;
-    const channel = supabase.channel(channelName);
-    controlChannelRef.current = channel;
+    const pollControls = async () => {
+      if (!isActive) return;
+      
+      const commands = await pollControlCommands();
+      for (const cmd of commands) {
+        if (cmd.command === 'logout') {
+          console.log('Remote logout signal received');
+          window.location.href = '/api/auth/logout';
+          return;
+        }
+      }
+    };
 
-    channel
-      .on('broadcast', { event: 'logout' }, () => {
-        console.log('Remote logout signal received');
-        // Redirect to logout endpoint
-        router.push('/api/auth/logout');
-      })
-      .subscribe((status) => {
-        console.log('Control channel status:', status);
-      });
+    // Poll every 2 seconds
+    const interval = setInterval(pollControls, 2000);
+    pollControls(); // Initial poll
 
     return () => {
-      // Delay cleanup to handle StrictMode double-mount
-      const channelToRemove = controlChannelRef.current;
-      controlChannelRef.current = null;
-      setTimeout(() => {
-        if (controlChannelRef.current === null && channelToRemove) {
-          supabase.removeChannel(channelToRemove);
-        }
-      }, 100);
+      isActive = false;
+      clearInterval(interval);
     };
-  }, [kiosk, supabase, router]);
+  }, [kiosk, router]);
 
-  // Listen for incoming calls from manager via broadcast
-  const incomingCallChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
-
+  // Poll for incoming calls from manager
   useEffect(() => {
     if (!kiosk) return;
 
-    // Reuse existing channel if available (handles StrictMode remount)
-    if (incomingCallChannelRef.current) {
-      return;
-    }
+    let isActive = true;
+    let lastSeenSessionId: string | null = null;
 
-    const channelName = `kiosk-incoming-call-${kiosk.id}`;
-    console.log('[Kiosk] Subscribing to incoming call channel:', channelName);
-    const channel = supabase.channel(channelName);
-    incomingCallChannelRef.current = channel;
+    const pollCalls = async () => {
+      if (!isActive) return;
+      
+      const session = await pollIncomingCalls(kiosk.id);
+      if (session && session.id !== lastSeenSessionId) {
+        console.log('[Kiosk] Incoming call from manager:', session);
+        lastSeenSessionId = session.id;
+        setIncomingCallSession({ id: session.id, room_name: session.room_name });
+        setShowIncomingCall(true);
+      }
+    };
 
-    channel
-      .on('broadcast', { event: 'incoming-call' }, ({ payload }) => {
-        console.log('[Kiosk] Received broadcast:', payload);
-        const session = payload.session as { id: string; room_name: string; caller_type: string; status: string };
-        if (session && session.caller_type === 'manager' && session.status === 'waiting') {
-          console.log('[Kiosk] Showing incoming call from manager:', session);
-          setIncomingCallSession({ id: session.id, room_name: session.room_name });
-          setShowIncomingCall(true);
-        }
-      })
-      .subscribe((status) => {
-        console.log('[Kiosk] Incoming calls channel status:', status);
-      });
+    // Poll every 2 seconds
+    const interval = setInterval(pollCalls, 2000);
+    pollCalls(); // Initial poll
 
     return () => {
-      // Delay cleanup to handle StrictMode double-mount
-      const channelToRemove = incomingCallChannelRef.current;
-      incomingCallChannelRef.current = null;
-      setTimeout(() => {
-        if (incomingCallChannelRef.current === null && channelToRemove) {
-          console.log('[Kiosk] Unsubscribing from incoming call channel');
-          supabase.removeChannel(channelToRemove);
-        }
-      }, 100);
+      isActive = false;
+      clearInterval(interval);
     };
-  }, [kiosk, supabase]);
+  }, [kiosk]);
 
-  // Live preview via modern-screenshot + Supabase Realtime
-  const streamChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  // Screen capture and upload for live preview
   const captureIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     if (!kiosk) return;
 
-    // Reuse existing channel if available (handles StrictMode remount)
-    if (streamChannelRef.current) {
-      return;
-    }
-
-    const channelName = `kiosk-stream-${kiosk.id}`;
-    const channel = supabase.channel(channelName);
-    streamChannelRef.current = channel;
     let isCapturing = false;
     let isActive = true;
 
-    const captureAndBroadcast = async () => {
+    const captureAndUpload = async () => {
       if (!containerRef.current || isCapturing || !isActive) return;
       isCapturing = true;
 
@@ -321,12 +502,8 @@ export default function KioskApp({ kiosk, content, paymentResult }: KioskAppProp
         });
 
         if (isActive && dataUrl) {
-          // Broadcast to viewers
-          channel.send({
-            type: 'broadcast',
-            event: 'screen-update',
-            payload: { imageData: dataUrl },
-          });
+          // Upload to server via API
+          await uploadScreenFrame(dataUrl);
         }
       } catch {
         // Don't log every error to avoid console spam
@@ -336,16 +513,10 @@ export default function KioskApp({ kiosk, content, paymentResult }: KioskAppProp
       }
     };
 
-    // Subscribe to channel first
-    channel.subscribe((status) => {
-      console.log('Stream channel status:', status);
-      if (status === 'SUBSCRIBED' && isActive) {
-        console.log('Kiosk broadcasting on channel:', channelName);
-        // Start capturing after subscribed
-        captureAndBroadcast();
-        captureIntervalRef.current = setInterval(captureAndBroadcast, 500); // 2fps
-      }
-    });
+    // Start capturing
+    console.log('Kiosk screen capture started');
+    captureAndUpload();
+    captureIntervalRef.current = setInterval(captureAndUpload, 500); // 2fps
 
     return () => {
       isActive = false;
@@ -353,14 +524,6 @@ export default function KioskApp({ kiosk, content, paymentResult }: KioskAppProp
         clearInterval(captureIntervalRef.current);
         captureIntervalRef.current = null;
       }
-      // Delay cleanup to handle StrictMode double-mount
-      const channelToRemove = streamChannelRef.current;
-      streamChannelRef.current = null;
-      setTimeout(() => {
-        if (streamChannelRef.current === null && channelToRemove) {
-          supabase.removeChannel(channelToRemove);
-        }
-      }, 100);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kiosk?.id]);
@@ -370,20 +533,16 @@ export default function KioskApp({ kiosk, content, paymentResult }: KioskAppProp
     const newInputData = { ...inputData, ...data };
     setInputData(newInputData);
     if (kiosk) {
-      supabase
-        .from('kiosks')
-        .update({
-          settings: {
-            ...kiosk.settings,
-            inputData: newInputData
-          }
-        })
-        .eq('id', kiosk.id)
-        .then(({ error }) => {
-          if (error) console.error('Error syncing input data:', error);
-        });
+      updateKiosk(kiosk.id, {
+        settings: {
+          ...kiosk.settings,
+          inputData: newInputData
+        }
+      }).then((success) => {
+        if (!success) console.error('Error syncing input data');
+      });
     }
-  }, [inputData, kiosk, supabase]);
+  }, [inputData, kiosk]);
 
   // Set kiosk status to online when app loads
   // Use a ref to track mount state and debounce offline to handle React StrictMode
@@ -404,7 +563,7 @@ export default function KioskApp({ kiosk, content, paymentResult }: KioskAppProp
       offlineTimeoutRef.current = null;
     }
 
-    const updateStatus = async (status: 'online' | 'offline') => {
+    const setKioskStatus = async (status: 'online' | 'offline') => {
       const updates: Record<string, unknown> = {
         status,
         last_seen: new Date().toISOString(),
@@ -413,31 +572,26 @@ export default function KioskApp({ kiosk, content, paymentResult }: KioskAppProp
         updates.current_screen = 'start';
       }
 
-      const { error } = await supabase
-        .from('kiosks')
-        .update(updates)
-        .eq('id', kiosk.id);
-
-      if (error) {
-        console.error(`Error setting kiosk ${status}:`, error);
+      const success = await updateKiosk(kiosk.id, updates);
+      if (!success) {
+        console.error(`Error setting kiosk ${status}`);
       } else {
         console.log(`Kiosk ${kiosk.id} set to ${status}`);
       }
     };
 
     // Set online immediately
-    updateStatus('online');
+    setKioskStatus('online');
 
     // Update last_seen frequently (every 10 seconds)
     const interval = setInterval(() => {
       if (isMountedRef.current) {
-        supabase
-          .from('kiosks')
-          .update({ last_seen: new Date().toISOString(), status: 'online' })
-          .eq('id', kiosk.id)
-          .then(({ error }) => {
-            if (error) console.error('Error updating last_seen:', error);
-          });
+        updateKiosk(kiosk.id, { 
+          last_seen: new Date().toISOString(), 
+          status: 'online' 
+        }).then((success) => {
+          if (!success) console.error('Error updating last_seen');
+        });
       }
     }, 10000); // Every 10 seconds
 
@@ -448,7 +602,7 @@ export default function KioskApp({ kiosk, content, paymentResult }: KioskAppProp
       // Only set offline if component doesn't remount within 100ms
       offlineTimeoutRef.current = setTimeout(() => {
         if (!isMountedRef.current) {
-          updateStatus('offline');
+          setKioskStatus('offline');
         }
       }, 100);
     };
@@ -478,15 +632,11 @@ export default function KioskApp({ kiosk, content, paymentResult }: KioskAppProp
       if (screenName === 'start') {
         updates.settings = { ...kiosk.settings, inputData: {} };
       }
-      supabase
-        .from('kiosks')
-        .update(updates)
-        .eq('id', kiosk.id)
-        .then(({ error }) => {
-          if (error) console.error('Error updating current_screen:', error);
-        });
+      updateKiosk(kiosk.id, updates).then((success) => {
+        if (!success) console.error('Error updating current_screen');
+      });
     }
-  }, [kiosk, supabase]);
+  }, [kiosk]);
 
   const openStaffModal = useCallback(async () => {
     // Reset call state
@@ -494,65 +644,55 @@ export default function KioskApp({ kiosk, content, paymentResult }: KioskAppProp
     setStaffCallDuration(0);
     setIsStaffModalOpen(true);
     // Create video session for staff call (only if kiosk exists)
-    if (kiosk) {
-      const roomName = `voice-${kiosk.id}-${Date.now()}`;
-      console.log('[Kiosk] Creating video session:', { kiosk_id: kiosk.id, project_id: kiosk.project_id, roomName });
-      const { data: session, error } = await supabase.from('video_sessions').insert({
-        kiosk_id: kiosk.id,
-        project_id: kiosk.project_id,
-        room_name: roomName,
-        status: 'waiting',
-        caller_type: 'kiosk',
-      }).select().single();
-
-      if (error) {
-        console.error('[Kiosk] Failed to create video session:', error);
-      } else if (session) {
-        console.log('[Kiosk] Video session created successfully:', session);
-        setCurrentSessionId(session.id);
-
-        // Broadcast the incoming call to the super admin channel
-        // Super admin listens on this channel to receive calls from all kiosks
-        const superAdminChannel = 'voice-calls-super-admin';
-        console.log('[Kiosk] Broadcasting incoming call to super admin channel:', superAdminChannel);
-        console.log('[Kiosk] Session data:', JSON.stringify(session));
-
-        const broadcastChannel = supabase.channel(superAdminChannel);
-        broadcastChannel.subscribe(async (status) => {
-          console.log('[Kiosk] Broadcast channel status:', status);
-          if (status === 'SUBSCRIBED') {
-            // Small delay to ensure manager is ready to receive
-            await new Promise(resolve => setTimeout(resolve, 100));
-
-            const result = await broadcastChannel.send({
-              type: 'broadcast',
-              event: 'incoming-call',
-              payload: { session },
-            });
-            console.log('[Kiosk] Incoming call broadcast result:', result);
-
-            // Cleanup broadcast channel after sending
-            setTimeout(() => {
-              supabase.removeChannel(broadcastChannel);
-              console.log('[Kiosk] Broadcast channel cleaned up');
-            }, 1000);
-          }
-        });
-      }
+    if (!kiosk) {
+      console.error('[Kiosk] Cannot create video session: kiosk object not available');
+      setError('키오스크 정보를 찾을 수 없습니다');
+      setIsStaffModalOpen(false);
+      return;
     }
-  }, [kiosk, supabase]);
+    
+    // Validate kiosk has required fields
+    if (!kiosk.id || !kiosk.project_id) {
+      console.error('[Kiosk] Cannot create video session: missing required kiosk fields', {
+        kiosk_id: kiosk.id,
+        project_id: kiosk.project_id
+      });
+      setError('키오스크 설정이 불완전합니다');
+      setIsStaffModalOpen(false);
+      return;
+    }
+    
+    const roomName = `voice-${kiosk.id}-${Date.now()}`;
+    console.log('[Kiosk] Creating video session:', { kiosk_id: kiosk.id, project_id: kiosk.project_id, roomName });
+    const session = await createVideoSession({
+      kiosk_id: kiosk.id,
+      project_id: kiosk.project_id,
+      room_name: roomName,
+      status: 'waiting',
+      caller_type: 'kiosk',
+    });
+
+    if (!session) {
+      console.error('[Kiosk] Failed to create video session');
+    } else {
+      console.log('[Kiosk] Video session created successfully:', session);
+      setCurrentSessionId(session.id);
+      // Manager will poll for waiting sessions via API
+      console.log('[Kiosk] Video session ready for manager to pick up');
+    }
+  }, [kiosk]);
 
   const closeStaffModal = useCallback(async () => {
     // Update session status if we have one
     if (currentSessionId) {
-      await supabase.from('video_sessions').update({
+      await updateVideoSession(currentSessionId, {
         status: 'ended',
         ended_at: new Date().toISOString(),
-      }).eq('id', currentSessionId);
+      });
     }
     setIsStaffModalOpen(false);
     setCurrentSessionId(null);
-  }, [currentSessionId, supabase]);
+  }, [currentSessionId]);
 
   // Common call props for TopButtonRow in all screens
   // Handler to close incoming call - sets status to 'ended' which triggers cleanup in IncomingCallFromManager
@@ -717,19 +857,17 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
   const setCallDuration = onCallDurationChange;
   const [error, setError] = useState<string | null>(null);
 
-  const supabaseRef = useRef(createClient());
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
-  const channelRef = useRef<ReturnType<typeof supabaseRef.current.channel> | null>(null);
+  const signalingChannelRef = useRef<SignalingChannel | null>(null);
   const durationIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const durationCounterRef = useRef(0); // Track duration for interval updates
+  const durationCounterRef = useRef(0);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
   const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
 
   // Cleanup function
   const cleanup = useCallback(() => {
-    // Clear timers
     if (durationIntervalRef.current) {
       clearInterval(durationIntervalRef.current);
       durationIntervalRef.current = null;
@@ -738,22 +876,12 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
       clearTimeout(timeoutRef.current);
       timeoutRef.current = null;
     }
-
-    // Stop local tracks
     localStreamRef.current?.getTracks().forEach((track) => track.stop());
     localStreamRef.current = null;
-
-    // Close peer connection
     peerConnectionRef.current?.close();
     peerConnectionRef.current = null;
-
-    // Remove channel
-    if (channelRef.current) {
-      supabaseRef.current.removeChannel(channelRef.current);
-      channelRef.current = null;
-    }
-
-    // Clear pending candidates
+    signalingChannelRef.current?.close();
+    signalingChannelRef.current = null;
     pendingCandidatesRef.current = [];
   }, []);
 
@@ -761,11 +889,24 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
   useEffect(() => {
     if (!isOpen || !sessionId) return;
 
-    const supabase = supabaseRef.current;
     let isActive = true;
 
     const setupCall = async () => {
       try {
+        // Check if we're in a browser environment
+        if (typeof window === 'undefined' || typeof navigator === 'undefined') {
+          console.log('Not in browser environment, skipping call setup');
+          return;
+        }
+
+        // Check if getUserMedia is supported
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          console.warn('getUserMedia not supported in this browser');
+          setError('이 브라우저는 음성 통화를 지원하지 않습니다');
+          setCallStatus('failed');
+          return;
+        }
+
         // Get microphone access
         const stream = await navigator.mediaDevices.getUserMedia({
           audio: { echoCancellation: true, noiseSuppression: true },
@@ -787,22 +928,15 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
         });
 
         // Setup signaling channel
-        const channelName = `voice-call-${sessionId}`;
-        console.log('[Kiosk] Setting up signaling channel:', channelName);
-        const channel = supabase.channel(channelName);
-        channelRef.current = channel;
+        console.log('[Kiosk] Setting up signaling channel for session:', sessionId);
+        const signalingChannel = new SignalingChannel(sessionId);
+        signalingChannelRef.current = signalingChannel;
 
         // Handle ICE candidates
         pc.onicecandidate = (event) => {
-          if (event.candidate && channel) {
+          if (event.candidate && signalingChannelRef.current) {
             console.log('[Kiosk] Sending ICE candidate');
-            channel.send({
-              type: 'broadcast',
-              event: 'signaling',
-              payload: { type: 'ice-candidate', candidate: event.candidate.toJSON() },
-            });
-          } else if (!event.candidate) {
-            console.log('[Kiosk] ICE gathering complete');
+            signalingChannelRef.current.send({ type: 'ice-candidate', candidate: event.candidate.toJSON() });
           }
         };
 
@@ -824,7 +958,6 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
             case 'connected':
               console.log('[Kiosk] Call connected!');
               setCallStatus('connected');
-              // Start duration timer
               durationCounterRef.current = 0;
               durationIntervalRef.current = setInterval(() => {
                 durationCounterRef.current += 1;
@@ -840,34 +973,19 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
           }
         };
 
-        // Handle ICE connection state
-        pc.oniceconnectionstatechange = () => {
-          console.log('[Kiosk] ICE connection state:', pc.iceConnectionState);
-        };
-
-        // Handle ICE gathering state
-        pc.onicegatheringstatechange = () => {
-          console.log('[Kiosk] ICE gathering state:', pc.iceGatheringState);
-        };
-
-        // Listen for signaling messages (inline handler with direct access to pc and channel)
-        channel.on('broadcast', { event: 'signaling' }, async ({ payload }) => {
-          console.log('[Kiosk] 📥 Received signaling message:', payload.type, payload);
+        // Listen for signaling messages
+        signalingChannel.onMessage(async (payload) => {
+          console.log('[Kiosk] 📥 Received signaling message:', payload.type);
           if (!isActive) return;
 
-          if (payload.type === 'answer' && payload.sdp) {
+          if (payload.type === 'answer' && 'sdp' in payload) {
             console.log('[Kiosk] Setting remote description from answer');
             await pc.setRemoteDescription({ type: 'answer', sdp: payload.sdp });
-            console.log('[Kiosk] Remote description set, ICE connection state:', pc.iceConnectionState);
-            // Add pending ICE candidates
             for (const candidate of pendingCandidatesRef.current) {
-              console.log('[Kiosk] Adding pending ICE candidate');
               await pc.addIceCandidate(candidate);
             }
             pendingCandidatesRef.current = [];
-            // Don't set 'connecting' here - onconnectionstatechange will handle status updates
-            // Setting it here can overwrite 'connected' if connection established quickly
-          } else if (payload.type === 'ice-candidate' && payload.candidate) {
+          } else if (payload.type === 'ice-candidate' && 'candidate' in payload) {
             if (pc.remoteDescription) {
               await pc.addIceCandidate(payload.candidate);
             } else {
@@ -876,24 +994,17 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
           } else if (payload.type === 'call-answered') {
             console.log('[Kiosk] Manager answered the call!');
             setCallStatus('connecting');
-            // Clear timeout since call was answered
             if (timeoutRef.current) {
               clearTimeout(timeoutRef.current);
               timeoutRef.current = null;
             }
-            // Create and send offer now that manager is ready
-            console.log('[Kiosk] PC signaling state:', pc.signalingState);
+            // Create and send offer
             if (pc.signalingState === 'stable') {
               try {
                 const offer = await pc.createOffer();
                 await pc.setLocalDescription(offer);
                 console.log('[Kiosk] 📤 Sending offer to manager');
-                channel.send({
-                  type: 'broadcast',
-                  event: 'signaling',
-                  payload: { type: 'offer', sdp: offer.sdp },
-                });
-                console.log('[Kiosk] Offer sent');
+                signalingChannel.send({ type: 'offer', sdp: offer.sdp! });
               } catch (err) {
                 console.error('[Kiosk] Failed to create/send offer:', err);
               }
@@ -905,25 +1016,24 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
           }
         });
 
-        // Subscribe and wait for manager to answer (don't send offer yet)
-        channel.subscribe((status) => {
-          if (status === 'SUBSCRIBED' && isActive) {
-            console.log('[Kiosk] Signaling channel subscribed, waiting for manager to answer');
-            setCallStatus('ringing');
+        // Subscribe and start polling
+        await signalingChannel.subscribe();
+        console.log('[Kiosk] Signaling channel subscribed, waiting for manager to answer');
+        setCallStatus('ringing');
 
-            // Set timeout for no answer (60 seconds)
-            timeoutRef.current = setTimeout(() => {
-              if (isActive) {
-                setError('응답이 없습니다. 잠시 후 다시 시도해 주세요.');
-                setCallStatus('failed');
-              }
-            }, 60000);
+        // Set timeout for no answer (60 seconds)
+        timeoutRef.current = setTimeout(() => {
+          if (isActive) {
+            setError('응답이 없습니다. 잠시 후 다시 시도해 주세요.');
+            setCallStatus('failed');
           }
-        });
+        }, 60000);
       } catch (err) {
         console.error('Failed to setup call:', err);
         if (err instanceof DOMException && err.name === 'NotAllowedError') {
           setError('마이크 권한이 필요합니다');
+        } else if (err instanceof Error && err.message.includes('지원하지 않습니다')) {
+          setError(err.message);
         } else {
           setError('통화를 시작할 수 없습니다');
         }
@@ -938,7 +1048,7 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
       cleanup();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, sessionId]); // Only re-run when modal opens/closes or sessionId changes
+  }, [isOpen, sessionId]);
 
   // Reset state when modal closes
   useEffect(() => {
@@ -951,12 +1061,8 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
 
   const handleClose = () => {
     // Send end signal if connected
-    if (channelRef.current && (callStatus === 'connected' || callStatus === 'ringing' || callStatus === 'connecting')) {
-      channelRef.current.send({
-        type: 'broadcast',
-        event: 'signaling',
-        payload: { type: 'call-ended', reason: 'ended' },
-      });
+    if (signalingChannelRef.current && (callStatus === 'connected' || callStatus === 'ringing' || callStatus === 'connecting')) {
+      signalingChannelRef.current.send({ type: 'call-ended', reason: 'ended' });
     }
     cleanup();
     onClose();
@@ -1040,11 +1146,10 @@ function IncomingCallFromManager({ session, onClose, callStatus, onCallStatusCha
   const setCallDuration = onCallDurationChange;
   const durationCounterRef = useRef(0);
 
-  const supabaseRef = useRef(createClient());
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
-  const channelRef = useRef<ReturnType<typeof supabaseRef.current.channel> | null>(null);
+  const signalingChannelRef = useRef<SignalingChannel | null>(null);
   const durationIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
 
@@ -1057,22 +1162,32 @@ function IncomingCallFromManager({ session, onClose, callStatus, onCallStatusCha
     localStreamRef.current = null;
     peerConnectionRef.current?.close();
     peerConnectionRef.current = null;
-    if (channelRef.current) {
-      supabaseRef.current.removeChannel(channelRef.current);
-      channelRef.current = null;
-    }
+    signalingChannelRef.current?.close();
+    signalingChannelRef.current = null;
     pendingCandidatesRef.current = [];
   }, []);
 
   // Auto-answer the call
   useEffect(() => {
     console.log('[IncomingCallFromManager] useEffect triggered, session:', session.id);
-    const supabase = supabaseRef.current;
     let isActive = true;
 
     const answerCall = async () => {
       console.log('[IncomingCallFromManager] answerCall starting...');
       try {
+        // Check if we're in a browser environment
+        if (typeof window === 'undefined' || typeof navigator === 'undefined') {
+          console.log('Not in browser environment, skipping call answer');
+          return;
+        }
+
+        // Check if getUserMedia is supported
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          console.warn('getUserMedia not supported in this browser');
+          setError('이 브라우저는 음성 통화를 지원하지 않습니다');
+          setCallStatus('failed');
+          return;
+        }
         // Get microphone
         console.log('[IncomingCallFromManager] Requesting microphone...');
         const stream = await navigator.mediaDevices.getUserMedia({
@@ -1096,19 +1211,14 @@ function IncomingCallFromManager({ session, onClose, callStatus, onCallStatusCha
         });
 
         // Setup signaling channel
-        const channelName = `voice-call-${session.id}`;
-        console.log('[IncomingCallFromManager] Setting up signaling channel:', channelName);
-        const channel = supabase.channel(channelName);
-        channelRef.current = channel;
+        console.log('[IncomingCallFromManager] Setting up signaling channel for session:', session.id);
+        const signalingChannel = new SignalingChannel(session.id);
+        signalingChannelRef.current = signalingChannel;
 
         // Handle ICE candidates
         pc.onicecandidate = (event) => {
-          if (event.candidate && channelRef.current) {
-            channelRef.current.send({
-              type: 'broadcast',
-              event: 'signaling',
-              payload: { type: 'ice-candidate', candidate: event.candidate.toJSON() },
-            });
+          if (event.candidate && signalingChannelRef.current) {
+            signalingChannelRef.current.send({ type: 'ice-candidate', candidate: event.candidate.toJSON() });
           }
         };
 
@@ -1142,39 +1252,25 @@ function IncomingCallFromManager({ session, onClose, callStatus, onCallStatusCha
 
         // Listen for signaling messages
         console.log('[IncomingCallFromManager] Setting up signaling message listener...');
-        channel.on('broadcast', { event: 'signaling' }, async ({ payload }) => {
-          console.log('[IncomingCallFromManager] 📥 Received signaling message:', payload.type, payload);
-          if (!isActive) {
-            console.log('[IncomingCallFromManager] Ignoring - component not active');
-            return;
-          }
+        signalingChannel.onMessage(async (payload) => {
+          console.log('[IncomingCallFromManager] 📥 Received signaling message:', payload.type);
+          if (!isActive) return;
 
-          if (payload.type === 'offer' && payload.sdp) {
-            console.log('[IncomingCallFromManager] Received SDP offer, setting remote description...');
+          if (payload.type === 'offer' && 'sdp' in payload) {
+            console.log('[IncomingCallFromManager] Received SDP offer');
             await pc.setRemoteDescription({ type: 'offer', sdp: payload.sdp });
-            console.log('[IncomingCallFromManager] Remote description set, adding pending candidates:', pendingCandidatesRef.current.length);
-            // Add pending candidates
             for (const candidate of pendingCandidatesRef.current) {
               await pc.addIceCandidate(candidate);
             }
             pendingCandidatesRef.current = [];
-            // Create and send answer
-            console.log('[IncomingCallFromManager] Creating SDP answer...');
             const answer = await pc.createAnswer();
             await pc.setLocalDescription(answer);
-            console.log('[IncomingCallFromManager] Sending SDP answer...');
-            channel.send({
-              type: 'broadcast',
-              event: 'signaling',
-              payload: { type: 'answer', sdp: answer.sdp },
-            });
+            signalingChannel.send({ type: 'answer', sdp: answer.sdp! });
             setCallStatus('connecting');
-          } else if (payload.type === 'ice-candidate' && payload.candidate) {
-            console.log('[IncomingCallFromManager] Received ICE candidate');
+          } else if (payload.type === 'ice-candidate' && 'candidate' in payload) {
             if (pc.remoteDescription) {
               await pc.addIceCandidate(payload.candidate);
             } else {
-              console.log('[IncomingCallFromManager] Queuing ICE candidate');
               pendingCandidatesRef.current.push(payload.candidate);
             }
           } else if (payload.type === 'call-ended') {
@@ -1184,33 +1280,18 @@ function IncomingCallFromManager({ session, onClose, callStatus, onCallStatusCha
           }
         });
 
-        // Subscribe to channel
-        console.log('[IncomingCallFromManager] Subscribing to signaling channel...');
-        channel.subscribe((status) => {
-          console.log('[IncomingCallFromManager] Signaling channel status:', status);
-          if (status === 'SUBSCRIBED' && isActive) {
-            // Small delay to ensure broadcast listener is fully ready before sending call-answered
-            // This prevents the race condition where manager re-sends offer before kiosk's listener is active
-            setTimeout(() => {
-              if (!isActive) return;
-              console.log('[IncomingCallFromManager] 📤 Sending call-answered signal (after 100ms delay)...');
-              // Send call-answered signal
-              channel.send({
-                type: 'broadcast',
-                event: 'signaling',
-                payload: { type: 'call-answered' },
-              });
-              console.log('[IncomingCallFromManager] Updating database status to connected...');
-              // Update database
-              supabase.from('video_sessions').update({
-                status: 'connected',
-              }).eq('id', session.id).then(() => {
-                console.log('[IncomingCallFromManager] Database updated');
-              });
-              setCallStatus('connecting');
-            }, 100);
-          }
-        });
+        // Subscribe to channel and send call-answered signal
+        await signalingChannel.subscribe();
+        console.log('[IncomingCallFromManager] Signaling channel subscribed');
+        
+        // Send call-answered signal after short delay
+        setTimeout(() => {
+          if (!isActive) return;
+          console.log('[IncomingCallFromManager] 📤 Sending call-answered signal');
+          signalingChannel.send({ type: 'call-answered' });
+          updateVideoSession(session.id, { status: 'connected' });
+          setCallStatus('connecting');
+        }, 100);
       } catch (err) {
         console.error('[IncomingCallFromManager] Failed to answer call:', err);
         setCallStatus('failed');
@@ -1218,36 +1299,29 @@ function IncomingCallFromManager({ session, onClose, callStatus, onCallStatusCha
     };
 
     // Auto-answer after short delay
-    console.log('[IncomingCallFromManager] Setting up auto-answer timer (500ms)...');
     const timer = setTimeout(() => {
-      console.log('[IncomingCallFromManager] Timer fired, calling answerCall...');
       answerCall();
     }, 500);
 
     return () => {
-      console.log('[IncomingCallFromManager] Cleanup called');
       isActive = false;
       clearTimeout(timer);
       cleanup();
     };
-  }, [session.id, cleanup]);
+  }, [session.id, cleanup, setCallDuration, setCallStatus]);
 
   // Send call-ended signal and cleanup when status changes to ended or failed
   useEffect(() => {
     if (callStatus === 'ended' || callStatus === 'failed') {
       // Send call-ended signal
-      if (channelRef.current) {
-        channelRef.current.send({
-          type: 'broadcast',
-          event: 'signaling',
-          payload: { type: 'call-ended', reason: callStatus },
-        });
+      if (signalingChannelRef.current) {
+        signalingChannelRef.current.send({ type: 'call-ended', reason: callStatus === 'ended' ? 'ended' : 'error' });
       }
-      // Update database
-      supabaseRef.current.from('video_sessions').update({
+      // Update database via fetch API
+      updateVideoSession(session.id, {
         status: 'ended',
         ended_at: new Date().toISOString(),
-      }).eq('id', session.id).then(() => {});
+      });
       // Cleanup and close after short delay
       const timer = setTimeout(() => {
         cleanup();
@@ -1365,6 +1439,7 @@ function CheckinReservationScreen({
           reservationNumber: reservationNumber.trim(),
           projectId,
         }),
+        credentials: 'include',
       });
 
       const data = await response.json();
@@ -1563,6 +1638,20 @@ function IDVerificationScreen({
 
   const startCamera = async () => {
     try {
+      // Check if we're in a browser environment
+      if (typeof window === 'undefined' || typeof navigator === 'undefined') {
+        console.log('Not in browser environment, skipping camera start');
+        setErrorMessage('브라우저 환경이 감지되지 않았습니다.');
+        setVerificationStep('error');
+        return;
+      }
+
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        console.warn('getUserMedia not supported in this browser');
+        setErrorMessage('이 브라우저는 카메라를 지원하지 않습니다.');
+        setVerificationStep('error');
+        return;
+      }
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
       });
@@ -1724,6 +1813,7 @@ function IDVerificationScreen({
           guestCount,
           signatureName,
         }),
+        credentials: 'include',
       });
 
       const result = await response.json();
@@ -1747,7 +1837,21 @@ function IDVerificationScreen({
           await startCamera();
         }
       } else {
-        setErrorMessage(result.error || '인증에 실패했습니다');
+        // Parse error message for better user experience
+        let errorMsg = result.error || '인증에 실패했습니다';
+        
+        // Check for specific error types
+        if (result.data?.ocrResult?.errorCode === 'O003' || errorMsg.includes('주민등록번호 없음')) {
+          errorMsg = '주민등록증 또는 운전면허증만 인증 가능합니다.\n여권이나 외국인등록증은 지원하지 않습니다.\n다른 신분증을 사용해주세요.';
+        } else if (errorMsg.includes('지원하지 않는 신분증')) {
+          errorMsg = '주민등록증 또는 운전면허증을 사용해주세요.';
+        } else if (errorMsg.includes('안면인증 실패') || errorMsg.includes('얼굴이 일치하지')) {
+          errorMsg = '얼굴이 신분증과 일치하지 않습니다.\n다시 시도해주세요.';
+        } else if (errorMsg.includes('미성년자')) {
+          errorMsg = '만 19세 미만은 체크인이 불가합니다.';
+        }
+        
+        setErrorMessage(errorMsg);
         setVerificationStep('error');
       }
     } catch (error) {
@@ -2113,6 +2217,7 @@ function HotelInfoScreen({
             reservationId: inputData?.reservation?.id,
             reservationNumber: inputData?.reservation?.reservationNumber,
           }),
+          credentials: 'include',
         });
 
         const data = await response.json();

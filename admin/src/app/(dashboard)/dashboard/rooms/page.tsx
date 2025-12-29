@@ -1,7 +1,64 @@
 import { getCurrentProfile } from '@/lib/auth';
-import { createServiceClient } from '@/lib/supabase/server';
+import { query, queryOne } from '@/lib/db';
 import { redirect } from 'next/navigation';
 import RoomManager from './RoomManager';
+
+interface Project {
+  id: string;
+  name: string;
+  is_active: boolean;
+  settings: Record<string, unknown> | null;
+  created_at: string;
+}
+
+interface RoomType {
+  id: string;
+  project_id: string;
+  name: string;
+  description: string | null;
+  base_price: number;
+  max_guests: number;
+  is_active: boolean;
+  image_url: string | null;
+  code: string;
+  display_order: number;
+}
+
+interface Reservation {
+  id: string;
+  project_id: string;
+  room_type_id: string | null;
+  reservation_number: string;
+  guest_name: string | null;
+  guest_phone: string | null;
+  guest_email: string | null;
+  guest_count: number;
+  check_in_date: string;
+  check_out_date: string;
+  room_number: string | null;
+  status: string;
+  source: string | null;
+  notes: string | null;
+  total_price: number | null;
+  room_type?: RoomType;
+  created_at?: string;
+}
+
+interface Room {
+  id: string;
+  project_id: string;
+  room_type_id: string | null;
+  room_number: string;
+  access_type: 'password' | 'card';
+  room_password: string | null;
+  key_box_number: string | null;
+  key_box_password: string | null;
+  status: string;
+  floor: number | null;
+  notes: string | null;
+  is_active: boolean;
+  room_type?: RoomType;
+}
 
 export default async function RoomsPage() {
   const profile = await getCurrentProfile();
@@ -12,66 +69,72 @@ export default async function RoomsPage() {
     redirect('/dashboard');
   }
 
-  const supabase = await createServiceClient();
-
   // For super admin, get all projects to select from
-  let projects = null;
+  let projects: Project[] | null = null;
   if (profile.role === 'super_admin') {
-    const { data } = await supabase
-      .from('projects')
-      .select('*')
-      .eq('is_active', true)
-      .order('name');
-    projects = data;
+    projects = await query<Project>(
+      'SELECT * FROM projects WHERE is_active = true ORDER BY name'
+    );
   }
 
   const targetProjectId = profile.project_id || projects?.[0]?.id;
 
   // Get the current project for settings
-  let currentProject = null;
+  let currentProject: Project | null = null;
   if (targetProjectId) {
-    const { data } = await supabase
-      .from('projects')
-      .select('*')
-      .eq('id', targetProjectId)
-      .single();
-    currentProject = data;
+    currentProject = await queryOne<Project>(
+      'SELECT * FROM projects WHERE id = $1',
+      [targetProjectId]
+    );
   }
 
   // Get room types for the current project
-  let roomTypes = null;
+  let roomTypes: RoomType[] | null = null;
   if (targetProjectId) {
-    const { data } = await supabase
-      .from('room_types')
-      .select('*')
-      .eq('project_id', targetProjectId)
-      .order('display_order');
-    roomTypes = data;
+    roomTypes = await query<RoomType>(
+      'SELECT * FROM room_types WHERE project_id = $1 ORDER BY display_order',
+      [targetProjectId]
+    );
   }
 
   // Get today's reservations only
   const today = new Date().toISOString().split('T')[0];
-  let reservations = null;
+  let reservations: Reservation[] | null = null;
   if (targetProjectId) {
-    const { data } = await supabase
-      .from('reservations')
-      .select('*, room_type:room_types(*)')
-      .eq('project_id', targetProjectId)
-      .eq('check_in_date', today)
-      .order('created_at', { ascending: false })
-      .limit(100);
-    reservations = data;
+    reservations = await query<Reservation>(
+      `SELECT r.*, 
+        json_build_object(
+          'id', rt.id,
+          'project_id', rt.project_id,
+          'name', rt.name,
+          'display_order', rt.display_order
+        ) as room_type
+      FROM reservations r
+      LEFT JOIN room_types rt ON r.room_type_id = rt.id
+      WHERE r.project_id = $1 AND r.check_in_date = $2
+      ORDER BY r.created_at DESC
+      LIMIT 100`,
+      [targetProjectId, today]
+    );
   }
 
   // Get individual rooms
-  let rooms = null;
+  let rooms: Room[] | null = null;
   if (targetProjectId) {
-    const { data } = await supabase
-      .from('rooms')
-      .select('*, room_type:room_types(*)')
-      .eq('project_id', targetProjectId)
-      .order('room_number');
-    rooms = data;
+    rooms = await query<Room>(
+      `SELECT r.*, 
+        json_build_object(
+          'id', rt.id,
+          'project_id', rt.project_id,
+          'name', rt.name,
+          'display_order', rt.display_order
+        ) as room_type
+      FROM rooms r
+      LEFT JOIN room_types rt ON r.room_type_id = rt.id
+      WHERE r.project_id = $1
+      ORDER BY r.room_number`,
+      [targetProjectId]
+    );
   }
 
   return (
@@ -80,7 +143,7 @@ export default async function RoomsPage() {
 
       <RoomManager
         projects={projects}
-        defaultProjectId={targetProjectId}
+        defaultProjectId={targetProjectId || null}
         initialRoomTypes={roomTypes || []}
         initialReservations={reservations || []}
         initialRooms={rooms || []}

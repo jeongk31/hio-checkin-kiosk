@@ -1,14 +1,18 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { createClient } from '@/lib/supabase/client';
-import { Project, Kiosk, KioskContent } from '@/types/database';
-import type { SupabaseClient } from '@supabase/supabase-js';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { Kiosk, KioskContent } from '@/types/database';
 import ProjectSelector from '@/components/ProjectSelector';
 import { useVoiceCallContext } from '@/contexts/VoiceCallContext';
 
+interface SimpleProject {
+  id: string;
+  name: string;
+  is_active?: boolean;
+}
+
 interface KioskManagementProps {
-  projects: Project[];
+  projects: SimpleProject[];
   kiosks: Kiosk[];
   content: KioskContent[];
   isSuperAdmin: boolean;
@@ -56,7 +60,7 @@ export default function KioskManagement({
   isSuperAdmin,
   currentProjectId,
 }: KioskManagementProps) {
-  const [projects] = useState<Project[]>(initialProjects);
+  const [projects] = useState<SimpleProject[]>(initialProjects);
   const [kiosks, setKiosks] = useState<Kiosk[]>(initialKiosks);
   const [selectedProjectId, setSelectedProjectId] = useState<string>(
     isSuperAdmin ? 'all' : (currentProjectId || initialProjects[0]?.id || '')
@@ -65,7 +69,6 @@ export default function KioskManagement({
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
   const [fullscreenKiosk, setFullscreenKiosk] = useState<FullscreenKiosk | null>(null);
   const [gridSize, setGridSize] = useState<GridSize>(2);
-  const supabase = useMemo(() => createClient(), []);
 
   // Update fullscreen image when receiving new frames
   const handleImageUpdate = useCallback((kioskId: string, imageData: string) => {
@@ -80,43 +83,24 @@ export default function KioskManagement({
   const refreshKiosks = useCallback(async () => {
     setIsRefreshing(true);
     try {
-      const { data } = await supabase
-        .from('kiosks')
-        .select('*, project:projects(*), profile:profiles(*)')
-        .order('created_at', { ascending: false });
+      const params = new URLSearchParams();
+      if (selectedProjectId !== 'all') {
+        params.set('projectId', selectedProjectId);
+      }
+      const response = await fetch(`/api/kiosks?${params.toString()}`);
+      const data = await response.json();
 
-      if (data) {
-        setKiosks(data);
+      if (data.kiosks) {
+        setKiosks(data.kiosks);
         setLastRefresh(new Date());
       }
     } catch (error) {
       console.error('Error refreshing kiosks:', error);
     }
     setIsRefreshing(false);
-  }, [supabase]);
+  }, [selectedProjectId]);
 
-  useEffect(() => {
-    const channel = supabase
-      .channel('kiosk-updates')
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'kiosks' },
-        (payload) => {
-          setKiosks((prev) =>
-            prev.map((k) =>
-              k.id === payload.new.id ? { ...k, ...payload.new } : k
-            )
-          );
-          setLastRefresh(new Date());
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [supabase]);
-
+  // Polling for kiosk updates (replaces postgres_changes subscription)
   useEffect(() => {
     const interval = setInterval(refreshKiosks, 3000);
     return () => clearInterval(interval);
@@ -213,7 +197,6 @@ export default function KioskManagement({
               <KioskLivePreview
                 key={kiosk.id}
                 kiosk={kiosk}
-                supabase={supabase}
                 onFullscreen={(imageData) => setFullscreenKiosk({ kiosk, imageData })}
                 onImageUpdate={handleImageUpdate}
                 isSuperAdmin={isSuperAdmin}
@@ -269,13 +252,11 @@ export default function KioskManagement({
 
 function KioskLivePreview({
   kiosk,
-  supabase,
   onFullscreen,
   onImageUpdate,
   isSuperAdmin,
 }: {
   kiosk: Kiosk;
-  supabase: SupabaseClient;
   onFullscreen: (imageData: string) => void;
   onImageUpdate?: (kioskId: string, imageData: string) => void;
   isSuperAdmin: boolean;
@@ -329,29 +310,35 @@ function KioskLivePreview({
     }
   };
 
-  // Always subscribe to the channel - don't depend on DB status
-  // The stream itself is the source of truth for whether kiosk is actually online
+  // Poll for screen frames from API instead of Supabase broadcast
   useEffect(() => {
-    const channelName = `kiosk-stream-${kiosk.id}`;
-    const channel = supabase.channel(channelName);
     let isActive = true;
+    let lastFrameId: string | null = null;
 
-    console.log(`[${kiosk.name}] Subscribing to channel:`, channelName);
-
-    channel
-      .on('broadcast', { event: 'screen-update' }, ({ payload }) => {
-        if (isActive && payload?.imageData) {
-          setScreenImage(payload.imageData);
-          setIsReceiving(true);
-          lastFrameTimeRef.current = Date.now();
-          // Report new image to parent for fullscreen updates
-          onImageUpdate?.(kiosk.id, payload.imageData);
+    const pollScreenFrame = async () => {
+      if (!isActive) return;
+      
+      try {
+        const response = await fetch(`/api/kiosk-screen?kioskId=${kiosk.id}`);
+        if (response.ok) {
+          const data = await response.json();
+          if (data.frame && data.frame.id !== lastFrameId) {
+            lastFrameId = data.frame.id;
+            setScreenImage(data.frame.image_data);
+            setIsReceiving(true);
+            lastFrameTimeRef.current = Date.now();
+            // Report new image to parent for fullscreen updates
+            onImageUpdate?.(kiosk.id, data.frame.image_data);
+          }
         }
-      })
-      .subscribe((status) => {
-        if (!isActive) return; // Don't log after unmount
-        console.log(`[${kiosk.name}] Channel status:`, status);
-      });
+      } catch (error) {
+        console.error(`[${kiosk.name}] Error polling screen frame:`, error);
+      }
+    };
+
+    // Poll every second for screen updates
+    const pollInterval = setInterval(pollScreenFrame, 1000);
+    pollScreenFrame(); // Initial poll
 
     // Reset receiving state if no frames for 5 seconds
     const checkInterval = setInterval(() => {
@@ -362,9 +349,8 @@ function KioskLivePreview({
 
     return () => {
       isActive = false;
+      clearInterval(pollInterval);
       clearInterval(checkInterval);
-      console.log(`[${kiosk.name}] Unsubscribing from channel`);
-      supabase.removeChannel(channel);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kiosk.id, kiosk.name]);

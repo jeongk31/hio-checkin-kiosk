@@ -1,4 +1,4 @@
-import { createServiceClient } from '@/lib/supabase/server';
+import { execute } from '@/lib/db';
 import { getCurrentProfile } from '@/lib/auth';
 import { NextResponse } from 'next/server';
 
@@ -21,16 +21,10 @@ export async function PUT(request: Request) {
       return NextResponse.json({ error: 'Project ID is required' }, { status: 400 });
     }
 
-    const supabase = await createServiceClient();
-
-    const { error } = await supabase
-      .from('projects')
-      .update({ is_active: isActive })
-      .eq('id', id);
-
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
-    }
+    await execute(
+      'UPDATE projects SET is_active = $1, updated_at = NOW() WHERE id = $2',
+      [isActive, id]
+    );
 
     return NextResponse.json({ success: true });
   } catch (error) {
@@ -58,16 +52,7 @@ export async function DELETE(request: Request) {
       return NextResponse.json({ error: 'Project ID is required' }, { status: 400 });
     }
 
-    const supabase = await createServiceClient();
-
-    const { error } = await supabase
-      .from('projects')
-      .delete()
-      .eq('id', id);
-
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
-    }
+    await execute('DELETE FROM projects WHERE id = $1', [id]);
 
     return NextResponse.json({ success: true });
   } catch (error) {

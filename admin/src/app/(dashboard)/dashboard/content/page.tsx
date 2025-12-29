@@ -1,7 +1,25 @@
 import { getCurrentProfile } from '@/lib/auth';
-import { createServiceClient } from '@/lib/supabase/server';
+import { query } from '@/lib/db';
 import { redirect } from 'next/navigation';
 import ContentEditor from './ContentEditor';
+
+interface ProjectRow {
+  id: string;
+  name: string;
+  slug: string;
+  logo_url: string | null;
+  is_active: boolean;
+}
+
+interface ContentRow {
+  id: string;
+  project_id: string;
+  content_key: string;
+  content_value: string;
+  language: string;
+  created_at: string;
+  updated_at: string;
+}
 
 export default async function ContentPage() {
   const profile = await getCurrentProfile();
@@ -13,30 +31,23 @@ export default async function ContentPage() {
     redirect('/dashboard');
   }
 
-  const supabase = await createServiceClient();
-
   // For super admin, get all projects to select from
-  let projects = null;
+  let projects: ProjectRow[] | null = null;
   if (profile.role === 'super_admin') {
-    const { data } = await supabase
-      .from('projects')
-      .select('*')
-      .eq('is_active', true)
-      .order('name');
-    projects = data;
+    projects = await query<ProjectRow>(
+      'SELECT * FROM projects WHERE is_active = true ORDER BY name'
+    );
   }
 
   // Get content for the current project (or first project for super admin)
-  let content = null;
+  let content: ContentRow[] | null = null;
   const targetProjectId = projectId || projects?.[0]?.id;
 
   if (targetProjectId) {
-    const { data } = await supabase
-      .from('kiosk_content')
-      .select('*')
-      .eq('project_id', targetProjectId)
-      .order('content_key');
-    content = data;
+    content = await query<ContentRow>(
+      'SELECT * FROM kiosk_content WHERE project_id = $1 ORDER BY content_key',
+      [targetProjectId]
+    );
   }
 
   return (
@@ -46,7 +57,7 @@ export default async function ContentPage() {
       <ContentEditor
         initialContent={content || []}
         projects={projects}
-        defaultProjectId={targetProjectId}
+        defaultProjectId={targetProjectId || null}
         isSuperAdmin={profile.role === 'super_admin'}
       />
     </div>

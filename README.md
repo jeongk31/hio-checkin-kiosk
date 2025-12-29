@@ -1,49 +1,169 @@
-# 호텔 체크인 키오스크 UI
+# Hotel Check-in Kiosk System
 
-한국 모텔 스타일의 체크인 키오스크 UI 샘플입니다.
+A modern hotel check-in kiosk system with admin dashboard, built for Korean motel/hotel environments.
 
-## 기능
+## Features
 
-### 주요 화면
-1. **시작 화면** - 체크인 시작
-2. **개인정보 입력** - 이름, 휴대폰 번호, 이메일, 인원 수
-3. **신분증 확인** - 신분증 스캔
-4. **결제** - 예약 정보 확인 및 결제 수단 선택
-5. **완료** - 객실 번호 및 비밀번호 안내
+### Kiosk Interface
+1. **Welcome Screen** - Start check-in process
+2. **Guest Information** - Name, phone number, email, number of guests
+3. **ID Verification** - ID card scanning and verification
+4. **Payment** - Reservation confirmation and payment method selection
+5. **Completion** - Room number and access code display
 
-### 직원 호출
-- 모든 화면에서 우측 상단 '직원 호출' 버튼으로 영상통화 연결 (시뮬레이션)
+### Staff Call System
+- Video call support from any kiosk screen via "Call Staff" button
+- Real-time WebRTC communication for guest assistance
 
-## 사용 방법
+### Admin Dashboard
+- **Project Management** - Multi-property support
+- **Kiosk Management** - Monitor and control kiosks remotely
+- **Room Management** - Room types, availability, and assignments
+- **Content Management** - Customize kiosk content per project
+- **Video Call Management** - Handle incoming calls from kiosks
+- **User Management** - Admin, project admin, and staff accounts
 
-1. `index.html` 파일을 웹 브라우저로 열기
-2. 화면의 버튼을 클릭하여 체크인 프로세스 진행
+## Tech Stack
 
-## 키보드 단축키 (개발/테스트용)
+### Frontend
+- Next.js 14 (App Router)
+- TypeScript
+- Tailwind CSS
+- WebRTC for video calls
 
-- `1` - 시작 화면
-- `2` - 개인정보 입력
-- `3` - 신분증 확인
-- `4` - 결제
-- `5` - 완료
-- `ESC` - 모달 닫기
+### Backend
+- PostgreSQL database
+- Next.js API Routes
+- JWT authentication with bcrypt
+- Server-side rendering
 
-## 기술 스택
+### APIs
+- useB API integration (identity verification, payment processing)
 
-- HTML5
-- CSS3 (Flexbox, Grid, Animations)
-- Vanilla JavaScript
+## Installation
 
-## 특징
+### Prerequisites
+- Node.js 18+
+- PostgreSQL 14+
 
-- 반응형 디자인
-- 부드러운 애니메이션
-- 직관적인 UI/UX
-- 한국어 인터페이스
-- 실제 키오스크와 유사한 플로우
+### Database Setup
 
-## 참고사항
+1. Create PostgreSQL database and user:
+```sql
+CREATE DATABASE kiosk;
+CREATE USER orange WITH PASSWORD '00oo00oo';
+GRANT ALL PRIVILEGES ON DATABASE kiosk TO orange;
+```
 
-- 이 프로젝트는 UI 샘플이며, 실제 기능은 구현되어 있지 않습니다
-- 모든 인터랙션은 시뮬레이션입니다
-- 실제 결제, 신분증 스캔, 영상통화 기능은 포함되어 있지 않습니다
+2. Apply database schema:
+```bash
+psql -U orange -d kiosk -f database/schema.sql
+```
+
+3. Seed initial admin user:
+```bash
+cd admin
+node scripts/seed-db.js
+```
+
+Default admin credentials:
+- Email: admin@admin.com
+- Password: admin123
+
+### Environment Configuration
+
+Create `admin/.env.local`:
+```env
+# Database
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5432
+POSTGRES_DATABASE=kiosk
+POSTGRES_USER=orange
+POSTGRES_PASSWORD=00oo00oo
+
+# Authentication
+JWT_SECRET=your-secure-random-string-here
+
+# useB API (Optional)
+USEB_API_KEY=your-useb-api-key
+USEB_SECRET_KEY=your-useb-secret-key
+USEB_MERCHANT_ID=your-merchant-id
+```
+
+### Start Development Server
+
+```bash
+cd admin
+npm install
+npm run dev
+```
+
+Access at: http://localhost:3000
+
+## Database Schema
+
+- **users** - Authentication
+- **profiles** - User profiles and roles
+- **projects** - Multi-property management
+- **kiosks** - Kiosk registration and status
+- **room_types** - Room categories and pricing
+- **rooms** - Individual room inventory
+- **reservations** - Guest bookings
+- **video_sessions** - Video call sessions
+- **signaling_messages** - WebRTC signaling
+- **kiosk_control_commands** - Remote kiosk control
+- **kiosk_screen_frames** - Screen streaming
+- **identity_verifications** - ID verification records
+- **payments** - Payment transactions
+
+## User Roles
+
+- **super_admin** - Full system access
+- **project_admin** - Single property management
+- **staff** - Front desk operations
+- **kiosk** - Kiosk device accounts
+
+## Development Keyboard Shortcuts
+
+In kiosk mode:
+- `1` - Welcome screen
+- `2` - Guest information
+- `3` - ID verification
+- `4` - Payment
+- `5` - Completion
+- `ESC` - Close modals
+
+## Production Deployment
+
+### Build
+```bash
+cd admin
+npm run build
+```
+
+### Environment Variables
+Set all environment variables in your hosting platform (Vercel, AWS, etc.)
+
+### Database
+- Use managed PostgreSQL (AWS RDS, DigitalOcean, etc.)
+- Enable SSL connections
+- Set up automated backups
+- Configure connection pooling
+
+## Architecture
+
+- **Polling-based real-time updates** - No WebSocket dependencies
+- **JWT session management** - Secure cookie-based auth
+- **WebRTC for video calls** - Direct peer-to-peer communication
+- **PostgreSQL RLS policies** - Row-level security (commented out, application-level auth used)
+
+## Notes
+
+- This system uses PostgreSQL with application-level authentication
+- Real-time features use polling (configurable intervals)
+- WebRTC requires HTTPS in production
+- useB API integration requires valid credentials for ID verification and payments
+
+## License
+
+Proprietary - All rights reserved

@@ -4,22 +4,29 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:https": "node server.js",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "start:https": "NODE_ENV=production node server.js",
+    "lint": "next lint",
+    "db:setup": "psql -U orange -d kiosk -f ../database/schema.sql",
+    "db:seed": "node scripts/seed-db.js"
   },
   "dependencies": {
-    "@supabase/ssr": "^0.8.0",
-    "@supabase/supabase-js": "^2.45.0",
+    "bcryptjs": "^2.4.3",
     "html2canvas": "^1.4.1",
+    "jose": "^5.2.0",
     "modern-screenshot": "^4.6.7",
     "next": "14.2.35",
+    "pg": "^8.11.3",
     "react": "^18",
     "react-dom": "^18",
     "zustand": "^5.0.9"
   },
   "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
     "@types/node": "^20",
+    "@types/pg": "^8.10.9",
     "@types/react": "^18",
     "@types/react-dom": "^18",
     "eslint": "^8",

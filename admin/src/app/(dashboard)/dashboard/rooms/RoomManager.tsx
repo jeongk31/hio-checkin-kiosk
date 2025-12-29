@@ -2,15 +2,13 @@
 
 import { useState, useEffect, useRef } from 'react';
 import ProjectSelector from '@/components/ProjectSelector';
-import { Project as DatabaseProject } from '@/types/database';
-import { createClient } from '@/lib/supabase/client';
 
 interface Project {
   id: string;
   name: string;
   slug?: string;
   is_active?: boolean;
-  settings?: Record<string, unknown>;
+  settings?: Record<string, unknown> | null;
   created_at?: string;
 }
 
@@ -207,6 +205,10 @@ export default function RoomManager({
   };
 
   const handleSaveResetTime = async () => {
+    if (selectedProjectId === 'all') {
+      alert('특정 프로젝트를 선택해주세요.');
+      return;
+    }
     setSavingResetTime(true);
     try {
       const res = await fetch('/api/projects/settings', {
@@ -304,6 +306,11 @@ export default function RoomManager({
             notes: roomForm.notes,
             status: roomStatus,
           };
+
+      if (!body.projectId || body.projectId === 'all') {
+        alert('특정 프로젝트를 선택해주세요.');
+        return;
+      }
 
       const res = await fetch('/api/rooms', {
         method,
@@ -555,21 +562,21 @@ export default function RoomManager({
 
     setUploadingImage(true);
     try {
-      const supabase = createClient();
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${selectedProjectId}/${Date.now()}.${fileExt}`;
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('folder', `room-images/${selectedProjectId}`);
 
-      const { error: uploadError } = await supabase.storage
-        .from('room-images')
-        .upload(fileName, file);
+      const response = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData,
+      });
 
-      if (uploadError) {
-        throw uploadError;
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Upload failed');
       }
 
-      const { data: { publicUrl } } = supabase.storage
-        .from('room-images')
-        .getPublicUrl(fileName);
+      const { url: publicUrl } = await response.json();
 
       setRoomTypeForm({ ...roomTypeForm, imageUrl: publicUrl });
     } catch (error) {
@@ -642,7 +649,7 @@ export default function RoomManager({
       {/* Project Selector for super admin */}
       {isSuperAdmin && projects && (
         <ProjectSelector
-          projects={projects as DatabaseProject[]}
+          projects={projects}
           selectedProjectId={selectedProjectId}
           onProjectChange={handleProjectChange}
           showAllOption={true}

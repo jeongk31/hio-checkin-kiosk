@@ -9,7 +9,34 @@ import {
   FaceAuthResult,
   IDStatusVerificationResult,
 } from '@/lib/useb';
-import { createServiceClient } from '@/lib/supabase/server';
+import { query, queryOne, execute } from '@/lib/db';
+
+interface IdentityVerification {
+  id: string;
+  project_id: string;
+  reservation_id: string | null;
+  guest_index: number;
+  guest_name: string | null;
+  id_type: string | null;
+  ocr_success: boolean;
+  status_verified: boolean;
+  status_verification_transaction_id: string | null;
+  id_verified: boolean;
+  face_matched: boolean;
+  similarity_score: number | null;
+  is_adult: boolean;
+  status: string;
+  failure_reason: string | null;
+  verified_at: string | null;
+  signature_name: string | null;
+  signature_matched: boolean | null;
+  created_at: string;
+}
+
+interface ReservationVerificationData {
+  verification_data: unknown[];
+  verified_guests: { name: string; verified_at: string; verification_id: string }[];
+}
 
 /**
  * POST /api/identity-verification
@@ -106,10 +133,16 @@ export async function POST(request: Request) {
             error: statusVerificationResult.error,
           };
         } else {
+          // OCR failed - check if it's an unsupported ID type
+          const isUnsupportedIdType = ocrResult.errorCode === 'O003' || 
+                                       (ocrResult.error && ocrResult.error.includes('주민등록번호 없음'));
+          
           result = {
             success: false,
             ocrResult,
-            error: ocrResult.error || 'OCR 실패로 진위확인을 수행할 수 없습니다',
+            error: isUnsupportedIdType 
+              ? '지원하지 않는 신분증 형식입니다. 주민등록증 또는 운전면허증을 사용해주세요.'
+              : (ocrResult.error || 'OCR 실패로 진위확인을 수행할 수 없습니다'),
           };
         }
         break;
@@ -143,8 +176,6 @@ export async function POST(request: Request) {
     // Store verification result in database
     if (projectId) {
       try {
-        const supabase = await createServiceClient();
-
         const verificationRecord = {
           project_id: projectId,
           reservation_id: reservationId || null,
@@ -152,9 +183,9 @@ export async function POST(request: Request) {
           guest_name: ocrResult?.data?.name || null,
           id_type: ocrResult?.data?.idType || null,
           ocr_success: ocrResult?.success || false,
-          status_verified: statusVerificationResult?.verified || false,  // 진위확인 결과
+          status_verified: statusVerificationResult?.verified || false,
           status_verification_transaction_id: statusVerificationResult?.transactionId || null,
-          id_verified: faceAuthResult?.matched || false,  // 안면인증 결과 (face matched)
+          id_verified: faceAuthResult?.matched || false,
           face_matched: faceAuthResult?.matched || false,
           similarity_score: faceAuthResult?.similarity || null,
           is_adult: result.isAdult || false,
@@ -162,28 +193,50 @@ export async function POST(request: Request) {
           failure_reason: result.success ? null : (result.error as string) || null,
           verified_at: result.success ? new Date().toISOString() : null,
           signature_name: isLastGuest ? signatureName || null : null,
-          signature_matched: null as boolean | null, // Will be updated after signature check
+          signature_matched: null as boolean | null,
         };
 
-        const { data: insertedVerification, error: insertError } = await supabase
-          .from('identity_verifications')
-          .insert(verificationRecord)
-          .select()
-          .single();
+        const insertedVerification = await queryOne<IdentityVerification>(
+          `INSERT INTO identity_verifications (
+            project_id, reservation_id, guest_index, guest_name, id_type,
+            ocr_success, status_verified, status_verification_transaction_id,
+            id_verified, face_matched, similarity_score, is_adult, status,
+            failure_reason, verified_at, signature_name, signature_matched
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+          RETURNING *`,
+          [
+            verificationRecord.project_id,
+            verificationRecord.reservation_id,
+            verificationRecord.guest_index,
+            verificationRecord.guest_name,
+            verificationRecord.id_type,
+            verificationRecord.ocr_success,
+            verificationRecord.status_verified,
+            verificationRecord.status_verification_transaction_id,
+            verificationRecord.id_verified,
+            verificationRecord.face_matched,
+            verificationRecord.similarity_score,
+            verificationRecord.is_adult,
+            verificationRecord.status,
+            verificationRecord.failure_reason,
+            verificationRecord.verified_at,
+            verificationRecord.signature_name,
+            verificationRecord.signature_matched,
+          ]
+        );
 
-        if (insertError) {
-          console.error('Failed to insert verification record:', insertError);
+        if (!insertedVerification) {
+          console.error('Failed to insert verification record');
         } else {
-          result.verificationId = insertedVerification?.id;
+          result.verificationId = insertedVerification.id;
         }
 
         // If verification successful and reservationId provided, update reservation
         if (result.success && reservationId) {
-          const { data: currentReservation } = await supabase
-            .from('reservations')
-            .select('verification_data, verified_guests')
-            .eq('id', reservationId)
-            .single();
+          const currentReservation = await queryOne<ReservationVerificationData>(
+            'SELECT verification_data, verified_guests FROM reservations WHERE id = $1',
+            [reservationId]
+          );
 
           const currentData = (currentReservation?.verification_data as unknown[]) || [];
           const currentVerifiedGuests = (currentReservation?.verified_guests as { name: string; verified_at: string; verification_id: string }[]) || [];
@@ -206,40 +259,40 @@ export async function POST(request: Request) {
             ? [...currentVerifiedGuests, newVerifiedGuest]
             : currentVerifiedGuests;
 
-          const { error: updateError } = await supabase
-            .from('reservations')
-            .update({
-              verification_data: [...currentData, newVerificationEntry],
-              verified_guests: updatedVerifiedGuests,
-            })
-            .eq('id', reservationId);
-
-          if (updateError) {
-            console.error('Failed to update reservation:', updateError);
-          }
+          await execute(
+            `UPDATE reservations 
+             SET verification_data = $1, verified_guests = $2, updated_at = NOW()
+             WHERE id = $3`,
+            [
+              JSON.stringify([...currentData, newVerificationEntry]),
+              JSON.stringify(updatedVerifiedGuests),
+              reservationId,
+            ]
+          );
         }
 
         // After last guest verification, check if signature matches any verified guest
         if (result.success && isLastGuest && signatureName && projectId) {
           // Get all verified guest names for this reservation/session
-          const verifiedNamesQuery = reservationId
-            ? supabase
-                .from('identity_verifications')
-                .select('guest_name')
-                .eq('reservation_id', reservationId)
-                .eq('status', 'verified')
-                .not('guest_name', 'is', null)
-            : supabase
-                .from('identity_verifications')
-                .select('guest_name')
-                .eq('project_id', projectId)
-                .eq('status', 'verified')
-                .not('guest_name', 'is', null)
-                .gte('created_at', new Date(Date.now() - 30 * 60 * 1000).toISOString()); // Last 30 minutes
+          let verifiedGuests: { guest_name: string }[];
+          
+          if (reservationId) {
+            verifiedGuests = await query<{ guest_name: string }>(
+              `SELECT guest_name FROM identity_verifications 
+               WHERE reservation_id = $1 AND status = 'verified' AND guest_name IS NOT NULL`,
+              [reservationId]
+            );
+          } else {
+            verifiedGuests = await query<{ guest_name: string }>(
+              `SELECT guest_name FROM identity_verifications 
+               WHERE project_id = $1 AND status = 'verified' AND guest_name IS NOT NULL
+               AND created_at >= $2`,
+              [projectId, new Date(Date.now() - 30 * 60 * 1000).toISOString()]
+            );
+          }
 
-          const { data: verifiedGuests } = await verifiedNamesQuery;
-          const verifiedNames = (verifiedGuests || [])
-            .map((g) => g.guest_name as string)
+          const verifiedNames = verifiedGuests
+            .map((g) => g.guest_name)
             .filter(Boolean);
 
           // Include the current guest's name
@@ -257,14 +310,12 @@ export async function POST(request: Request) {
 
             // Update the verification record to failed with signature match info
             if (insertedVerification?.id) {
-              await supabase
-                .from('identity_verifications')
-                .update({
-                  status: 'failed',
-                  failure_reason: result.error,
-                  signature_matched: false,
-                })
-                .eq('id', insertedVerification.id);
+              await execute(
+                `UPDATE identity_verifications 
+                 SET status = 'failed', failure_reason = $1, signature_matched = false
+                 WHERE id = $2`,
+                [result.error, insertedVerification.id]
+              );
             }
           } else {
             result.signatureMatched = true;
@@ -272,12 +323,10 @@ export async function POST(request: Request) {
 
             // Update the verification record with signature match success
             if (insertedVerification?.id) {
-              await supabase
-                .from('identity_verifications')
-                .update({
-                  signature_matched: true,
-                })
-                .eq('id', insertedVerification.id);
+              await execute(
+                'UPDATE identity_verifications SET signature_matched = true WHERE id = $1',
+                [insertedVerification.id]
+              );
             }
           }
         }
@@ -322,32 +371,30 @@ export async function GET(request: Request) {
     const reservationId = searchParams.get('reservationId');
     const status = searchParams.get('status');
 
-    const supabase = await createServiceClient();
-
-    let query = supabase
-      .from('identity_verifications')
-      .select('*')
-      .order('created_at', { ascending: false });
+    let sql = 'SELECT * FROM identity_verifications WHERE 1=1';
+    const params: (string | null)[] = [];
+    let paramIndex = 1;
 
     if (projectId) {
-      query = query.eq('project_id', projectId);
+      sql += ` AND project_id = $${paramIndex++}`;
+      params.push(projectId);
     }
 
     if (reservationId) {
-      query = query.eq('reservation_id', reservationId);
+      sql += ` AND reservation_id = $${paramIndex++}`;
+      params.push(reservationId);
     }
 
     if (status) {
-      query = query.eq('status', status);
+      sql += ` AND status = $${paramIndex++}`;
+      params.push(status);
     }
 
-    const { data, error } = await query.limit(100);
+    sql += ' ORDER BY created_at DESC LIMIT 100';
 
-    if (error) {
-      return NextResponse.json({ success: false, error: error.message }, { status: 400 });
-    }
+    const verifications = await query<IdentityVerification>(sql, params);
 
-    return NextResponse.json({ success: true, verifications: data });
+    return NextResponse.json({ success: true, verifications });
   } catch (error) {
     console.error('Get verifications error:', error);
     return NextResponse.json(

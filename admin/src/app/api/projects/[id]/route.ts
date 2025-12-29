@@ -1,6 +1,16 @@
-import { createServiceClient } from '@/lib/supabase/server';
+import { queryOne } from '@/lib/db';
 import { getCurrentProfile } from '@/lib/auth';
 import { NextResponse } from 'next/server';
+
+interface Project {
+  id: string;
+  name: string;
+  slug: string;
+  is_active: boolean;
+  settings: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+}
 
 // Get a single project by ID
 export async function GET(
@@ -21,19 +31,16 @@ export async function GET(
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
-    const supabase = await createServiceClient();
+    const project = await queryOne<Project>(
+      'SELECT * FROM projects WHERE id = $1',
+      [id]
+    );
 
-    const { data, error } = await supabase
-      .from('projects')
-      .select('*')
-      .eq('id', id)
-      .single();
-
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
+    if (!project) {
+      return NextResponse.json({ error: 'Project not found' }, { status: 404 });
     }
 
-    return NextResponse.json({ project: data });
+    return NextResponse.json({ project });
   } catch (error) {
     console.error('Error fetching project:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

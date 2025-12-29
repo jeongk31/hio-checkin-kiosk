@@ -1,19 +1,25 @@
 import { getCurrentProfile } from '@/lib/auth';
-import { createServiceClient } from '@/lib/supabase/server';
+import { query } from '@/lib/db';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import ProjectActions from './ProjectActions';
+
+interface Project {
+  id: string;
+  name: string;
+  is_active: boolean;
+  settings: { type?: string; location?: string } | null;
+  created_at: string;
+}
 
 export default async function ProjectsPage() {
   const profile = await getCurrentProfile();
   if (!profile) redirect('/login');
   if (profile.role !== 'super_admin') redirect('/dashboard');
 
-  const supabase = await createServiceClient();
-  const { data: projects } = await supabase
-    .from('projects')
-    .select('*')
-    .order('created_at', { ascending: false });
+  const projects = await query<Project>(
+    'SELECT * FROM projects ORDER BY created_at DESC'
+  );
 
   return (
     <div className="p-8">

@@ -1,6 +1,19 @@
-import { createServiceClient } from '@/lib/supabase/server';
+import { queryOne } from '@/lib/db';
 import { getCurrentProfile } from '@/lib/auth';
 import { NextResponse } from 'next/server';
+
+interface Kiosk {
+  id: string;
+  name: string;
+  project_id: string;
+  location: string | null;
+  profile_id: string | null;
+  status: string;
+  current_screen: string;
+  settings: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
 
 export async function POST(request: Request) {
   try {
@@ -26,27 +39,18 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Name and project are required' }, { status: 400 });
     }
 
-    const supabase = await createServiceClient();
+    const kiosk = await queryOne<Kiosk>(
+      `INSERT INTO kiosks (name, project_id, location, profile_id, status, current_screen, settings)
+       VALUES ($1, $2, $3, $4, 'offline', 'start', '{}')
+       RETURNING *`,
+      [name, projectId, location || null, profileId || null]
+    );
 
-    const { data, error } = await supabase
-      .from('kiosks')
-      .insert({
-        name,
-        project_id: projectId,
-        location: location || null,
-        profile_id: profileId || null,
-        status: 'offline',
-        current_screen: 'start',
-        settings: {},
-      })
-      .select()
-      .single();
-
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
+    if (!kiosk) {
+      return NextResponse.json({ error: 'Failed to create kiosk' }, { status: 400 });
     }
 
-    return NextResponse.json({ success: true, kiosk: data });
+    return NextResponse.json({ success: true, kiosk });
   } catch (error) {
     console.error('Error creating kiosk:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

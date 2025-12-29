@@ -1,39 +1,81 @@
 import { getCurrentProfile } from '@/lib/auth';
-import { createServiceClient } from '@/lib/supabase/server';
+import { query } from '@/lib/db';
 import { redirect } from 'next/navigation';
 import VideoCallList from './VideoCallList';
+
+interface VideoSession {
+  id: string;
+  project_id: string;
+  kiosk_id: string;
+  staff_user_id: string | null;
+  room_name: string;
+  caller_type: 'kiosk' | 'manager';
+  status: 'waiting' | 'connected' | 'ended';
+  started_at: string;
+  ended_at: string | null;
+  answered_by: string | null;
+  notes: string | null;
+  created_at: string;
+  kiosk: {
+    id: string;
+    name: string;
+    project_id: string;
+    project: {
+      id: string;
+      name: string;
+    } | null;
+  } | null;
+}
 
 export default async function VideoCallsPage() {
   const profile = await getCurrentProfile();
   if (!profile) redirect('/login');
 
-  const supabase = await createServiceClient();
   const isSuperAdmin = profile.role === 'super_admin';
 
-  let query = supabase
-    .from('video_sessions')
-    .select('*, kiosk:kiosks(*, project:projects(*))')
-    .order('started_at', { ascending: false })
-    .limit(50);
-
-  if (!isSuperAdmin) {
-    query = query.eq('project_id', profile.project_id);
-  }
-
-  const { data: sessions } = await query;
+  // Get all sessions with kiosk and project info
+  const sessionsSQL = `
+    SELECT 
+      vs.*,
+      json_build_object(
+        'id', k.id,
+        'name', k.name,
+        'project_id', k.project_id,
+        'project', json_build_object('id', p.id, 'name', p.name)
+      ) as kiosk
+    FROM video_sessions vs
+    LEFT JOIN kiosks k ON vs.kiosk_id = k.id
+    LEFT JOIN projects p ON k.project_id = p.id
+    ${!isSuperAdmin ? 'WHERE vs.project_id = $1' : ''}
+    ORDER BY vs.started_at DESC
+    LIMIT 50
+  `;
+  const sessions = await query<VideoSession>(
+    sessionsSQL,
+    !isSuperAdmin ? [profile.project_id] : []
+  );
 
   // Get waiting sessions (calls that need attention)
-  let waitingQuery = supabase
-    .from('video_sessions')
-    .select('*, kiosk:kiosks(*, project:projects(*))')
-    .eq('status', 'waiting')
-    .order('started_at', { ascending: true });
-
-  if (!isSuperAdmin) {
-    waitingQuery = waitingQuery.eq('project_id', profile.project_id);
-  }
-
-  const { data: waitingSessions } = await waitingQuery;
+  const waitingSQL = `
+    SELECT 
+      vs.*,
+      json_build_object(
+        'id', k.id,
+        'name', k.name,
+        'project_id', k.project_id,
+        'project', json_build_object('id', p.id, 'name', p.name)
+      ) as kiosk
+    FROM video_sessions vs
+    LEFT JOIN kiosks k ON vs.kiosk_id = k.id
+    LEFT JOIN projects p ON k.project_id = p.id
+    WHERE vs.status = 'waiting'
+    ${!isSuperAdmin ? 'AND vs.project_id = $1' : ''}
+    ORDER BY vs.started_at ASC
+  `;
+  const waitingSessions = await query<VideoSession>(
+    waitingSQL,
+    !isSuperAdmin ? [profile.project_id] : []
+  );
 
   return (
     <div className="p-8">

@@ -689,7 +689,26 @@ export async function performOCRAndFaceAuth(
   console.log('[Full Verification] Step 1: OCR');
   const ocrResult = await performIDCardOCR(idCardImageBase64);
 
+  // Check if OCR failed due to unsupported ID type
+  const isUnsupportedIdType = ocrResult.errorCode === 'O003' || 
+                               (ocrResult.error && ocrResult.error.includes('주민등록번호 없음'));
+
   if (!ocrResult.success || !ocrResult.data) {
+    // If it's an unsupported ID type, still try face authentication
+    if (isUnsupportedIdType) {
+      console.log('[Full Verification] Unsupported ID type, proceeding with face auth only');
+      const faceAuthResult = await performFaceAuth(faceImageBase64, idCardImageBase64);
+      
+      return {
+        success: faceAuthResult.success && faceAuthResult.matched,
+        ocrResult,
+        faceAuthResult,
+        error: faceAuthResult.matched 
+          ? '지원하지 않는 신분증입니다. 주민등록증이나 운전면허증을 사용해주세요. (안면인증만 완료)' 
+          : ocrResult.error || 'OCR 실패',
+      };
+    }
+    
     return {
       success: false,
       ocrResult,
