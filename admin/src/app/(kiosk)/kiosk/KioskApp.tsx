@@ -155,6 +155,14 @@ interface InputData {
   assignedRoom?: AssignedRoom | null;
 }
 
+// Call props for TopButtonRow
+interface CallProps {
+  callStatus: 'calling' | 'ringing' | 'connecting' | 'connected' | 'ended' | 'failed';
+  callDuration: number;
+  onEndCall: () => void;
+  isCallActive: boolean;
+}
+
 export default function KioskApp({ kiosk, content, paymentResult }: KioskAppProps) {
   // Helper for this component
   const t = (key: string) => getContent(content, key);
@@ -162,6 +170,12 @@ export default function KioskApp({ kiosk, content, paymentResult }: KioskAppProp
   const [currentScreen, setCurrentScreen] = useState<ScreenName>('start');
   const [isStaffModalOpen, setIsStaffModalOpen] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  // Staff call state (lifted from StaffCallModal for TopButtonRow access)
+  const [staffCallStatus, setStaffCallStatus] = useState<'calling' | 'ringing' | 'connecting' | 'connected' | 'ended' | 'failed'>('calling');
+  const [staffCallDuration, setStaffCallDuration] = useState(0);
+  // Incoming call from manager state (lifted from IncomingCallFromManager for TopButtonRow access)
+  const [incomingCallStatus, setIncomingCallStatus] = useState<'calling' | 'ringing' | 'connecting' | 'connected' | 'ended' | 'failed'>('ringing');
+  const [incomingCallDuration, setIncomingCallDuration] = useState(0);
   const [selectedRoom, setSelectedRoom] = useState<Room | null>(null);
   const [inputData, setInputData] = useState<InputData>({});
   const [paymentState, setPaymentState] = useState<'idle' | 'processing' | 'success' | 'failed'>('idle');
@@ -474,6 +488,9 @@ export default function KioskApp({ kiosk, content, paymentResult }: KioskAppProp
   }, [kiosk, supabase]);
 
   const openStaffModal = useCallback(async () => {
+    // Reset call state
+    setStaffCallStatus('calling');
+    setStaffCallDuration(0);
     setIsStaffModalOpen(true);
     // Create video session for staff call (only if kiosk exists)
     if (kiosk) {
@@ -535,34 +552,53 @@ export default function KioskApp({ kiosk, content, paymentResult }: KioskAppProp
     setCurrentSessionId(null);
   }, [currentSessionId, supabase]);
 
+  // Common call props for TopButtonRow in all screens
+  // Handler to close incoming call - sets status to 'ended' which triggers cleanup in IncomingCallFromManager
+  const closeIncomingCall = useCallback(() => {
+    setIncomingCallStatus('ended');
+    // The IncomingCallFromManager component will handle the rest (signaling, database, cleanup)
+    // and call its onClose which resets the state
+  }, []);
+
+  // Determine active call state (outgoing takes priority, then incoming)
+  const isOutgoingCallActive = isStaffModalOpen && (staffCallStatus === 'connecting' || staffCallStatus === 'connected');
+  const isIncomingCallActive = showIncomingCall && (incomingCallStatus === 'connecting' || incomingCallStatus === 'connected');
+
+  const callProps = {
+    callStatus: isOutgoingCallActive ? staffCallStatus : (isIncomingCallActive ? incomingCallStatus : staffCallStatus),
+    callDuration: isOutgoingCallActive ? staffCallDuration : (isIncomingCallActive ? incomingCallDuration : 0),
+    onEndCall: isOutgoingCallActive ? closeStaffModal : (isIncomingCallActive ? closeIncomingCall : closeStaffModal),
+    isCallActive: isOutgoingCallActive || isIncomingCallActive,
+  };
+
   const renderScreen = () => {
     switch (currentScreen) {
       case 'start':
-        return <StartScreen goToScreen={goToScreen} t={t} openStaffModal={openStaffModal} />;
+        return <StartScreen goToScreen={goToScreen} t={t} openStaffModal={openStaffModal} callProps={callProps} />;
       case 'checkin-reservation':
-        return <CheckinReservationScreen goToScreen={goToScreen} syncInputData={syncInputData} t={t} projectId={kiosk?.project_id} openStaffModal={openStaffModal} />;
+        return <CheckinReservationScreen goToScreen={goToScreen} syncInputData={syncInputData} t={t} projectId={kiosk?.project_id} openStaffModal={openStaffModal} callProps={callProps} />;
       case 'checkin-consent':
-        return <ConsentScreen goToScreen={goToScreen} flowType="checkin" syncInputData={syncInputData} t={t} openStaffModal={openStaffModal} />;
+        return <ConsentScreen goToScreen={goToScreen} flowType="checkin" syncInputData={syncInputData} t={t} openStaffModal={openStaffModal} callProps={callProps} />;
       case 'checkin-id-verification':
-        return <IDVerificationScreen goToScreen={goToScreen} flowType="checkin" syncInputData={syncInputData} t={t} projectId={kiosk?.project_id} reservationId={inputData.reservation?.id} openStaffModal={openStaffModal} signatureName={inputData.signature} />;
+        return <IDVerificationScreen goToScreen={goToScreen} flowType="checkin" syncInputData={syncInputData} t={t} projectId={kiosk?.project_id} reservationId={inputData.reservation?.id} openStaffModal={openStaffModal} signatureName={inputData.signature} callProps={callProps} />;
       case 'checkin-info':
-        return <HotelInfoScreen goToScreen={goToScreen} flowType="checkin" t={t} projectId={kiosk?.project_id} syncInputData={syncInputData} inputData={inputData} openStaffModal={openStaffModal} />;
+        return <HotelInfoScreen goToScreen={goToScreen} flowType="checkin" t={t} projectId={kiosk?.project_id} syncInputData={syncInputData} inputData={inputData} openStaffModal={openStaffModal} callProps={callProps} />;
       case 'room-selection':
-        return <RoomSelectionScreen goToScreen={goToScreen} setSelectedRoom={setSelectedRoom} syncInputData={syncInputData} t={t} projectId={kiosk?.project_id} openStaffModal={openStaffModal} />;
+        return <RoomSelectionScreen goToScreen={goToScreen} setSelectedRoom={setSelectedRoom} syncInputData={syncInputData} t={t} projectId={kiosk?.project_id} openStaffModal={openStaffModal} callProps={callProps} />;
       case 'walkin-consent':
-        return <ConsentScreen goToScreen={goToScreen} flowType="walkin" syncInputData={syncInputData} t={t} openStaffModal={openStaffModal} />;
+        return <ConsentScreen goToScreen={goToScreen} flowType="walkin" syncInputData={syncInputData} t={t} openStaffModal={openStaffModal} callProps={callProps} />;
       case 'walkin-id-verification':
-        return <IDVerificationScreen goToScreen={goToScreen} flowType="walkin" syncInputData={syncInputData} t={t} projectId={kiosk?.project_id} openStaffModal={openStaffModal} signatureName={inputData.signature} />;
+        return <IDVerificationScreen goToScreen={goToScreen} flowType="walkin" syncInputData={syncInputData} t={t} projectId={kiosk?.project_id} openStaffModal={openStaffModal} signatureName={inputData.signature} callProps={callProps} />;
       case 'payment-confirm':
-        return <PaymentConfirmScreen goToScreen={goToScreen} selectedRoom={selectedRoom} t={t} openStaffModal={openStaffModal} />;
+        return <PaymentConfirmScreen goToScreen={goToScreen} selectedRoom={selectedRoom} t={t} openStaffModal={openStaffModal} callProps={callProps} />;
       case 'payment-process':
-        return <PaymentProcessScreen goToScreen={goToScreen} selectedRoom={selectedRoom} t={t} openStaffModal={openStaffModal} kioskId={kiosk?.id} paymentState={paymentState} paymentError={paymentError} setPaymentState={setPaymentState} setPaymentError={setPaymentError} />;
+        return <PaymentProcessScreen goToScreen={goToScreen} selectedRoom={selectedRoom} t={t} openStaffModal={openStaffModal} kioskId={kiosk?.id} paymentState={paymentState} paymentError={paymentError} setPaymentState={setPaymentState} setPaymentError={setPaymentError} callProps={callProps} />;
       case 'walkin-info':
-        return <HotelInfoScreen goToScreen={goToScreen} flowType="walkin" t={t} projectId={kiosk?.project_id} selectedRoomTypeId={selectedRoom?.id} syncInputData={syncInputData} inputData={inputData} openStaffModal={openStaffModal} />;
+        return <HotelInfoScreen goToScreen={goToScreen} flowType="walkin" t={t} projectId={kiosk?.project_id} selectedRoomTypeId={selectedRoom?.id} syncInputData={syncInputData} inputData={inputData} openStaffModal={openStaffModal} callProps={callProps} />;
       case 'checkout':
-        return <CheckoutScreen goToScreen={goToScreen} t={t} openStaffModal={openStaffModal} />;
+        return <CheckoutScreen goToScreen={goToScreen} t={t} openStaffModal={openStaffModal} callProps={callProps} />;
       default:
-        return <StartScreen goToScreen={goToScreen} t={t} openStaffModal={openStaffModal} />;
+        return <StartScreen goToScreen={goToScreen} t={t} openStaffModal={openStaffModal} callProps={callProps} />;
     }
   };
 
@@ -573,26 +609,84 @@ export default function KioskApp({ kiosk, content, paymentResult }: KioskAppProp
         isOpen={isStaffModalOpen}
         onClose={closeStaffModal}
         sessionId={currentSessionId}
+        callStatus={staffCallStatus}
+        onCallStatusChange={setStaffCallStatus}
+        callDuration={staffCallDuration}
+        onCallDurationChange={setStaffCallDuration}
       />
       {showIncomingCall && incomingCallSession && (
         <IncomingCallFromManager
           session={incomingCallSession}
           onClose={() => {
+            // Reset all incoming call state after cleanup
             setShowIncomingCall(false);
             setIncomingCallSession(null);
+            setIncomingCallStatus('ringing');
+            setIncomingCallDuration(0);
           }}
+          callStatus={incomingCallStatus}
+          onCallStatusChange={setIncomingCallStatus}
+          callDuration={incomingCallDuration}
+          onCallDurationChange={setIncomingCallDuration}
         />
       )}
     </div>
   );
 }
 
-// Staff Call Button
-function StaffCallButton({ onClick }: { onClick: () => void }) {
+// Top Button Row - shows call indicator (left) and staff button (right)
+function TopButtonRow({
+  onStaffCall,
+  callStatus,
+  callDuration,
+  onEndCall,
+  isCallActive
+}: {
+  onStaffCall: () => void;
+  callStatus?: 'calling' | 'ringing' | 'connecting' | 'connected' | 'ended' | 'failed';
+  callDuration?: number;
+  onEndCall?: () => void;
+  isCallActive?: boolean;
+}) {
+  const formatDuration = (seconds: number): string => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const showIndicator = isCallActive;
+
   return (
-    <button className="staff-call-btn" onClick={onClick}>
-      <span>직원 호출</span>
-    </button>
+    <div className="top-button-row">
+      {/* Call indicator - left side */}
+      {showIndicator && (
+        <div className="call-indicator">
+          <div
+            className="call-indicator-dot"
+            style={{ backgroundColor: callStatus === 'connected' ? '#22c55e' : '#f59e0b' }}
+          />
+          <span className="call-indicator-text">
+            {callStatus === 'connected' ? '통화중' : '연결중'}
+          </span>
+          {callStatus === 'connected' && callDuration !== undefined && (
+            <span className="call-indicator-duration">
+              {formatDuration(callDuration)}
+            </span>
+          )}
+          <button className="call-indicator-end" onClick={onEndCall}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+      )}
+
+      {/* Staff call button - right side */}
+      <button className="staff-call-btn" onClick={onStaffCall}>
+        <span>직원 호출</span>
+      </button>
+    </div>
   );
 }
 
@@ -608,13 +702,17 @@ interface StaffCallModalProps {
   isOpen: boolean;
   onClose: () => void;
   sessionId: string | null;
+  callStatus: CallStatus;
+  onCallStatusChange: (status: CallStatus) => void;
+  callDuration: number;
+  onCallDurationChange: (duration: number) => void;
 }
 
 // Staff Call Modal with WebRTC
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-function StaffCallModal({ isOpen, onClose, sessionId }: StaffCallModalProps) {
-  const [callStatus, setCallStatus] = useState<CallStatus>('calling');
-  const [callDuration, setCallDuration] = useState(0);
+function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusChange, callDuration, onCallDurationChange }: StaffCallModalProps) {
+  const setCallStatus = onCallStatusChange;
+  const setCallDuration = onCallDurationChange;
   const [error, setError] = useState<string | null>(null);
 
   const supabaseRef = useRef(createClient());
@@ -623,6 +721,7 @@ function StaffCallModal({ isOpen, onClose, sessionId }: StaffCallModalProps) {
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
   const channelRef = useRef<ReturnType<typeof supabaseRef.current.channel> | null>(null);
   const durationIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const durationCounterRef = useRef(0); // Track duration for interval updates
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
   const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
 
@@ -724,8 +823,10 @@ function StaffCallModal({ isOpen, onClose, sessionId }: StaffCallModalProps) {
               console.log('[Kiosk] Call connected!');
               setCallStatus('connected');
               // Start duration timer
+              durationCounterRef.current = 0;
               durationIntervalRef.current = setInterval(() => {
-                setCallDuration((prev) => prev + 1);
+                durationCounterRef.current += 1;
+                setCallDuration(durationCounterRef.current);
               }, 1000);
               break;
             case 'disconnected':
@@ -865,73 +966,12 @@ function StaffCallModal({ isOpen, onClose, sessionId }: StaffCallModalProps) {
     }
   };
 
-  const formatDuration = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  };
+  // For connecting/connected states, just render audio element (indicator is in TopButtonRow)
+  if (callStatus === 'connecting' || callStatus === 'connected') {
+    return <audio ref={remoteAudioRef} autoPlay playsInline style={{ display: 'none' }} />;
+  }
 
   if (!isOpen) return null;
-
-  // Show minimal indicator for connecting/connected states
-  // Positioned to align with right side of main content (1100px centered container)
-  // Same position as staff-call-btn would be
-  if (callStatus === 'connecting' || callStatus === 'connected') {
-    return (
-      <>
-        <div style={{
-          position: 'fixed',
-          top: '16px',
-          right: 'max(24px, calc(50% - 550px))', // Align with right edge of 1100px centered container
-          zIndex: 1000,
-          backgroundColor: 'white',
-          borderRadius: '10px',
-          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08)',
-          padding: '8px 14px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '10px',
-        }}>
-          {/* Status indicator dot - matches staff-call-btn style */}
-          <div style={{
-            width: '6px',
-            height: '6px',
-            borderRadius: '50%',
-            backgroundColor: callStatus === 'connected' ? '#22c55e' : '#f59e0b',
-          }} />
-          <span style={{ fontSize: '13px', fontWeight: 500, color: '#191f28' }}>
-            {callStatus === 'connected' ? '통화중' : '연결중'}
-          </span>
-          {callStatus === 'connected' && (
-            <span style={{ fontSize: '13px', color: '#6b7684', fontFamily: 'monospace' }}>
-              {formatDuration(callDuration)}
-            </span>
-          )}
-          <button
-            onClick={handleClose}
-            style={{
-              width: '28px',
-              height: '28px',
-              borderRadius: '50%',
-              backgroundColor: '#ef4444',
-              border: 'none',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              marginLeft: '4px',
-            }}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="18" y1="6" x2="6" y2="18"></line>
-              <line x1="6" y1="6" x2="18" y2="18"></line>
-            </svg>
-          </button>
-        </div>
-        <audio ref={remoteAudioRef} autoPlay playsInline style={{ display: 'none' }} />
-      </>
-    );
-  }
 
   // Show modal for calling/ringing/ended/failed states
   return (
@@ -986,12 +1026,17 @@ function StaffCallModal({ isOpen, onClose, sessionId }: StaffCallModalProps) {
 interface IncomingCallFromManagerProps {
   session: { id: string; room_name: string };
   onClose: () => void;
+  callStatus: CallStatus;
+  onCallStatusChange: (status: CallStatus) => void;
+  callDuration: number;
+  onCallDurationChange: (duration: number) => void;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-function IncomingCallFromManager({ session, onClose }: IncomingCallFromManagerProps) {
-  const [callStatus, setCallStatus] = useState<CallStatus>('ringing');
-  const [callDuration, setCallDuration] = useState(0);
+function IncomingCallFromManager({ session, onClose, callStatus, onCallStatusChange, callDuration, onCallDurationChange }: IncomingCallFromManagerProps) {
+  const setCallStatus = onCallStatusChange;
+  const setCallDuration = onCallDurationChange;
+  const durationCounterRef = useRef(0);
 
   const supabaseRef = useRef(createClient());
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
@@ -1080,8 +1125,10 @@ function IncomingCallFromManager({ session, onClose }: IncomingCallFromManagerPr
           switch (pc.connectionState) {
             case 'connected':
               setCallStatus('connected');
+              durationCounterRef.current = 0;
               durationIntervalRef.current = setInterval(() => {
-                setCallDuration((prev) => prev + 1);
+                durationCounterRef.current += 1;
+                setCallDuration(durationCounterRef.current);
               }, 1000);
               break;
             case 'disconnected':
@@ -1183,110 +1230,33 @@ function IncomingCallFromManager({ session, onClose }: IncomingCallFromManagerPr
     };
   }, [session.id, cleanup]);
 
-  const handleClose = () => {
-    if (channelRef.current) {
-      channelRef.current.send({
-        type: 'broadcast',
-        event: 'signaling',
-        payload: { type: 'call-ended', reason: 'ended' },
-      });
-    }
-    // Update database
-    supabaseRef.current.from('video_sessions').update({
-      status: 'ended',
-      ended_at: new Date().toISOString(),
-    }).eq('id', session.id).then(() => {});
-    cleanup();
-    onClose();
-  };
-
-  const formatDuration = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  };
-
-  // Auto-close on ended/failed after a short delay
+  // Send call-ended signal and cleanup when status changes to ended or failed
   useEffect(() => {
     if (callStatus === 'ended' || callStatus === 'failed') {
+      // Send call-ended signal
+      if (channelRef.current) {
+        channelRef.current.send({
+          type: 'broadcast',
+          event: 'signaling',
+          payload: { type: 'call-ended', reason: callStatus },
+        });
+      }
+      // Update database
+      supabaseRef.current.from('video_sessions').update({
+        status: 'ended',
+        ended_at: new Date().toISOString(),
+      }).eq('id', session.id).then(() => {});
+      // Cleanup and close after short delay
       const timer = setTimeout(() => {
+        cleanup();
         onClose();
-      }, 1500);
+      }, 500);
       return () => clearTimeout(timer);
     }
-  }, [callStatus, onClose]);
+  }, [callStatus, session.id, cleanup, onClose]);
 
-  return (
-    <>
-      {/* Minimal indicator in top-left corner */}
-      <div style={{
-        position: 'fixed',
-        top: '16px',
-        left: '16px',
-        zIndex: 1000,
-        backgroundColor: 'white',
-        borderRadius: '12px',
-        boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-        padding: '12px 16px',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '12px',
-        border: '1px solid #e5e7eb',
-      }}>
-        {/* Status indicator */}
-        <div style={{
-          width: '10px',
-          height: '10px',
-          borderRadius: '50%',
-          backgroundColor: callStatus === 'connected' ? '#22c55e' : '#f59e0b',
-          animation: 'pulse 2s infinite',
-        }} />
-
-        {/* Status text and duration */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{ fontSize: '16px', fontWeight: 500, color: '#1f2937' }}>
-            {callStatus === 'connected' ? '통화중' : '연결중'}
-          </span>
-          {callStatus === 'connected' && (
-            <span style={{ fontSize: '16px', color: '#6b7280', fontFamily: 'monospace' }}>
-              {formatDuration(callDuration)}
-            </span>
-          )}
-        </div>
-
-        {/* End call button */}
-        <button
-          onClick={handleClose}
-          style={{
-            width: '36px',
-            height: '36px',
-            borderRadius: '50%',
-            backgroundColor: '#ef4444',
-            border: 'none',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            transition: 'background-color 0.2s',
-          }}
-          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#dc2626'}
-          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#ef4444'}
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <line x1="18" y1="6" x2="6" y2="18"></line>
-            <line x1="6" y1="6" x2="18" y2="18"></line>
-          </svg>
-        </button>
-      </div>
-      <audio ref={remoteAudioRef} autoPlay playsInline style={{ display: 'none' }} />
-      <style>{`
-        @keyframes pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.5; }
-        }
-      `}</style>
-    </>
-  );
+  // Only render the audio element - UI is handled by TopButtonRow
+  return <audio ref={remoteAudioRef} autoPlay playsInline style={{ display: 'none' }} />;
 }
 
 // Navigation Arrow Component
@@ -1320,11 +1290,11 @@ function NavArrow({
 }
 
 // Start Screen
-function StartScreen({ goToScreen, t, openStaffModal }: { goToScreen: (screen: ScreenName) => void; t: (key: string) => string; openStaffModal: () => void }) {
+function StartScreen({ goToScreen, t, openStaffModal, callProps }: { goToScreen: (screen: ScreenName) => void; t: (key: string) => string; openStaffModal: () => void; callProps: CallProps }) {
   return (
     <div className="screen">
       <div className="screen-wrapper">
-        <StaffCallButton onClick={openStaffModal} />
+        <TopButtonRow onStaffCall={openStaffModal} callStatus={callProps.callStatus} callDuration={callProps.callDuration} onEndCall={callProps.onEndCall} isCallActive={callProps.isCallActive} />
         <div className="container">
           <div className="logo">
             <h1>HiO</h1>
@@ -1360,12 +1330,14 @@ function CheckinReservationScreen({
   t,
   projectId,
   openStaffModal,
+  callProps,
 }: {
   goToScreen: (screen: ScreenName) => void;
   syncInputData: (data: Partial<InputData>) => void;
   t: (key: string) => string;
   projectId?: string;
   openStaffModal: () => void;
+  callProps: CallProps;
 }) {
   const [reservationNumber, setReservationNumber] = useState('');
   const [isValidating, setIsValidating] = useState(false);
@@ -1417,7 +1389,7 @@ function CheckinReservationScreen({
   return (
     <div className="screen">
       <div className="screen-wrapper">
-        <StaffCallButton onClick={openStaffModal} />
+        <TopButtonRow onStaffCall={openStaffModal} callStatus={callProps.callStatus} callDuration={callProps.callDuration} onEndCall={callProps.onEndCall} isCallActive={callProps.isCallActive} />
         <div className="container">
           <NavArrow direction="left" label="이전" onClick={() => goToScreen('start')} disabled={isValidating} />
           <NavArrow direction="right" label={isValidating ? '확인 중...' : '다음'} onClick={handleNext} disabled={!reservationNumber.trim() || isValidating} />
@@ -1459,12 +1431,14 @@ function ConsentScreen({
   syncInputData,
   t,
   openStaffModal,
+  callProps,
 }: {
   goToScreen: (screen: ScreenName) => void;
   flowType: 'checkin' | 'walkin';
   syncInputData: (data: Partial<InputData>) => void;
   t: (key: string) => string;
   openStaffModal: () => void;
+  callProps: CallProps;
 }) {
   const [agreed, setAgreed] = useState(false);
   const [signature, setSignature] = useState('');
@@ -1500,7 +1474,7 @@ function ConsentScreen({
   return (
     <div className="screen">
       <div className="screen-wrapper">
-        <StaffCallButton onClick={openStaffModal} />
+        <TopButtonRow onStaffCall={openStaffModal} callStatus={callProps.callStatus} callDuration={callProps.callDuration} onEndCall={callProps.onEndCall} isCallActive={callProps.isCallActive} />
         <div className="container">
           <NavArrow direction="left" label="이전" onClick={handleBack} />
           <NavArrow direction="right" label="다음" onClick={handleNext} disabled={!agreed || !signature.trim()} />
@@ -1555,6 +1529,7 @@ function IDVerificationScreen({
   reservationId,
   openStaffModal,
   signatureName,
+  callProps,
 }: {
   goToScreen: (screen: ScreenName) => void;
   flowType: 'checkin' | 'walkin';
@@ -1564,6 +1539,7 @@ function IDVerificationScreen({
   reservationId?: string;
   openStaffModal: () => void;
   signatureName?: string;
+  callProps: CallProps;
 }) {
   const [guestCount, setGuestCount] = useState(1);
   const [currentGuest, setCurrentGuest] = useState(0);
@@ -1819,7 +1795,7 @@ function IDVerificationScreen({
     return (
       <div className="screen">
         <div className="screen-wrapper">
-          <StaffCallButton onClick={openStaffModal} />
+          <TopButtonRow onStaffCall={openStaffModal} callStatus={callProps.callStatus} callDuration={callProps.callDuration} onEndCall={callProps.onEndCall} isCallActive={callProps.isCallActive} />
           <div className="container">
             <NavArrow direction="left" label="이전" onClick={handleBack} />
             <NavArrow direction="right" label="인증 시작" onClick={handleStartVerification} />
@@ -1847,7 +1823,7 @@ function IDVerificationScreen({
     return (
       <div className="screen">
         <div className="screen-wrapper">
-          <StaffCallButton onClick={openStaffModal} />
+          <TopButtonRow onStaffCall={openStaffModal} callStatus={callProps.callStatus} callDuration={callProps.callDuration} onEndCall={callProps.onEndCall} isCallActive={callProps.isCallActive} />
           <div className="container">
             <NavArrow direction="left" label="이전" onClick={handleBack} />
             <NavArrow direction="right" label="다시 시도" onClick={handleRetry} />
@@ -1872,7 +1848,7 @@ function IDVerificationScreen({
     return (
       <div className="screen">
         <div className="screen-wrapper">
-          <StaffCallButton onClick={openStaffModal} />
+          <TopButtonRow onStaffCall={openStaffModal} callStatus={callProps.callStatus} callDuration={callProps.callDuration} onEndCall={callProps.onEndCall} isCallActive={callProps.isCallActive} />
           <div className="container">
             <div className="logo"><h1>HiO</h1></div>
             <h2 className="screen-title">인증 완료</h2>
@@ -1895,7 +1871,7 @@ function IDVerificationScreen({
     return (
       <div className="screen">
         <div className="screen-wrapper">
-          <StaffCallButton onClick={openStaffModal} />
+          <TopButtonRow onStaffCall={openStaffModal} callStatus={callProps.callStatus} callDuration={callProps.callDuration} onEndCall={callProps.onEndCall} isCallActive={callProps.isCallActive} />
           <div className="container">
             <div className="logo"><h1>HiO</h1></div>
             <h2 className="screen-title">{screenTitle}</h2>
@@ -1918,7 +1894,7 @@ function IDVerificationScreen({
   return (
     <div className="screen">
       <div className="screen-wrapper">
-        <StaffCallButton onClick={openStaffModal} />
+        <TopButtonRow onStaffCall={openStaffModal} callStatus={callProps.callStatus} callDuration={callProps.callDuration} onEndCall={callProps.onEndCall} isCallActive={callProps.isCallActive} />
         <div className="container">
           <NavArrow direction="left" label="이전" onClick={handleBack} />
           <div className="logo"><h1>HiO</h1></div>
@@ -2092,6 +2068,7 @@ function HotelInfoScreen({
   syncInputData,
   inputData,
   openStaffModal,
+  callProps,
 }: {
   goToScreen: (screen: ScreenName) => void;
   flowType: 'checkin' | 'walkin';
@@ -2101,6 +2078,7 @@ function HotelInfoScreen({
   syncInputData?: (data: Partial<InputData>) => void;
   inputData?: InputData;
   openStaffModal: () => void;
+  callProps: CallProps;
 }) {
   const [assignedRoom, setAssignedRoom] = useState<AssignedRoom | null>(null);
   const [loading, setLoading] = useState(true);
@@ -2167,7 +2145,7 @@ function HotelInfoScreen({
     return (
       <div className="screen">
         <div className="screen-wrapper">
-          <StaffCallButton onClick={openStaffModal} />
+          <TopButtonRow onStaffCall={openStaffModal} callStatus={callProps.callStatus} callDuration={callProps.callDuration} onEndCall={callProps.onEndCall} isCallActive={callProps.isCallActive} />
           <div className="container">
             <div className="logo">
               <h1>HiO</h1>
@@ -2186,7 +2164,7 @@ function HotelInfoScreen({
     return (
       <div className="screen">
         <div className="screen-wrapper">
-          <StaffCallButton onClick={openStaffModal} />
+          <TopButtonRow onStaffCall={openStaffModal} callStatus={callProps.callStatus} callDuration={callProps.callDuration} onEndCall={callProps.onEndCall} isCallActive={callProps.isCallActive} />
           <div className="container">
             <NavArrow direction="right" label="확인" onClick={handleComplete} />
             <div className="logo">
@@ -2206,7 +2184,7 @@ function HotelInfoScreen({
   return (
     <div className="screen">
       <div className="screen-wrapper">
-        <StaffCallButton onClick={openStaffModal} />
+        <TopButtonRow onStaffCall={openStaffModal} callStatus={callProps.callStatus} callDuration={callProps.callDuration} onEndCall={callProps.onEndCall} isCallActive={callProps.isCallActive} />
         <div className="container">
           <NavArrow direction="right" label="완료" onClick={handleComplete} />
 
@@ -2292,6 +2270,7 @@ function RoomSelectionScreen({
   t,
   projectId,
   openStaffModal,
+  callProps,
 }: {
   goToScreen: (screen: ScreenName) => void;
   setSelectedRoom: (room: Room) => void;
@@ -2299,6 +2278,7 @@ function RoomSelectionScreen({
   t: (key: string) => string;
   projectId?: string;
   openStaffModal: () => void;
+  callProps: CallProps;
 }) {
   const [selected, setSelected] = useState<string | null>(null);
   const [roomTypes, setRoomTypes] = useState<RoomTypeData[]>([]);
@@ -2426,7 +2406,7 @@ function RoomSelectionScreen({
     return (
       <div className="screen">
         <div className="screen-wrapper">
-          <StaffCallButton onClick={openStaffModal} />
+          <TopButtonRow onStaffCall={openStaffModal} callStatus={callProps.callStatus} callDuration={callProps.callDuration} onEndCall={callProps.onEndCall} isCallActive={callProps.isCallActive} />
           <div className="container">
             <div className="logo">
               <h1>HiO</h1>
@@ -2443,7 +2423,7 @@ function RoomSelectionScreen({
   return (
     <div className="screen">
       <div className="screen-wrapper">
-        <StaffCallButton onClick={openStaffModal} />
+        <TopButtonRow onStaffCall={openStaffModal} callStatus={callProps.callStatus} callDuration={callProps.callDuration} onEndCall={callProps.onEndCall} isCallActive={callProps.isCallActive} />
         <div className="container">
           <NavArrow direction="left" label="이전" onClick={() => goToScreen('start')} />
           <NavArrow direction="right" label="다음" onClick={handleNext} disabled={!selected || availableRoomTypes.length === 0} />
@@ -2531,11 +2511,13 @@ function PaymentConfirmScreen({
   selectedRoom,
   t,
   openStaffModal,
+  callProps,
 }: {
   goToScreen: (screen: ScreenName) => void;
   selectedRoom: Room | null;
   t: (key: string) => string;
   openStaffModal: () => void;
+  callProps: CallProps;
 }) {
   const [isProcessing, setIsProcessing] = useState(false);
 
@@ -2551,7 +2533,7 @@ function PaymentConfirmScreen({
   return (
     <div className="screen">
       <div className="screen-wrapper">
-        <StaffCallButton onClick={openStaffModal} />
+        <TopButtonRow onStaffCall={openStaffModal} callStatus={callProps.callStatus} callDuration={callProps.callDuration} onEndCall={callProps.onEndCall} isCallActive={callProps.isCallActive} />
         <div className="container">
           <NavArrow direction="left" label="이전" onClick={() => goToScreen('walkin-id-verification')} />
           <div className="logo">
@@ -2623,6 +2605,7 @@ function PaymentProcessScreen({
   paymentError,
   setPaymentState,
   setPaymentError,
+  callProps,
 }: {
   goToScreen: (screen: ScreenName) => void;
   selectedRoom: Room | null;
@@ -2633,6 +2616,7 @@ function PaymentProcessScreen({
   paymentError: string | null;
   setPaymentState: (state: 'idle' | 'processing' | 'success' | 'failed') => void;
   setPaymentError: (error: string | null) => void;
+  callProps: CallProps;
 }) {
   const handlePayment = () => {
     const amount = selectedRoom?.price || 65000;
@@ -2665,7 +2649,7 @@ function PaymentProcessScreen({
     return (
       <div className="screen">
         <div className="screen-wrapper">
-          <StaffCallButton onClick={openStaffModal} />
+          <TopButtonRow onStaffCall={openStaffModal} callStatus={callProps.callStatus} callDuration={callProps.callDuration} onEndCall={callProps.onEndCall} isCallActive={callProps.isCallActive} />
           <div className="container">
             <div className="logo">
               <h1>HiO</h1>
@@ -2690,7 +2674,7 @@ function PaymentProcessScreen({
     return (
       <div className="screen">
         <div className="screen-wrapper">
-          <StaffCallButton onClick={openStaffModal} />
+          <TopButtonRow onStaffCall={openStaffModal} callStatus={callProps.callStatus} callDuration={callProps.callDuration} onEndCall={callProps.onEndCall} isCallActive={callProps.isCallActive} />
           <div className="container">
             <NavArrow direction="left" label="이전" onClick={() => { setPaymentState('idle'); goToScreen('payment-confirm'); }} />
             <NavArrow direction="right" label="다시 시도" onClick={handleRetry} />
@@ -2721,7 +2705,7 @@ function PaymentProcessScreen({
     return (
       <div className="screen">
         <div className="screen-wrapper">
-          <StaffCallButton onClick={openStaffModal} />
+          <TopButtonRow onStaffCall={openStaffModal} callStatus={callProps.callStatus} callDuration={callProps.callDuration} onEndCall={callProps.onEndCall} isCallActive={callProps.isCallActive} />
           <div className="container">
             <div className="logo">
               <h1>HiO</h1>
@@ -2743,7 +2727,7 @@ function PaymentProcessScreen({
   return (
     <div className="screen">
       <div className="screen-wrapper">
-        <StaffCallButton onClick={openStaffModal} />
+        <TopButtonRow onStaffCall={openStaffModal} callStatus={callProps.callStatus} callDuration={callProps.callDuration} onEndCall={callProps.onEndCall} isCallActive={callProps.isCallActive} />
         <div className="container">
           <NavArrow direction="left" label="이전" onClick={() => goToScreen('payment-confirm')} />
           <NavArrow direction="right" label="결제하기" onClick={handlePayment} />
@@ -2772,7 +2756,7 @@ function PaymentProcessScreen({
 }
 
 // Checkout Screen
-function CheckoutScreen({ goToScreen, t, openStaffModal }: { goToScreen: (screen: ScreenName) => void; t: (key: string) => string; openStaffModal: () => void }) {
+function CheckoutScreen({ goToScreen, t, openStaffModal, callProps }: { goToScreen: (screen: ScreenName) => void; t: (key: string) => string; openStaffModal: () => void; callProps: CallProps }) {
   const handleComplete = () => {
     goToScreen('start');
   };
@@ -2780,7 +2764,7 @@ function CheckoutScreen({ goToScreen, t, openStaffModal }: { goToScreen: (screen
   return (
     <div className="screen">
       <div className="screen-wrapper">
-        <StaffCallButton onClick={openStaffModal} />
+        <TopButtonRow onStaffCall={openStaffModal} callStatus={callProps.callStatus} callDuration={callProps.callDuration} onEndCall={callProps.onEndCall} isCallActive={callProps.isCallActive} />
         <div className="container">
           <NavArrow direction="right" label="완료" onClick={handleComplete} />
           <div className="logo">
