@@ -5,6 +5,7 @@ const JWT_SECRET = new TextEncoder().encode(
   process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-in-production'
 );
 const SESSION_COOKIE_NAME = 'session_token';
+const PMS_AUTH_URL = process.env.PMS_AUTH_URL || 'http://localhost:8000';
 
 async function verifyToken(token: string): Promise<{ userId: string } | null> {
   try {
@@ -15,10 +16,37 @@ async function verifyToken(token: string): Promise<{ userId: string } | null> {
   }
 }
 
+/**
+ * Verify PMS token is still valid (called on each protected request)
+ */
+async function verifyPMSToken(token: string): Promise<boolean> {
+  try {
+    const response = await fetch(`${PMS_AUTH_URL}/api/v1/auth/verify`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+    });
+
+    if (!response.ok) return false;
+
+    const data = await response.json();
+    
+    // Check if valid and has kiosk access
+    if (!data.valid) return false;
+    if (!data.user?.allowed_systems?.includes('kiosk')) return false;
+    
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function middleware(request: NextRequest) {
   const response = NextResponse.next({ request });
 
   const sessionToken = request.cookies.get(SESSION_COOKIE_NAME)?.value;
+  const pmsToken = request.cookies.get('pms_token')?.value;
   const isAuthPage = request.nextUrl.pathname === '/login';
   const isPublicPage = request.nextUrl.pathname === '/';
   const isApiRoute = request.nextUrl.pathname.startsWith('/api');
@@ -37,6 +65,22 @@ export async function middleware(request: NextRequest) {
     userId = payload?.userId || null;
   }
 
+  // If user has session, validate PMS token on each request
+  if (userId && pmsToken) {
+    const isPMSValid = await verifyPMSToken(pmsToken);
+    
+    if (!isPMSValid) {
+      // PMS token invalid - clear session and redirect to login
+      const url = request.nextUrl.clone();
+      url.pathname = '/login';
+      const redirectResponse = NextResponse.redirect(url);
+      redirectResponse.cookies.set('session_token', '', { maxAge: 0 });
+      redirectResponse.cookies.set('pms_token', '', { maxAge: 0 });
+      redirectResponse.cookies.set('user_role', '', { maxAge: 0 });
+      return redirectResponse;
+    }
+  }
+
   // If not logged in and trying to access protected route, redirect to login
   if (!userId && !isAuthPage && !isPublicPage) {
     const url = request.nextUrl.clone();
@@ -44,6 +88,7 @@ export async function middleware(request: NextRequest) {
     const redirectResponse = NextResponse.redirect(url);
     // Clear any stale cookies
     redirectResponse.cookies.set('session_token', '', { maxAge: 0 });
+    redirectResponse.cookies.set('pms_token', '', { maxAge: 0 });
     redirectResponse.cookies.set('user_role', '', { maxAge: 0 });
     return redirectResponse;
   }

@@ -1,7 +1,8 @@
-import { signIn, createSession, setSessionCookie } from '@/lib/db/auth';
-import { queryOne } from '@/lib/db';
+import { createSession, setSessionCookie } from '@/lib/db/auth';
+import { queryOne, execute } from '@/lib/db';
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
+import { authenticateWithPMS, getKioskRole } from '@/lib/pms-auth';
 
 interface ProfileRow {
   role: string;
@@ -12,34 +13,69 @@ export async function POST(request: Request) {
   try {
     const { email, password } = await request.json();
 
-    // Sign in user
-    const { userId, error: signInError } = await signIn(email, password);
+    // Authenticate against PMS (central auth provider)
+    const pmsResult = await authenticateWithPMS(email, password);
 
-    if (signInError || !userId) {
-      return NextResponse.json({ error: signInError || 'Login failed' }, { status: 401 });
+    if (!pmsResult.success) {
+      return NextResponse.json({ error: pmsResult.error }, { status: 401 });
     }
 
-    // Get profile to check if active and get role
-    const profile = await queryOne<ProfileRow>(
-      'SELECT role, is_active FROM profiles WHERE user_id = $1',
-      [userId]
+    const { data: pmsData } = pmsResult;
+    const pmsUser = pmsData.user;
+
+    // Map PMS role to Kiosk role
+    const kioskRole = getKioskRole(pmsUser.role);
+
+    // Get or create local profile for session management
+    // (we still need local profile for project assignments and local data)
+    let profile = await queryOne<ProfileRow & { user_id: string }>(
+      'SELECT user_id, role, is_active FROM profiles WHERE email = $1',
+      [pmsUser.email]
     );
 
     if (!profile) {
-      return NextResponse.json({ error: 'Profile not found' }, { status: 403 });
+      // Create local profile linked to PMS user
+      const userId = pmsUser.id; // Use PMS user ID
+      await execute(
+        `INSERT INTO users (id, email, password_hash) 
+         VALUES ($1, $2, $3) 
+         ON CONFLICT (id) DO UPDATE SET email = $2`,
+        [userId, pmsUser.email, 'pms-managed'] // Password managed by PMS
+      );
+      
+      await execute(
+        `INSERT INTO profiles (user_id, email, role, is_active) 
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (user_id) DO UPDATE SET role = $3, is_active = $4`,
+        [userId, pmsUser.email, kioskRole, pmsUser.is_active]
+      );
+      
+      profile = { user_id: userId, role: kioskRole, is_active: true };
+    } else {
+      // Update local profile with latest PMS role
+      await execute(
+        'UPDATE profiles SET role = $1, is_active = $2 WHERE user_id = $3',
+        [kioskRole, pmsUser.is_active, profile.user_id]
+      );
+      profile.role = kioskRole;
     }
 
-    if (!profile.is_active) {
-      return NextResponse.json({ error: 'Account is not active' }, { status: 403 });
-    }
-
-    // Create session and set cookie
-    const token = await createSession(userId);
+    // Create local session and set cookie
+    const token = await createSession(profile.user_id);
     await setSessionCookie(token);
 
-    // Set role cookie for middleware (for role-based routing)
+    // Store PMS token in cookie for API validation
     const cookieStore = await cookies();
-    cookieStore.set('user_role', profile.role, {
+    cookieStore.set('pms_token', pmsData.access_token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: pmsData.expires_in,
+      path: '/',
+    });
+
+    // Set role cookie for middleware (for role-based routing)
+    cookieStore.set('user_role', kioskRole, {
       httpOnly: true,
       secure: false, // Allow HTTP for local network access
       sameSite: 'lax',
@@ -48,7 +84,7 @@ export async function POST(request: Request) {
     });
 
     // Determine redirect URL based on role
-    const redirectUrl = profile.role === 'kiosk' ? '/kiosk' : '/dashboard';
+    const redirectUrl = kioskRole === 'kiosk' ? '/kiosk' : '/dashboard';
 
     return NextResponse.json({ success: true, redirectUrl });
   } catch (error) {
