@@ -11,6 +11,8 @@ const PMS_AUTH_URL = process.env.PMS_AUTH_URL || 'http://localhost:8000';
 const PMS_TO_KIOSK_ROLE: Record<string, string> = {
   "Super Admin": "super_admin",
   "super_admin": "super_admin",
+  "Master": "super_admin",
+  "master": "super_admin",
   "Team Leader": "project_admin",
   "team_leader": "project_admin",
   "Manager": "project_admin",
@@ -19,17 +21,21 @@ const PMS_TO_KIOSK_ROLE: Record<string, string> = {
   "client": "project_admin",
   "Project": "project_admin",
   "project": "project_admin",
+  "Kiosk": "kiosk",
+  "kiosk": "kiosk",
 };
 
-export function getKioskRole(pmsRole: string): string {
-  return PMS_TO_KIOSK_ROLE[pmsRole] ?? "project_admin";
+export function getKioskRole(pmsRole: string | { name: string }): string {
+  // Extract role name if it's an object
+  const roleName = typeof pmsRole === 'string' ? pmsRole : pmsRole?.name || '';
+  return PMS_TO_KIOSK_ROLE[roleName] ?? "project_admin";
 }
 
 export interface PMSUser {
   id: string;
   email: string;
   username: string;
-  role: string;
+  role: string | { name: string };  // Can be string or object with name
   role_rank: number;
   allowed_systems: string[];
   project_id: string | null;

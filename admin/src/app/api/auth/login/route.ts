@@ -43,21 +43,57 @@ export async function POST(request: Request) {
         [userId, pmsUser.email, 'pms-managed'] // Password managed by PMS
       );
       
-      await execute(
+      profile = await queryOne(
         `INSERT INTO profiles (user_id, email, role, is_active) 
          VALUES ($1, $2, $3, $4)
-         ON CONFLICT (user_id) DO UPDATE SET role = $3, is_active = $4`,
+         ON CONFLICT (user_id) DO UPDATE SET role = $3, is_active = $4, email = $2
+         RETURNING id, user_id, role, is_active`,
         [userId, pmsUser.email, kioskRole, pmsUser.is_active]
       );
       
-      profile = { user_id: userId, role: kioskRole, is_active: true };
+      if (!profile) {
+        profile = { id: userId, user_id: userId, role: kioskRole, is_active: true };
+      }
     } else {
       // Update local profile with latest PMS role
-      await execute(
-        'UPDATE profiles SET role = $1, is_active = $2 WHERE user_id = $3',
+      const updatedProfile = await queryOne(
+        'UPDATE profiles SET role = $1, is_active = $2 WHERE user_id = $3 RETURNING id, user_id, role, is_active',
         [kioskRole, pmsUser.is_active, profile.user_id]
       );
-      profile.role = kioskRole;
+      if (updatedProfile) {
+        profile = updatedProfile;
+      } else {
+        profile.role = kioskRole;
+      }
+    }
+
+    // Auto-create kiosk device if user doesn't have one (for new users)
+    if (kioskRole === 'super_admin' || kioskRole === 'kiosk') {
+      const existingKiosk = await queryOne(
+        'SELECT id FROM kiosks WHERE profile_id = $1',
+        [profile.id]
+      );
+
+      if (!existingKiosk) {
+        // Get first available project or create default one
+        const project = await queryOne<{ id: string }>(
+          'SELECT id FROM projects ORDER BY created_at ASC LIMIT 1'
+        );
+
+        if (project) {
+          await execute(
+            `INSERT INTO kiosks (id, project_id, profile_id, name, location, status) 
+             VALUES (gen_random_uuid(), $1, $2, $3, $4, 'offline')
+             ON CONFLICT DO NOTHING`,
+            [
+              project.id,
+              profile.id,
+              `${pmsUser.username || pmsUser.email} Device`,
+              'Auto-created'
+            ]
+          );
+        }
+      }
     }
 
     // Create local session and set cookie
