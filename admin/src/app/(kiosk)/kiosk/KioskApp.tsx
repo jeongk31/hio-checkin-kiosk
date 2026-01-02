@@ -646,7 +646,6 @@ export default function KioskApp({ kiosk, content, paymentResult }: KioskAppProp
     // Create video session for staff call (only if kiosk exists)
     if (!kiosk) {
       console.error('[Kiosk] Cannot create video session: kiosk object not available');
-      setError('키오스크 정보를 찾을 수 없습니다');
       setIsStaffModalOpen(false);
       return;
     }
@@ -657,7 +656,6 @@ export default function KioskApp({ kiosk, content, paymentResult }: KioskAppProp
         kiosk_id: kiosk.id,
         project_id: kiosk.project_id
       });
-      setError('키오스크 설정이 불완전합니다');
       setIsStaffModalOpen(false);
       return;
     }
