@@ -5,8 +5,11 @@ import { NextResponse } from 'next/server';
 import { authenticateWithPMS, getKioskRole } from '@/lib/pms-auth';
 
 interface ProfileRow {
+  id?: string;
+  user_id: string;
   role: string;
   is_active: boolean;
+  email?: string;
 }
 
 export async function POST(request: Request) {
@@ -43,7 +46,7 @@ export async function POST(request: Request) {
         [userId, pmsUser.email, 'pms-managed'] // Password managed by PMS
       );
       
-      profile = await queryOne(
+      profile = await queryOne<ProfileRow & { user_id: string }>(
         `INSERT INTO profiles (user_id, email, role, is_active) 
          VALUES ($1, $2, $3, $4)
          ON CONFLICT (user_id) DO UPDATE SET role = $3, is_active = $4, email = $2
@@ -56,7 +59,7 @@ export async function POST(request: Request) {
       }
     } else {
       // Update local profile with latest PMS role
-      const updatedProfile = await queryOne(
+      const updatedProfile = await queryOne<ProfileRow & { user_id: string }>(
         'UPDATE profiles SET role = $1, is_active = $2 WHERE user_id = $3 RETURNING id, user_id, role, is_active',
         [kioskRole, pmsUser.is_active, profile.user_id]
       );
