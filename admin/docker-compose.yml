@@ -5,16 +5,29 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      args:
-        - NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
-        - NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY}
     container_name: hio-checkin-admin
     restart: unless-stopped
     ports:
       - "3000:3000"
     environment:
+      # PostgreSQL Connection (use host.docker.internal for host PostgreSQL)
+      - POSTGRES_HOST=host.docker.internal
+      - POSTGRES_PORT=5432
+      - POSTGRES_DATABASE=kiosk
+      - POSTGRES_USER=orange
+      - POSTGRES_PASSWORD=00oo00oo
+      
+      # PMS Authentication
+      - PMS_AUTH_URL=https://pmsapi.hio.ai.kr
+      
+      # Application
       - NODE_ENV=production
-      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+      - NEXT_PUBLIC_APP_URL=https://kiosk.hio.ai.kr
+      
+      # JWT Secret
+      - JWT_SECRET=${JWT_SECRET}
+      
+      # useB API
       - USEB_EMAIL=${USEB_EMAIL}
       - USEB_PASSWORD=${USEB_PASSWORD}
       - FACE_CLIENT_ID=${FACE_CLIENT_ID}
