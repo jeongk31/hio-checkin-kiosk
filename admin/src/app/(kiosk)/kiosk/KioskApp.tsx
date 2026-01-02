@@ -1142,7 +1142,9 @@ interface IncomingCallFromManagerProps {
 function IncomingCallFromManager({ session, onClose, callStatus, onCallStatusChange, callDuration, onCallDurationChange }: IncomingCallFromManagerProps) {
   const setCallStatus = onCallStatusChange;
   const setCallDuration = onCallDurationChange;
-  const [error, setError] = useState<string | null>(null);
+  // Error state for logging purposes (errors are handled by parent component)
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [_error, setError] = useState<string | null>(null);
   const durationCounterRef = useRef(0);
 
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
