@@ -1142,6 +1142,7 @@ interface IncomingCallFromManagerProps {
 function IncomingCallFromManager({ session, onClose, callStatus, onCallStatusChange, callDuration, onCallDurationChange }: IncomingCallFromManagerProps) {
   const setCallStatus = onCallStatusChange;
   const setCallDuration = onCallDurationChange;
+  const [error, setError] = useState<string | null>(null);
   const durationCounterRef = useRef(0);
 
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
