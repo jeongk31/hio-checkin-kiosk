@@ -11,7 +11,7 @@ services:
       - "3000:3000"
     environment:
       # PostgreSQL Connection (use host.docker.internal for host PostgreSQL)
-      - POSTGRES_HOST=host.docker.internal
+      - POSTGRES_HOST=172.17.0.1
       - POSTGRES_PORT=5432
       - POSTGRES_DATABASE=kiosk
       - POSTGRES_USER=orange
