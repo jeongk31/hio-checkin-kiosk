@@ -9,8 +9,10 @@ services:
     restart: unless-stopped
     ports:
       - "3000:3000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
-      # PostgreSQL Connection (Windows Docker Desktop uses host.docker.internal)
+      # PostgreSQL Connection (Linux uses host-gateway or 172.17.0.1)
       - POSTGRES_HOST=host.docker.internal
       - POSTGRES_PORT=5432
       - POSTGRES_DATABASE=kiosk
