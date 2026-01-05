@@ -7,13 +7,10 @@ services:
       dockerfile: Dockerfile
     container_name: hio-checkin-admin
     restart: unless-stopped
-    ports:
-      - "3000:3000"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    network_mode: host
     environment:
-      # PostgreSQL Connection (Windows/Mac: host.docker.internal, Linux: use network_mode: host)
-      - POSTGRES_HOST=host.docker.internal
+      # PostgreSQL Connection (host network mode - use localhost)
+      - POSTGRES_HOST=localhost
       - POSTGRES_PORT=5432
       - POSTGRES_DATABASE=kiosk
       - POSTGRES_USER=orange
@@ -36,15 +33,9 @@ services:
       - FACE_CLIENT_SECRET=${FACE_CLIENT_SECRET}
     env_file:
       - .env.production
-    networks:
-      - app-network
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
-
-networks:
-  app-network:
-    driver: bridge
