@@ -38,6 +38,7 @@ export interface PMSUser {
   role: string | { name: string };  // Can be string or object with name
   role_rank: number;
   allowed_systems: string[];
+  allowed_regions: string[];  // Regions user can access (empty = all for admin)
   project_id: string | null;
   is_active: boolean;
 }

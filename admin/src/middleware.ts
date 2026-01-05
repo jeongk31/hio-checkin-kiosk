@@ -16,10 +16,19 @@ async function verifyToken(token: string): Promise<{ userId: string } | null> {
   }
 }
 
+interface PMSVerifyResult {
+  valid: boolean;
+  user?: {
+    allowed_systems?: string[];
+    allowed_regions?: string[];
+    role?: string;
+  };
+}
+
 /**
  * Verify PMS token is still valid (called on each protected request)
  */
-async function verifyPMSToken(token: string): Promise<boolean> {
+async function verifyPMSToken(token: string): Promise<PMSVerifyResult | null> {
   try {
     const response = await fetch(`${PMS_AUTH_URL}/api/v1/auth/verify`, {
       method: 'GET',
@@ -28,17 +37,17 @@ async function verifyPMSToken(token: string): Promise<boolean> {
       },
     });
 
-    if (!response.ok) return false;
+    if (!response.ok) return null;
 
     const data = await response.json();
     
     // Check if valid and has kiosk access
-    if (!data.valid) return false;
-    if (!data.user?.allowed_systems?.includes('kiosk')) return false;
+    if (!data.valid) return null;
+    if (!data.user?.allowed_systems?.includes('kiosk')) return null;
     
-    return true;
+    return data;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -67,9 +76,9 @@ export async function middleware(request: NextRequest) {
 
   // If user has session, validate PMS token on each request
   if (userId && pmsToken) {
-    const isPMSValid = await verifyPMSToken(pmsToken);
+    const pmsResult = await verifyPMSToken(pmsToken);
     
-    if (!isPMSValid) {
+    if (!pmsResult) {
       // PMS token invalid - clear session and redirect to login
       const url = request.nextUrl.clone();
       url.pathname = '/login';
@@ -77,7 +86,19 @@ export async function middleware(request: NextRequest) {
       redirectResponse.cookies.set('session_token', '', { maxAge: 0 });
       redirectResponse.cookies.set('pms_token', '', { maxAge: 0 });
       redirectResponse.cookies.set('user_role', '', { maxAge: 0 });
+      redirectResponse.cookies.set('allowed_regions', '', { maxAge: 0 });
       return redirectResponse;
+    }
+    
+    // Update allowed_regions cookie from PMS response
+    if (pmsResult.user?.allowed_regions) {
+      response.cookies.set('allowed_regions', JSON.stringify(pmsResult.user.allowed_regions), {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 7 * 24 * 60 * 60, // 7 days
+        path: '/',
+      });
     }
   }
 

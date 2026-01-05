@@ -14,10 +14,18 @@ interface ProfileRow {
 
 export async function POST(request: Request) {
   try {
-    const { email, password } = await request.json();
+    // Accept either email or username
+    const body = await request.json();
+    const identifier = body.email || body.username; // Support both fields
+    const password = body.password;
+
+    if (!identifier || !password) {
+      return NextResponse.json({ error: 'Username/email and password are required' }, { status: 400 });
+    }
 
     // Authenticate against PMS (central auth provider)
-    const pmsResult = await authenticateWithPMS(email, password);
+    // PMS already accepts both username and email in the 'username' field
+    const pmsResult = await authenticateWithPMS(identifier, password);
 
     if (!pmsResult.success) {
       return NextResponse.json({ error: pmsResult.error }, { status: 401 });
@@ -117,6 +125,16 @@ export async function POST(request: Request) {
     cookieStore.set('user_role', kioskRole, {
       httpOnly: true,
       secure: false, // Allow HTTP for local network access
+      sameSite: 'lax',
+      maxAge: 7 * 24 * 60 * 60, // 7 days
+      path: '/',
+    });
+
+    // Set allowed_regions cookie for region-based access control
+    const allowedRegions = pmsUser.allowed_regions || [];
+    cookieStore.set('allowed_regions', JSON.stringify(allowedRegions), {
+      httpOnly: true,
+      secure: false,
       sameSite: 'lax',
       maxAge: 7 * 24 * 60 * 60, // 7 days
       path: '/',

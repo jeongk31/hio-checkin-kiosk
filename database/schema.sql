@@ -60,12 +60,15 @@ CREATE TABLE IF NOT EXISTS projects (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name VARCHAR(255) NOT NULL,
     slug VARCHAR(100) UNIQUE NOT NULL,
+    region VARCHAR(50) DEFAULT NULL,  -- Region code for access control (e.g., 'seoul', 'busan')
     logo_url TEXT,
     settings JSONB DEFAULT '{}'::jsonb,
     is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+CREATE INDEX IF NOT EXISTS idx_projects_region ON projects(region);
 
 -- ============================================
 -- Profiles Table (Extended user info)

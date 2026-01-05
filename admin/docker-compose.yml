@@ -20,7 +20,7 @@ services:
       - POSTGRES_PASSWORD=00oo00oo
       
       # PMS Authentication
-      - PMS_AUTH_URL=https://pmsapi.hio.ai.kr
+      - PMS_AUTH_URL=http://localhost:8000
       
       # Application
       - NODE_ENV=production
