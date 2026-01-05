@@ -54,16 +54,19 @@ export async function POST(request: Request) {
         [userId, pmsUser.email, 'pms-managed'] // Password managed by PMS
       );
       
+      // Insert or update profile and always get the profile ID
       profile = await queryOne<ProfileRow & { user_id: string }>(
         `INSERT INTO profiles (user_id, email, role, is_active) 
          VALUES ($1, $2, $3, $4)
-         ON CONFLICT (user_id) DO UPDATE SET role = $3, is_active = $4, email = $2
-         RETURNING id, user_id, role, is_active`,
+         ON CONFLICT (user_id) DO UPDATE SET role = EXCLUDED.role, is_active = EXCLUDED.is_active, email = EXCLUDED.email
+         RETURNING id, user_id, role, is_active, email`,
         [userId, pmsUser.email, kioskRole, pmsUser.is_active]
       );
       
       if (!profile) {
-        profile = { id: userId, user_id: userId, role: kioskRole, is_active: true };
+        // This should never happen, but handle it gracefully
+        console.error('Failed to create or get profile for user:', userId);
+        return NextResponse.json({ error: 'Failed to create user profile' }, { status: 500 });
       }
     } else {
       // Update local profile with latest PMS role
@@ -78,18 +81,32 @@ export async function POST(request: Request) {
       }
     }
 
-    // Auto-create kiosk device if user doesn't have one (for new users)
-    if (kioskRole === 'super_admin' || kioskRole === 'kiosk') {
+    // Auto-create kiosk device if user doesn't have one (for kiosk users)
+    if (kioskRole === 'kiosk') {
       const existingKiosk = await queryOne(
         'SELECT id FROM kiosks WHERE profile_id = $1',
         [profile.id]
       );
 
       if (!existingKiosk) {
-        // Get first available project or create default one
-        const project = await queryOne<{ id: string }>(
-          'SELECT id FROM projects ORDER BY created_at ASC LIMIT 1'
-        );
+        // Get first available project, prefer one matching user's allowed regions
+        const allowedRegions = pmsUser.allowed_regions || [];
+        let project: { id: string } | null = null;
+        
+        if (allowedRegions.length > 0) {
+          // Try to find a project in user's allowed regions
+          project = await queryOne<{ id: string }>(
+            `SELECT id FROM projects WHERE region = ANY($1::text[]) ORDER BY created_at ASC LIMIT 1`,
+            [allowedRegions]
+          );
+        }
+        
+        // Fallback to any project if no region match
+        if (!project) {
+          project = await queryOne<{ id: string }>(
+            'SELECT id FROM projects ORDER BY created_at ASC LIMIT 1'
+          );
+        }
 
         if (project) {
           await execute(
@@ -103,6 +120,7 @@ export async function POST(request: Request) {
               'Auto-created'
             ]
           );
+          console.log(`Auto-created kiosk for profile ${profile.id} in project ${project.id}`);
         }
       }
     }
