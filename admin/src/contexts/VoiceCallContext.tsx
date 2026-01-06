@@ -123,13 +123,16 @@ export function VoiceCallProvider({ children, profile }: VoiceCallProviderProps)
     statusRef.current = state.status;
   }, [state.status]);
 
+  // Roles that can receive calls from kiosks
+  const VOICE_CALL_ENABLED_ROLES = ['super_admin', 'project_admin', 'manager'];
+
   // Poll for incoming calls (replaces Supabase Realtime)
   useEffect(() => {
     console.log('[Manager] Profile:', { id: profile.id, role: profile.role, project_id: profile.project_id });
 
-    // Only super_admin can receive calls from kiosks
-    if (profile.role !== 'super_admin') {
-      console.log('[Manager] Not super_admin, skipping voice call subscription');
+    // Only admin/manager roles can receive calls from kiosks
+    if (!VOICE_CALL_ENABLED_ROLES.includes(profile.role)) {
+      console.log('[Manager] Role not in voice call enabled list, skipping voice call subscription');
       return;
     }
 
@@ -166,8 +169,8 @@ export function VoiceCallProvider({ children, profile }: VoiceCallProviderProps)
       }
     };
 
-    // Poll every 2 seconds
-    const interval = setInterval(pollForIncomingCalls, 2000);
+    // Poll every 1.5 seconds for faster call detection
+    const interval = setInterval(pollForIncomingCalls, 1500);
     pollForIncomingCalls(); // Initial poll
 
     return () => {

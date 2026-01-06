@@ -136,6 +136,71 @@ admin/
 | `/api/reservations` | GET/POST/PUT/DELETE | Manage reservations |
 | `/api/profiles` | GET | List user profiles |
 | `/api/accounts/create` | POST | Create user account |
+| `/api/sync` | POST | Sync projects/users from PMS |
+| `/api/cron/daily-reset` | POST/GET | Daily room reset cron |
+
+## Cron Jobs
+
+### Daily Room Reset
+
+The system supports automatic daily room reset for each project. Each project can configure its own reset time.
+
+**Setting up the cron job:**
+
+#### Option 1: Linux/Docker crontab
+
+Add to your crontab (`crontab -e`):
+
+```bash
+# Check daily reset every minute (KST timezone)
+* * * * * curl -s -X POST http://localhost:3000/api/cron/daily-reset -H "Authorization: Bearer YOUR_CRON_SECRET"
+```
+
+#### Option 2: Docker Compose with cron service
+
+```yaml
+services:
+  cron:
+    image: alpine:latest
+    command: sh -c "while true; do curl -s -X POST http://kiosk:3000/api/cron/daily-reset; sleep 60; done"
+    depends_on:
+      - kiosk
+```
+
+#### Option 3: Vercel Cron (if deployed on Vercel)
+
+Add to `vercel.json`:
+
+```json
+{
+  "crons": [{
+    "path": "/api/cron/daily-reset",
+    "schedule": "* * * * *"
+  }]
+}
+```
+
+**Configuring reset time per project:**
+
+1. Access project settings in admin dashboard
+2. Set `daily_reset_time` in project settings (format: "HH:mm" in KST)
+3. Example: "06:00" for 6 AM KST daily reset
+
+**Environment variable (optional security):**
+
+```env
+CRON_SECRET=your-secure-cron-secret
+```
+
+**Testing the cron:**
+
+```bash
+# Check status
+curl http://localhost:3000/api/cron/daily-reset
+
+# Trigger reset manually
+curl -X POST http://localhost:3000/api/cron/daily-reset
+```
 
 ## User Roles
 

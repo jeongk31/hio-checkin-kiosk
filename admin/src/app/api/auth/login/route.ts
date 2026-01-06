@@ -243,15 +243,14 @@ export async function POST(request: Request) {
       
       // Insert or update profile and always get the profile ID
       profile = await queryOne<ProfileRow & { user_id: string }>(
-        `INSERT INTO profiles (user_id, email, role, is_active) 
-         VALUES ($1, $2, $3, $4)
-         ON CONFLICT (user_id) DO UPDATE SET role = EXCLUDED.role, is_active = EXCLUDED.is_active, email = EXCLUDED.email
-         RETURNING id, user_id, role, is_active, email`,
-        [userId, pmsUser.email, kioskRole, pmsUser.is_active]
         `INSERT INTO profiles (user_id, email, role, is_active, project_id)
-         VALUES ($1, $2, $3, $4, $5)
-         ON CONFLICT (user_id) DO UPDATE SET role = $3, is_active = $4, email = $2, project_id = $5
-         RETURNING id, user_id, role, is_active, project_id`,
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (user_id) DO UPDATE SET
+          role = EXCLUDED.role,
+          is_active = EXCLUDED.is_active,
+          email = EXCLUDED.email,
+          project_id = EXCLUDED.project_id
+        RETURNING id, user_id, role, is_active, project_id`,
         [userId, pmsUser.email, kioskRole, pmsUser.is_active, localProjectId]
       );
 
@@ -259,7 +258,6 @@ export async function POST(request: Request) {
         // This should never happen, but handle it gracefully
         console.error('Failed to create or get profile for user:', userId);
         return NextResponse.json({ error: 'Failed to create user profile' }, { status: 500 });
-        profile = { id: userId, user_id: userId, role: kioskRole, is_active: true, project_id: localProjectId };
       }
     } else {
       // Update local profile with latest PMS role and project_id
@@ -275,10 +273,8 @@ export async function POST(request: Request) {
       }
     }
 
-    // Auto-create kiosk device if user doesn't have one (for kiosk users)
-    if (kioskRole === 'kiosk') {
     // Auto-create kiosk device ONLY for kiosk role users
-    if (kioskRole === 'kiosk' && localProjectId) {
+    if (kioskRole === 'kiosk') {
       const existingKiosk = await queryOne(
         'SELECT id FROM kiosks WHERE profile_id = $1',
         [profile.id]
@@ -287,77 +283,67 @@ export async function POST(request: Request) {
       if (!existingKiosk) {
         console.log(`No kiosk found for profile ${profile.id}, attempting to auto-create...`);
         
-        // Get first available project, prefer one matching user's allowed regions
-        const allowedRegions = pmsUser.allowed_regions || [];
-        let project: { id: string; name: string } | null = null;
+        // Determine which project to use for the kiosk
+        let kioskProjectId = localProjectId;
         
-        if (allowedRegions.length > 0) {
-          // Try to find a project in user's allowed regions
-          project = await queryOne<{ id: string; name: string }>(
-            `SELECT id, name FROM projects WHERE region = ANY($1::text[]) ORDER BY created_at ASC LIMIT 1`,
-            [allowedRegions]
-          );
-        }
-        
-        // Fallback to any project if no region match
-        if (!project) {
-          project = await queryOne<{ id: string; name: string }>(
-            'SELECT id, name FROM projects ORDER BY created_at ASC LIMIT 1'
-          );
-        }
-
-        // If no project exists, create a default one
-        if (!project) {
-          console.log('No projects found, creating default project...');
-          project = await queryOne<{ id: string; name: string }>(
-            `INSERT INTO projects (id, name, slug, is_active) 
-             VALUES (gen_random_uuid(), 'Default Hotel', 'default-hotel', true)
-             ON CONFLICT (slug) DO UPDATE SET name = EXCLUDED.name
-             RETURNING id, name`,
-            []
-          );
-          console.log(`Created default project: ${project?.id}`);
-        }
-
-        if (project) {
-          // Check if kiosk already exists for this profile (race condition check)
-          const existingCheck = await queryOne<{ id: string }>(
-            'SELECT id FROM kiosks WHERE profile_id = $1',
-            [profile.id]
-          );
+        // If no project from PMS, try to find one based on allowed regions
+        if (!kioskProjectId) {
+          const allowedRegions = pmsUser.allowed_regions || [];
+          let project: { id: string; name: string } | null = null;
           
-          if (!existingCheck) {
-            const result = await queryOne<{ id: string }>(
-              `INSERT INTO kiosks (id, project_id, profile_id, name, location, status) 
-               VALUES (gen_random_uuid(), $1, $2, $3, $4, 'offline')
-               RETURNING id`,
-              [
-                project.id,
-                profile.id,
-                `${pmsUser.username || pmsUser.email} Device`,
-                'Auto-created'
-              ]
+          if (allowedRegions.length > 0) {
+            // Try to find a project in user's allowed regions
+            project = await queryOne<{ id: string; name: string }>(
+              `SELECT id, name FROM projects WHERE region = ANY($1::text[]) ORDER BY created_at ASC LIMIT 1`,
+              [allowedRegions]
             );
-            console.log(`Auto-created kiosk ${result?.id} for profile ${profile.id} in project ${project.name} (${project.id})`);
-          } else {
-            console.log(`Kiosk ${existingCheck.id} already exists for profile ${profile.id}`);
+          }
+          
+          // Fallback to any project if no region match
+          if (!project) {
+            project = await queryOne<{ id: string; name: string }>(
+              'SELECT id, name FROM projects ORDER BY created_at ASC LIMIT 1'
+            );
+          }
+
+          // If no project exists, create a default one
+          if (!project) {
+            console.log('No projects found, creating default project...');
+            project = await queryOne<{ id: string; name: string }>(
+              `INSERT INTO projects (id, name, slug, is_active) 
+               VALUES (gen_random_uuid(), 'Default Hotel', 'default-hotel', true)
+               ON CONFLICT (slug) DO UPDATE SET name = EXCLUDED.name
+               RETURNING id, name`,
+              []
+            );
+            console.log(`Created default project: ${project?.id}`);
+          }
+          
+          if (project) {
+            kioskProjectId = project.id;
+          }
+        }
+
+        // Create kiosk if we have a project
+        if (kioskProjectId) {
+          const result = await queryOne<{ id: string }>(
+            `INSERT INTO kiosks (id, project_id, profile_id, name, location, status) 
+             VALUES (gen_random_uuid(), $1, $2, $3, $4, 'offline')
+             ON CONFLICT DO NOTHING
+             RETURNING id`,
+            [
+              kioskProjectId,
+              profile.id,
+              `${pmsUser.username || pmsUser.email} Device`,
+              'Auto-created'
+            ]
+          );
+          if (result) {
+            console.log(`Auto-created kiosk ${result.id} for profile ${profile.id}`);
           }
         } else {
           console.error('Failed to create or find project for kiosk');
         }
-      } else {
-        console.log(`Kiosk already exists for profile ${profile.id}`);
-        await execute(
-          `INSERT INTO kiosks (id, project_id, profile_id, name, location, status)
-           VALUES (gen_random_uuid(), $1, $2, $3, $4, 'offline')
-           ON CONFLICT DO NOTHING`,
-          [
-            localProjectId,
-            profile.id,
-            `${pmsUser.username || pmsUser.email} Device`,
-            'Auto-created'
-          ]
-        );
       }
     }
 

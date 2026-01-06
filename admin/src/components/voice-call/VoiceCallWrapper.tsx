@@ -10,9 +10,13 @@ interface VoiceCallWrapperProps {
   profile: Profile;
 }
 
+// Roles that can receive voice calls from kiosks
+const VOICE_CALL_ENABLED_ROLES = ['super_admin', 'project_admin', 'manager'];
+
 export default function VoiceCallWrapper({ children, profile }: VoiceCallWrapperProps) {
-  // Only super_admin can receive calls from kiosks
-  if (profile.role !== 'super_admin') {
+  // Only admin/manager roles can receive calls from kiosks
+  // Kiosk users don't need voice call context (they use KioskApp directly)
+  if (!VOICE_CALL_ENABLED_ROLES.includes(profile.role)) {
     return <>{children}</>;
   }
 

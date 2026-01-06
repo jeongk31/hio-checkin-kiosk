@@ -100,6 +100,8 @@ async function syncSingleUser(pmsUser: PMSUser): Promise<void> {
  * POST /api/sync
  * Sync projects and users from PMS
  * Called automatically on kiosk/dashboard access
+ * Query params:
+ *   - force=true: Skip cache and force sync
  */
 export async function POST(request: Request) {
   try {
@@ -107,6 +109,10 @@ export async function POST(request: Request) {
     if (!profile) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+
+    // Check if force sync is requested
+    const url = new URL(request.url);
+    const forceSync = url.searchParams.get('force') === 'true';
 
     // Get PMS token from session/cookie
     const cookieStore = await cookies();
@@ -119,12 +125,12 @@ export async function POST(request: Request) {
       }, { status: 401 });
     }
 
-    // Check cache to prevent too frequent syncs
+    // Check cache to prevent too frequent syncs (skip if force=true)
     const cacheKey = `sync-${profile.user_id}`;
     const lastSync = syncCache.get(cacheKey);
     const now = Date.now();
 
-    if (lastSync && (now - lastSync) < SYNC_CACHE_MS) {
+    if (!forceSync && lastSync && (now - lastSync) < SYNC_CACHE_MS) {
       const remainingMs = SYNC_CACHE_MS - (now - lastSync);
       return NextResponse.json({
         success: true,
