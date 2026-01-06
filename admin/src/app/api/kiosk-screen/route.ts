@@ -81,14 +81,23 @@ export async function GET(request: NextRequest) {
 
     // Get latest frame
     const frame = await queryOne<ScreenFrameRow>(
-      `SELECT * FROM kiosk_screen_frames 
-       WHERE kiosk_id = $1 
-       ORDER BY created_at DESC 
+      `SELECT * FROM kiosk_screen_frames
+       WHERE kiosk_id = $1
+       ORDER BY created_at DESC
        LIMIT 1`,
       [kioskId]
     );
 
-    return NextResponse.json({ frame: frame?.frame_data || null });
+    // Return in format expected by dashboard: { frame: { id, image_data } }
+    if (frame) {
+      return NextResponse.json({
+        frame: {
+          id: frame.id,
+          image_data: frame.frame_data
+        }
+      });
+    }
+    return NextResponse.json({ frame: null });
   } catch (error) {
     console.error('Error getting screen frame:', error);
     return NextResponse.json({ error: 'Failed to get frame' }, { status: 500 });

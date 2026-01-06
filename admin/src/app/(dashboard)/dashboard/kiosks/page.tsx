@@ -61,9 +61,9 @@ export default async function KiosksPage() {
     !isSuperAdmin && profile.project_id ? [profile.project_id] : []
   );
 
-  // Get all kiosks with their project info
+  // Get all kiosks with their project info (only kiosks linked to kiosk role profiles)
   const kiosksSQL = `
-    SELECT 
+    SELECT
       k.*,
       json_build_object(
         'id', p.id,
@@ -83,7 +83,7 @@ export default async function KiosksPage() {
       ) as profile
     FROM kiosks k
     LEFT JOIN projects p ON k.project_id = p.id
-    LEFT JOIN profiles pr ON k.profile_id = pr.id
+    INNER JOIN profiles pr ON k.profile_id = pr.id AND pr.role = 'kiosk'
     ${!isSuperAdmin && profile.project_id ? 'WHERE k.project_id = $1' : ''}
     ORDER BY k.created_at DESC
   `;

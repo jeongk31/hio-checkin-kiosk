@@ -399,6 +399,28 @@ export default function KioskApp({ kiosk, content, paymentResult }: KioskAppProp
   const [showIncomingCall, setShowIncomingCall] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
+  // Sync projects from PMS on kiosk load (runs once on mount)
+  useEffect(() => {
+    const syncFromPMS = async () => {
+      try {
+        const response = await fetch('/api/sync', {
+          method: 'POST',
+          credentials: 'include',
+        });
+        if (response.ok) {
+          const data = await response.json();
+          if (!data.cached) {
+            console.log('[Kiosk] Synced from PMS:', data.synced);
+          }
+        }
+      } catch (error) {
+        console.error('[Kiosk] Failed to sync from PMS:', error);
+      }
+    };
+
+    syncFromPMS();
+  }, []); // Run once on mount
+
   // Handle payment result from URL callback (returned from EasyCheck app)
   useEffect(() => {
     if (paymentResult) {

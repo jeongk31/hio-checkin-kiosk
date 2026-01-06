@@ -25,17 +25,13 @@ export default async function DashboardPage() {
   const today = new Date().toISOString().split('T')[0];
 
   // Fetch stats based on role
-  let projectCount = 0;
   let kioskCount = 0;
-  let memberCount = 0;
   let todayCheckins = 0;
   let recentCheckins: RecentCheckin[] = [];
 
   if (isSuperAdmin) {
-    const [projectsResult, kiosksResult, membersResult, checkinsResult, recent] = await Promise.all([
-      queryOne<CountResult>('SELECT COUNT(*)::int as count FROM projects'),
+    const [kiosksResult, checkinsResult, recent] = await Promise.all([
       queryOne<CountResult>('SELECT COUNT(*)::int as count FROM kiosks'),
-      queryOne<CountResult>('SELECT COUNT(*)::int as count FROM profiles'),
       queryOne<CountResult>(
         'SELECT COUNT(*)::int as count FROM reservations WHERE status = $1 AND check_in_date = $2',
         ['checked_in', today]
@@ -49,19 +45,13 @@ export default async function DashboardPage() {
         ['checked_in']
       ),
     ]);
-    projectCount = projectsResult?.count || 0;
     kioskCount = kiosksResult?.count || 0;
-    memberCount = membersResult?.count || 0;
     todayCheckins = checkinsResult?.count || 0;
     recentCheckins = recent || [];
   } else {
-    const [kiosksResult, membersResult, checkinsResult, recent] = await Promise.all([
+    const [kiosksResult, checkinsResult, recent] = await Promise.all([
       queryOne<CountResult>(
         'SELECT COUNT(*)::int as count FROM kiosks WHERE project_id = $1',
-        [profile.project_id]
-      ),
-      queryOne<CountResult>(
-        'SELECT COUNT(*)::int as count FROM profiles WHERE project_id = $1',
         [profile.project_id]
       ),
       queryOne<CountResult>(
@@ -78,7 +68,6 @@ export default async function DashboardPage() {
       ),
     ]);
     kioskCount = kiosksResult?.count || 0;
-    memberCount = membersResult?.count || 0;
     todayCheckins = checkinsResult?.count || 0;
     recentCheckins = recent || [];
   }
@@ -87,26 +76,10 @@ export default async function DashboardPage() {
     <div className="p-8">
       <h1 className="text-2xl font-bold text-gray-900 mb-8">대시보드</h1>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        {isSuperAdmin && (
-          <div className="bg-white rounded-lg shadow p-6">
-            <div className="text-sm text-gray-500">전체 프로젝트</div>
-            <div className="text-3xl font-bold text-gray-900 mt-2">
-              {projectCount}
-            </div>
-          </div>
-        )}
-
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
         <div className="bg-white rounded-lg shadow p-6">
           <div className="text-sm text-gray-500">전체 키오스크</div>
           <div className="text-3xl font-bold text-gray-900 mt-2">{kioskCount}</div>
-        </div>
-
-        <div className="bg-white rounded-lg shadow p-6">
-          <div className="text-sm text-gray-500">전체 멤버</div>
-          <div className="text-3xl font-bold text-gray-900 mt-2">
-            {memberCount}
-          </div>
         </div>
 
         <div className="bg-white rounded-lg shadow p-6">

@@ -23,8 +23,6 @@ export default function Sidebar({ profile }: SidebarProps) {
 
   const superAdminLinks = [
     { href: '/dashboard', label: '대시보드', icon: '📊' },
-    { href: '/dashboard/projects', label: '프로젝트 관리', icon: '🏨' },
-    { href: '/dashboard/accounts', label: '계정 관리', icon: '👥' },
     { href: '/dashboard/kiosks', label: '전체 키오스크', icon: '🖥️' },
     { href: '/dashboard/rooms', label: '당일 객실', icon: '🛏️' },
     { href: '/dashboard/content', label: '문구 편집', icon: '✏️' },
@@ -35,7 +33,6 @@ export default function Sidebar({ profile }: SidebarProps) {
     { href: '/dashboard/kiosks', label: '키오스크 관리', icon: '🖥️' },
     { href: '/dashboard/rooms', label: '당일 객실', icon: '🛏️' },
     { href: '/dashboard/content', label: '문구 편집', icon: '✏️' },
-    { href: '/dashboard/accounts', label: '키오스크 계정', icon: '👥' },
   ];
 
   const links = isSuperAdmin ? superAdminLinks : projectAdminLinks;

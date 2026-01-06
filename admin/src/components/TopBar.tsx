@@ -25,8 +25,8 @@ export default function TopBar({ profile }: TopBarProps) {
 
   const superAdminLinks = [
     { href: '/dashboard', label: '대시보드' },
-    { href: '/dashboard/projects', label: '프로젝트' },
-    { href: '/dashboard/accounts', label: '계정' },
+    // { href: '/dashboard/projects', label: '프로젝트' },
+    // { href: '/dashboard/accounts', label: '계정' },
     { href: '/dashboard/kiosks', label: '키오스크' },
     { href: '/dashboard/rooms', label: '당일 객실' },
     { href: '/dashboard/content', label: '문구' },

@@ -8,6 +8,13 @@ interface SimpleProject {
   name: string;
 }
 
+interface ProjectSettings {
+  daily_reset_time?: string; // Format: "HH:mm"
+  type?: string;
+  province?: string;
+  location?: string;
+}
+
 interface ContentEditorProps {
   initialContent: KioskContent[];
   projects: SimpleProject[] | null;
@@ -147,6 +154,9 @@ export default function ContentEditor({
   const [projectId, setProjectId] = useState(defaultProjectId || '');
   const [saving, setSaving] = useState<string | null>(null);
   const [savedKeys, setSavedKeys] = useState<Set<string>>(new Set());
+  const [projectSettings, setProjectSettings] = useState<ProjectSettings>({});
+  const [savingSettings, setSavingSettings] = useState(false);
+  const [settingsSaved, setSettingsSaved] = useState(false);
 
   // Convert content array to map
   useEffect(() => {
@@ -173,9 +183,43 @@ export default function ContentEditor({
     }
   };
 
+  const loadProjectSettings = async (pid: string) => {
+    try {
+      const response = await fetch(`/api/projects/${pid}/settings`);
+      if (response.ok) {
+        const data = await response.json();
+        setProjectSettings(data.settings || {});
+      }
+    } catch (error) {
+      console.error('Error loading project settings:', error);
+    }
+  };
+
+  const saveProjectSettings = async (settings: Partial<ProjectSettings>) => {
+    if (!projectId) return;
+    setSavingSettings(true);
+    try {
+      const response = await fetch(`/api/projects/${projectId}/settings`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(settings),
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setProjectSettings(data.settings);
+        setSettingsSaved(true);
+        setTimeout(() => setSettingsSaved(false), 2000);
+      }
+    } catch (error) {
+      console.error('Error saving project settings:', error);
+    }
+    setSavingSettings(false);
+  };
+
   useEffect(() => {
     if (projectId) {
       loadContent(projectId);
+      loadProjectSettings(projectId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
@@ -305,6 +349,59 @@ export default function ContentEditor({
 
       {projectId && (
         <>
+          {/* Project Settings Section */}
+          <div className="bg-white rounded-lg shadow overflow-hidden mb-8">
+            <div className="px-6 py-4 bg-gray-50 border-b">
+              <h3 className="text-lg font-semibold text-gray-900">프로젝트 설정</h3>
+              <p className="text-sm text-gray-500 mt-1">당일 객실 데이터 자동 초기화 설정</p>
+            </div>
+            <div className="px-6 py-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    일일 리셋 시간 (KST)
+                  </label>
+                  <p className="text-xs text-gray-500">
+                    매일 지정된 시간에 당일 객실 데이터가 자동으로 삭제됩니다
+                  </p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="time"
+                    value={projectSettings.daily_reset_time || ''}
+                    onChange={(e) => {
+                      setProjectSettings(prev => ({
+                        ...prev,
+                        daily_reset_time: e.target.value,
+                      }));
+                    }}
+                    className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <button
+                    onClick={() => saveProjectSettings({ daily_reset_time: projectSettings.daily_reset_time })}
+                    disabled={savingSettings}
+                    className="px-4 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    {savingSettings ? '저장 중...' : '저장'}
+                  </button>
+                  {settingsSaved && (
+                    <span className="text-sm text-green-600 flex items-center gap-1">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                      </svg>
+                      저장됨
+                    </span>
+                  )}
+                </div>
+              </div>
+              {projectSettings.daily_reset_time && (
+                <p className="text-sm text-blue-600 mt-3">
+                  현재 설정: 매일 {projectSettings.daily_reset_time} (한국 시간)에 당일 객실 데이터가 초기화됩니다
+                </p>
+              )}
+            </div>
+          </div>
+
           <div className="mb-6 flex justify-between items-center">
             <p className="text-sm text-gray-600">
               이 프로젝트의 모든 키오스크에 동일한 텍스트가 적용됩니다.

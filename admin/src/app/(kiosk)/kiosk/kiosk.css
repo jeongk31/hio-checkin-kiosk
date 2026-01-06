@@ -14,33 +14,35 @@
   --danger: #f04452;
 }
 
-/* Kiosk App Container */
+/* Kiosk App Container - Optimized for 2000x1200 tablet */
 .kiosk-app {
-  min-height: 100vh;
+  height: 100vh;
+  max-height: 100vh;
+  overflow: hidden;
   background: var(--gray-50);
-  padding: 24px;
+  padding: 32px;
 }
 
 /* Profile Info (Top Left) */
 .profile-info {
   position: fixed;
-  top: 24px;
-  left: calc(50% - 540px);
+  top: 32px;
+  left: calc(50% - 780px);
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 16px;
   background: white;
-  padding: 8px 16px;
-  border-radius: 12px;
+  padding: 12px 20px;
+  border-radius: 14px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
   z-index: 1000;
 }
 
 .profile-name {
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 500;
   color: var(--gray-600);
-  max-width: 150px;
+  max-width: 180px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -50,9 +52,9 @@
   background: var(--gray-50);
   color: var(--gray-500);
   border: none;
-  padding: 6px 12px;
-  border-radius: 8px;
-  font-size: 13px;
+  padding: 10px 16px;
+  border-radius: 10px;
+  font-size: 15px;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -71,9 +73,11 @@
 
 /* 화면 컨테이너 */
 .screen {
-  padding: 16px 24px;
+  padding: 24px 32px;
   animation: fadeIn 0.3s ease;
-  min-height: 100vh;
+  height: 100vh;
+  max-height: 100vh;
+  overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -84,8 +88,9 @@
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 2px;
-  width: 1100px;
+  gap: 8px;
+  width: 1600px;
+  max-height: calc(100vh - 80px);
 }
 
 /* Top Button Row - call indicator (left) + staff button (right) */
@@ -99,35 +104,35 @@
 /* Call Indicator */
 .call-indicator {
   background: white;
-  padding: 8px 14px;
-  border-radius: 10px;
+  padding: 12px 18px;
+  border-radius: 12px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
 }
 
 .call-indicator-dot {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
 }
 
 .call-indicator-text {
-  font-size: 13px;
+  font-size: 16px;
   font-weight: 500;
   color: var(--gray-900);
 }
 
 .call-indicator-duration {
-  font-size: 13px;
+  font-size: 16px;
   color: var(--gray-400);
   font-family: monospace;
 }
 
 .call-indicator-end {
-  width: 28px;
-  height: 28px;
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
   background-color: #ef4444;
   border: none;
@@ -135,7 +140,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-left: 4px;
+  margin-left: 6px;
   transition: background-color 0.2s;
 }
 
@@ -148,14 +153,14 @@
   background: white;
   color: var(--gray-900);
   border: none;
-  padding: 8px 14px;
-  border-radius: 10px;
-  font-size: 13px;
+  padding: 12px 18px;
+  border-radius: 12px;
+  font-size: 16px;
   font-weight: 500;
   cursor: pointer;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
   transition: all 0.2s ease;
 }
@@ -167,8 +172,8 @@
 .staff-call-btn::before {
   content: '';
   display: inline-block;
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
   background: var(--danger);
   border-radius: 50%;
 }
@@ -185,12 +190,14 @@
 }
 
 .container {
-  width: 1100px;
+  width: 1600px;
   background: white;
-  border-radius: 24px;
-  padding: 32px 60px 32px;
+  border-radius: 28px;
+  padding: 48px 80px 48px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04);
   position: relative;
+  max-height: calc(100vh - 140px);
+  overflow: hidden;
 }
 
 /* Arrow Navigation */
@@ -228,8 +235,8 @@
 }
 
 .nav-arrow svg {
-  width: 48px;
-  height: 48px;
+  width: 64px;
+  height: 64px;
   color: var(--gray-400);
 }
 
@@ -238,7 +245,7 @@
 }
 
 .nav-arrow span {
-  font-size: 13px;
+  font-size: 16px;
   color: var(--gray-400);
   font-weight: 500;
 }
@@ -256,7 +263,7 @@
 }
 
 .logo-image {
-  height: 80px;
+  height: 100px;
   width: auto;
   object-fit: contain;
 }
@@ -268,15 +275,15 @@
 }
 
 .welcome-message h2 {
-  font-size: 24px;
+  font-size: 32px;
   color: var(--gray-900);
-  margin-bottom: 8px;
+  margin-bottom: 12px;
   font-weight: 600;
   letter-spacing: -0.5px;
 }
 
 .welcome-message p {
-  font-size: 15px;
+  font-size: 18px;
   color: var(--gray-400);
   font-weight: 400;
   margin: 0;
@@ -284,9 +291,9 @@
 
 .footer-info {
   text-align: center;
-  margin-bottom: 16px;
+  margin-bottom: 20px;
   color: var(--gray-200);
-  font-size: 13px;
+  font-size: 16px;
   font-weight: 400;
 }
 
@@ -298,7 +305,7 @@
 .menu-buttons {
   display: flex;
   flex-direction: row;
-  gap: 12px;
+  gap: 16px;
 }
 
 .menu-buttons .primary-btn.large {
@@ -329,9 +336,9 @@
   position: relative;
   flex: 1;
   text-align: center;
-  font-size: 13px;
+  font-size: 16px;
   color: var(--gray-200);
-  padding: 8px;
+  padding: 10px;
   background: white;
   z-index: 1;
   font-weight: 500;
@@ -350,17 +357,17 @@
 .progress-step::before {
   content: '';
   display: block;
-  width: 10px;
-  height: 10px;
+  width: 14px;
+  height: 14px;
   background: var(--gray-100);
   border-radius: 50%;
-  margin: 0 auto 10px;
+  margin: 0 auto 12px;
 }
 
 .progress-step.active::before {
   background: var(--primary);
-  width: 12px;
-  height: 12px;
+  width: 16px;
+  height: 16px;
 }
 
 .progress-step.completed::before {
@@ -369,9 +376,9 @@
 
 /* 화면 제목 */
 .screen-title {
-  font-size: 22px;
+  font-size: 28px;
   color: var(--gray-900);
-  margin-bottom: 16px;
+  margin-bottom: 24px;
   text-align: center;
   font-weight: 600;
   letter-spacing: -0.5px;
@@ -388,19 +395,19 @@
 
 .form-group label {
   display: block;
-  font-size: 14px;
+  font-size: 17px;
   font-weight: 600;
   color: var(--gray-500);
-  margin-bottom: 8px;
+  margin-bottom: 10px;
   letter-spacing: -0.3px;
 }
 
 .input-field {
   width: 100%;
-  padding: 14px 16px;
-  font-size: 15px;
+  padding: 18px 20px;
+  font-size: 18px;
   border: 1px solid var(--gray-100);
-  border-radius: 12px;
+  border-radius: 14px;
   transition: all 0.2s ease;
   background: var(--gray-50);
   color: var(--gray-900);
@@ -423,17 +430,17 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 28px;
+  gap: 40px;
 }
 
 .number-btn {
-  width: 44px;
-  height: 44px;
-  font-size: 22px;
+  width: 60px;
+  height: 60px;
+  font-size: 28px;
   border: none;
   background: var(--gray-50);
   color: var(--gray-400);
-  border-radius: 12px;
+  border-radius: 14px;
   cursor: pointer;
   transition: all 0.2s ease;
   font-weight: 400;
@@ -446,10 +453,10 @@
 }
 
 .number-display {
-  font-size: 32px;
+  font-size: 48px;
   font-weight: 600;
   color: var(--gray-900);
-  min-width: 48px;
+  min-width: 60px;
   text-align: center;
 }
 
@@ -465,13 +472,13 @@
   cursor: pointer;
   font-weight: 400;
   color: var(--gray-500);
-  font-size: 14px;
+  font-size: 17px;
 }
 
 .checkbox-label input[type="checkbox"] {
-  width: 20px;
-  height: 20px;
-  margin-right: 10px;
+  width: 24px;
+  height: 24px;
+  margin-right: 12px;
   cursor: pointer;
   accent-color: var(--primary);
 }
@@ -682,14 +689,14 @@
 .room-info-card {
   background: var(--primary);
   color: white;
-  padding: 32px;
-  border-radius: 18px;
+  padding: 40px;
+  border-radius: 20px;
   margin: 32px 0;
 }
 
 .room-info-card h3 {
-  font-size: 12px;
-  margin-bottom: 20px;
+  font-size: 14px;
+  margin-bottom: 24px;
   opacity: 0.8;
   font-weight: 500;
   letter-spacing: 1px;
@@ -706,7 +713,7 @@
 }
 
 .large-text {
-  font-size: 48px;
+  font-size: 64px;
   font-weight: 700;
   letter-spacing: -1px;
 }
@@ -719,7 +726,7 @@
 .detail-item {
   display: flex;
   justify-content: space-between;
-  font-size: 15px;
+  font-size: 18px;
   font-weight: 400;
 }
 
@@ -728,9 +735,9 @@
 }
 
 .password {
-  font-size: 20px;
+  font-size: 26px;
   font-weight: 600;
-  letter-spacing: 3px;
+  letter-spacing: 4px;
 }
 
 .checkout-info {
@@ -755,11 +762,11 @@
 .secondary-btn,
 .danger-btn {
   flex: 1;
-  padding: 16px 24px;
-  font-size: 15px;
+  padding: 20px 32px;
+  font-size: 18px;
   font-weight: 600;
   border: none;
-  border-radius: 14px;
+  border-radius: 16px;
   cursor: pointer;
   transition: all 0.2s ease;
   font-family: inherit;
@@ -776,10 +783,10 @@
 
 .primary-btn.large {
   width: 100%;
-  padding: 18px 24px;
-  font-size: 17px;
+  padding: 24px 32px;
+  font-size: 22px;
   font-weight: 600;
-  border-radius: 16px;
+  border-radius: 18px;
 }
 
 .secondary-btn {
@@ -969,16 +976,16 @@
 .screen-description {
   text-align: center;
   color: var(--gray-400);
-  font-size: 14px;
-  margin-bottom: 16px;
+  font-size: 17px;
+  margin-bottom: 20px;
   font-weight: 400;
 }
 
 .screen-notice {
   text-align: center;
   color: var(--gray-300);
-  font-size: 12px;
-  margin-bottom: 12px;
+  font-size: 15px;
+  margin-bottom: 16px;
   font-weight: 400;
 }
 
@@ -1540,27 +1547,82 @@
   margin: 12px 0;
 }
 
-/* 반응형 - smaller tablets */
-@media (max-width: 1200px) {
+/* 반응형 - 2000x1200 tablet optimized */
+@media (min-width: 1800px) {
   .screen-wrapper {
-    width: 900px;
+    width: 1700px;
   }
 
   .container {
-    width: 900px;
+    width: 1700px;
+    padding: 56px 100px;
+  }
+
+  .nav-arrow.left {
+    left: -100px;
+  }
+
+  .nav-arrow.right {
+    right: -100px;
   }
 }
 
-@media (max-width: 960px) {
+@media (max-width: 1700px) {
+  .screen-wrapper {
+    width: 1400px;
+  }
+
+  .container {
+    width: 1400px;
+    padding: 40px 70px;
+  }
+}
+
+@media (max-width: 1500px) {
+  .screen-wrapper {
+    width: 1200px;
+  }
+
+  .container {
+    width: 1200px;
+    padding: 36px 60px;
+  }
+}
+
+@media (max-width: 1300px) {
+  .screen-wrapper {
+    width: 1000px;
+  }
+
+  .container {
+    width: 1000px;
+    padding: 32px 50px;
+  }
+
+  .nav-arrow.left {
+    left: -70px;
+  }
+
+  .nav-arrow.right {
+    right: -70px;
+  }
+
+  .nav-arrow svg {
+    width: 48px;
+    height: 48px;
+  }
+}
+
+@media (max-width: 1100px) {
   .screen-wrapper {
     width: 100%;
-    max-width: 700px;
+    max-width: 800px;
   }
 
   .container {
     width: 100%;
-    padding: 24px 40px 24px;
-    border-radius: 16px;
+    padding: 28px 40px;
+    border-radius: 20px;
   }
 
   .nav-arrow.left {
@@ -1572,7 +1634,7 @@
   }
 
   .nav-arrow svg {
-    width: 36px;
-    height: 36px;
+    width: 40px;
+    height: 40px;
   }
 }
