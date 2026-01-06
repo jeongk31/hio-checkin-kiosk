@@ -5,7 +5,6 @@ const JWT_SECRET = new TextEncoder().encode(
   process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-in-production'
 );
 const SESSION_COOKIE_NAME = 'session_token';
-const PMS_AUTH_URL = process.env.PMS_AUTH_URL || 'http://localhost:8000';
 
 async function verifyToken(token: string): Promise<{ userId: string } | null> {
   try {
@@ -16,128 +15,47 @@ async function verifyToken(token: string): Promise<{ userId: string } | null> {
   }
 }
 
-interface PMSVerifyResult {
-  valid: boolean;
-  user?: {
-    allowed_systems?: string[];
-    allowed_regions?: string[];
-    role?: string;
-  };
-}
-
-/**
- * Verify PMS token is still valid (called on each protected request)
- */
-async function verifyPMSToken(token: string): Promise<PMSVerifyResult | null> {
-  try {
-    const response = await fetch(`${PMS_AUTH_URL}/api/v1/auth/verify`, {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-      },
-    });
-
-    if (!response.ok) return null;
-
-    const data = await response.json();
-    
-    // Check if valid and has kiosk access
-    if (!data.valid) return null;
-    if (!data.user?.allowed_systems?.includes('kiosk')) return null;
-    
-    return data;
-  } catch {
-    return null;
-  }
-}
-
 export async function middleware(request: NextRequest) {
-  const response = NextResponse.next({ request });
-
-  const sessionToken = request.cookies.get(SESSION_COOKIE_NAME)?.value;
-  const pmsToken = request.cookies.get('pms_token')?.value;
-  const isAuthPage = request.nextUrl.pathname === '/login';
-  const isPublicPage = request.nextUrl.pathname === '/';
-  const isApiRoute = request.nextUrl.pathname.startsWith('/api');
+  const pathname = request.nextUrl.pathname;
 
   // Skip middleware for API routes - they handle their own auth
-  if (isApiRoute) {
-    return response;
+  if (pathname.startsWith('/api')) {
+    return NextResponse.next();
   }
 
-  // Check if user has valid session
-  let userId: string | null = null;
+  const sessionToken = request.cookies.get(SESSION_COOKIE_NAME)?.value;
+  const isAuthPage = pathname === '/login';
+  const isPublicPage = pathname === '/';
+
+  // Check if user has valid local session
+  let isAuthenticated = false;
   if (sessionToken) {
     const payload = await verifyToken(sessionToken);
-    userId = payload?.userId || null;
+    isAuthenticated = !!payload?.userId;
   }
 
-  // If user has session, validate PMS token on each request
-  if (userId && pmsToken) {
-    const pmsResult = await verifyPMSToken(pmsToken);
-    
-    if (!pmsResult) {
-      // PMS token invalid - clear session and redirect to login
-      const url = request.nextUrl.clone();
-      url.pathname = '/login';
-      const redirectResponse = NextResponse.redirect(url);
-      redirectResponse.cookies.set('session_token', '', { maxAge: 0 });
-      redirectResponse.cookies.set('pms_token', '', { maxAge: 0 });
-      redirectResponse.cookies.set('user_role', '', { maxAge: 0 });
-      redirectResponse.cookies.set('allowed_regions', '', { maxAge: 0 });
-      return redirectResponse;
-    }
-    
-    // Update allowed_regions cookie from PMS response
-    if (pmsResult.user?.allowed_regions) {
-      response.cookies.set('allowed_regions', JSON.stringify(pmsResult.user.allowed_regions), {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'lax',
-        maxAge: 7 * 24 * 60 * 60, // 7 days
-        path: '/',
-      });
-    }
-  }
-
-  // If not logged in and trying to access protected route, redirect to login
-  if (!userId && !isAuthPage && !isPublicPage) {
+  // Not authenticated - redirect to login (except for login/public pages)
+  if (!isAuthenticated && !isAuthPage && !isPublicPage) {
     const url = request.nextUrl.clone();
     url.pathname = '/login';
-    const redirectResponse = NextResponse.redirect(url);
-    // Clear any stale cookies
-    redirectResponse.cookies.set('session_token', '', { maxAge: 0 });
-    redirectResponse.cookies.set('pms_token', '', { maxAge: 0 });
-    redirectResponse.cookies.set('user_role', '', { maxAge: 0 });
-    return redirectResponse;
+    return NextResponse.redirect(url);
   }
 
-  // If logged in, check user role from cookie
-  if (userId) {
-    const userRole = request.cookies.get('user_role')?.value;
-
-    // If no role cookie but we have userId, something is wrong - clear session and redirect
-    if (!userRole) {
-      const url = request.nextUrl.clone();
-      url.pathname = '/login';
-      const redirectResponse = NextResponse.redirect(url);
-      redirectResponse.cookies.set('session_token', '', { maxAge: 0 });
-      redirectResponse.cookies.set('user_role', '', { maxAge: 0 });
-      return redirectResponse;
-    }
-
-    // Redirect from login page if already logged in
-    if (isAuthPage) {
-      const url = request.nextUrl.clone();
-      url.pathname = '/dashboard';
-      return NextResponse.redirect(url);
-    }
-
-    // No role-based routing - all users can access both dashboard and kiosk
-    // The pages themselves will handle access control
+  // Authenticated and on login page - redirect to dashboard
+  if (isAuthenticated && isAuthPage) {
+    const url = request.nextUrl.clone();
+    url.pathname = '/dashboard';
+    return NextResponse.redirect(url);
   }
 
-  return response;
+  // Authenticated and on public page - redirect to dashboard  
+  if (isAuthenticated && isPublicPage) {
+    const url = request.nextUrl.clone();
+    url.pathname = '/dashboard';
+    return NextResponse.redirect(url);
+  }
+
+  return NextResponse.next();
 }
 
 export const config = {

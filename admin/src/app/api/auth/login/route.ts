@@ -158,9 +158,10 @@ export async function POST(request: Request) {
       path: '/',
     });
 
-    // All users go to dashboard after login
-    // /kiosk is only for physical kiosk devices accessed directly
-    const redirectUrl = '/dashboard';
+    // Redirect based on role:
+    // - kiosk users go to /kiosk (the kiosk interface for guests)
+    // - admin/manager users go to /dashboard
+    const redirectUrl = kioskRole === 'kiosk' ? '/kiosk' : '/dashboard';
 
     return NextResponse.json({ success: true, redirectUrl });
   } catch (error) {
