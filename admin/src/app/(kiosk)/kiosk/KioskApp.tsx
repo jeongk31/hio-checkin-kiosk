@@ -461,8 +461,8 @@ export default function KioskApp({ kiosk, content, paymentResult }: KioskAppProp
       }
     };
 
-    // Poll every 2 seconds
-    const interval = setInterval(pollControls, 2000);
+    // Poll every 5 seconds (reduced to prevent DB exhaustion)
+    const interval = setInterval(pollControls, 5000);
     pollControls(); // Initial poll
 
     return () => {
@@ -490,8 +490,8 @@ export default function KioskApp({ kiosk, content, paymentResult }: KioskAppProp
       }
     };
 
-    // Poll every 1.5 seconds for faster call detection
-    const interval = setInterval(pollCalls, 1500);
+    // Poll every 3 seconds for call detection (reduced to prevent DB exhaustion)
+    const interval = setInterval(pollCalls, 3000);
     pollCalls(); // Initial poll
 
     return () => {

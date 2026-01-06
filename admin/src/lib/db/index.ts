@@ -1,15 +1,27 @@
 import { Pool, PoolClient } from 'pg';
 
-// PostgreSQL connection pool
+// PostgreSQL connection pool with optimized settings
 const pool = new Pool({
   host: process.env.POSTGRES_HOST || 'localhost',
   port: parseInt(process.env.POSTGRES_PORT || '5432'),
   database: process.env.POSTGRES_DATABASE || 'kiosk',
   user: process.env.POSTGRES_USER || 'orange',
   password: process.env.POSTGRES_PASSWORD || '00oo00oo',
-  max: 20,
+  // Reduce max connections to leave room for other processes
+  max: 10,
+  // Minimum connections to keep in the pool
+  min: 2,
+  // Time before idle connections are closed
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 2000,
+  // Time to wait for a connection before failing
+  connectionTimeoutMillis: 5000,
+  // Allow connections to be reused
+  allowExitOnIdle: false,
+});
+
+// Handle pool errors gracefully
+pool.on('error', (err) => {
+  console.error('[DB Pool] Unexpected error on idle client:', err.message);
 });
 
 // Export pool for direct access if needed

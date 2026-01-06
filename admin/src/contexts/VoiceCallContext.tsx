@@ -170,8 +170,8 @@ export function VoiceCallProvider({ children, profile }: VoiceCallProviderProps)
       }
     };
 
-    // Poll every 1.5 seconds for faster call detection
-    const interval = setInterval(pollForIncomingCalls, 1500);
+    // Poll every 3 seconds for call detection (reduced from 1.5s to prevent DB exhaustion)
+    const interval = setInterval(pollForIncomingCalls, 3000);
     pollForIncomingCalls(); // Initial poll
 
     return () => {

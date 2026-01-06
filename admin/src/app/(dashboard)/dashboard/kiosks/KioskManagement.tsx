@@ -101,8 +101,9 @@ export default function KioskManagement({
   }, [selectedProjectId]);
 
   // Polling for kiosk updates (replaces postgres_changes subscription)
+  // Reduced frequency to prevent database connection exhaustion
   useEffect(() => {
-    const interval = setInterval(refreshKiosks, 3000);
+    const interval = setInterval(refreshKiosks, 10000); // Every 10 seconds instead of 3
     return () => clearInterval(interval);
   }, [refreshKiosks]);
 
@@ -336,16 +337,16 @@ function KioskLivePreview({
       }
     };
 
-    // Poll every second for screen updates
-    const pollInterval = setInterval(pollScreenFrame, 1000);
+    // Poll every 3 seconds for screen updates (reduced from 1s to prevent DB exhaustion)
+    const pollInterval = setInterval(pollScreenFrame, 3000);
     pollScreenFrame(); // Initial poll
 
-    // Reset receiving state if no frames for 5 seconds
+    // Reset receiving state if no frames for 10 seconds
     const checkInterval = setInterval(() => {
-      if (isActive && lastFrameTimeRef.current > 0 && Date.now() - lastFrameTimeRef.current > 5000) {
+      if (isActive && lastFrameTimeRef.current > 0 && Date.now() - lastFrameTimeRef.current > 10000) {
         setIsReceiving(false);
       }
-    }, 2000);
+    }, 5000);
 
     return () => {
       isActive = false;
