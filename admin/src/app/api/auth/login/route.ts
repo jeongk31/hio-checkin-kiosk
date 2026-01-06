@@ -158,8 +158,9 @@ export async function POST(request: Request) {
       path: '/',
     });
 
-    // Determine redirect URL based on role
-    const redirectUrl = kioskRole === 'kiosk' ? '/kiosk' : '/dashboard';
+    // All users go to dashboard after login
+    // /kiosk is only for physical kiosk devices accessed directly
+    const redirectUrl = '/dashboard';
 
     return NextResponse.json({ success: true, redirectUrl });
   } catch (error) {
