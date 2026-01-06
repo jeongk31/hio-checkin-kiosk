@@ -59,8 +59,6 @@ export async function middleware(request: NextRequest) {
   const isAuthPage = request.nextUrl.pathname === '/login';
   const isPublicPage = request.nextUrl.pathname === '/';
   const isApiRoute = request.nextUrl.pathname.startsWith('/api');
-  const isKioskRoute = request.nextUrl.pathname.startsWith('/kiosk');
-  const isDashboardRoute = request.nextUrl.pathname.startsWith('/dashboard');
 
   // Skip middleware for API routes - they handle their own auth
   if (isApiRoute) {
