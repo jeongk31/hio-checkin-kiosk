@@ -57,13 +57,51 @@ async function syncSingleProject(pmsProject: PMSProject): Promise<void> {
 async function syncSingleUser(pmsUser: PMSUser): Promise<void> {
   const kioskRole = getKioskRole(pmsUser.role);
 
-  // Create or update user
-  await execute(
-    `INSERT INTO users (id, email, password_hash)
-     VALUES ($1, $2, $3)
-     ON CONFLICT (id) DO UPDATE SET email = $2`,
-    [pmsUser.id, pmsUser.email, 'pms-managed']
+  // Check if a user with this email already exists with a different ID
+  const existingUserByEmail = await queryOne<{ id: string; email: string }>(
+    'SELECT id, email FROM users WHERE email = $1',
+    [pmsUser.email]
   );
+
+  if (existingUserByEmail && existingUserByEmail.id !== pmsUser.id) {
+    // Email exists with different ID - need to migrate to PMS ID
+    console.log(`[Sync] Email ${pmsUser.email} exists with different ID. Updating to PMS ID: ${pmsUser.id}`);
+    
+    const oldUserId = existingUserByEmail.id;
+    
+    // Delete all foreign key references to the old user ID
+    await execute('DELETE FROM sessions WHERE user_id = $1', [oldUserId]);
+    
+    // Get the profile ID before deleting (for kiosk cleanup)
+    const oldProfile = await queryOne<{ id: string }>('SELECT id FROM profiles WHERE user_id = $1', [oldUserId]);
+    
+    // Delete kiosks associated with the old profile
+    if (oldProfile) {
+      await execute('DELETE FROM kiosks WHERE profile_id = $1', [oldProfile.id]);
+    }
+    
+    // Delete the old profile
+    await execute('DELETE FROM profiles WHERE user_id = $1', [oldUserId]);
+    
+    // Now we can safely delete the old user and create new one with PMS ID
+    await execute('DELETE FROM users WHERE id = $1', [oldUserId]);
+    
+    // Create user with the correct PMS ID
+    await execute(
+      'INSERT INTO users (id, email, password_hash) VALUES ($1, $2, $3)',
+      [pmsUser.id, pmsUser.email, 'pms-managed']
+    );
+  } else {
+    // Create or update user by ID
+    await execute(
+      `INSERT INTO users (id, email, password_hash)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (id) DO UPDATE SET 
+         email = EXCLUDED.email,
+         password_hash = EXCLUDED.password_hash`,
+      [pmsUser.id, pmsUser.email, 'pms-managed']
+    );
+  }
 
   // Create or update profile
   await execute(

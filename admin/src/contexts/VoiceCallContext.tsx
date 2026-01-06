@@ -8,6 +8,7 @@ interface KioskInfo {
   id: string;
   name: string;
   location: string | null;
+  project_id: string;
 }
 
 interface VoiceCallState {
@@ -108,7 +109,7 @@ export function VoiceCallProvider({ children, profile }: VoiceCallProviderProps)
       const response = await fetch(`/api/kiosks/${kioskId}`);
       if (response.ok) {
         const data = await response.json();
-        return { id: data.id, name: data.name, location: data.location };
+        return { id: data.id, name: data.name, location: data.location, project_id: data.project_id };
       }
       return null;
     } catch (error) {
@@ -195,14 +196,19 @@ export function VoiceCallProvider({ children, profile }: VoiceCallProviderProps)
     }
 
     try {
-      // Create video session via API
+      // Generate a unique room name for this call
+      const roomName = `call-${kioskId}-${Date.now()}`;
+      
+      // Create video session via API with correct parameters
       const response = await fetch('/api/video-sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          kioskId,
-          staffUserId: profile.id,
-          callerType: 'manager',
+          kiosk_id: kioskId,
+          project_id: kioskInfo.project_id,
+          room_name: roomName,
+          status: 'waiting',
+          caller_type: 'manager',
         }),
       });
 
