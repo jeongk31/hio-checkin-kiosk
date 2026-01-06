@@ -128,32 +128,15 @@ export async function middleware(request: NextRequest) {
       return redirectResponse;
     }
 
-    const isKioskUser = userRole === 'kiosk';
-    const isProjectAdmin = userRole === 'project_admin';
-    const isSuperAdmin = userRole === 'super_admin';
-
-    // Only redirect actual kiosk device users (those with linked kiosks) to /kiosk
-    // All admin users (including those with PMS Kiosk role) go to /dashboard
-    if (isKioskUser && isDashboardRoute) {
-      // Allow kiosk users to access dashboard if they don't have a kiosk device
-      // They'll be redirected from /kiosk page if no device exists
-      return response;
-    }
-
-    // Redirect admin/project_admin users trying to access kiosk to dashboard
-    if ((isSuperAdmin || isProjectAdmin) && isKioskRoute) {
+    // Redirect from login page if already logged in
+    if (isAuthPage) {
       const url = request.nextUrl.clone();
       url.pathname = '/dashboard';
       return NextResponse.redirect(url);
     }
 
-    // Redirect from login page - everyone goes to dashboard first
-    // The /kiosk page will handle device-specific routing
-    if (isAuthPage && userRole) {
-      const url = request.nextUrl.clone();
-      url.pathname = '/dashboard';
-      return NextResponse.redirect(url);
-    }
+    // No role-based routing - all users can access both dashboard and kiosk
+    // The pages themselves will handle access control
   }
 
   return response;
