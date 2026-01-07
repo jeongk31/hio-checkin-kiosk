@@ -28,10 +28,13 @@ export default function SyncWrapper({ children }: { children: React.ReactNode })
   const [isSyncing, setIsSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const syncIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const isSyncingRef = useRef(false); // Use ref to avoid dependency issues
 
   const syncFromPMS = useCallback(async (force: boolean = false) => {
-    if (isSyncing) return;
+    // Use ref instead of state to avoid creating new callback
+    if (isSyncingRef.current) return;
     
+    isSyncingRef.current = true;
     setIsSyncing(true);
     setError(null);
     
@@ -49,8 +52,14 @@ export default function SyncWrapper({ children }: { children: React.ReactNode })
         }
         setLastSync(new Date());
       } else if (response.status === 401) {
-        // Token expired, don't set error - let auth redirect handle it
-        console.log('[Dashboard] Sync unauthorized - token may be expired');
+        // Token expired - stop syncing (let middleware handle redirect)
+        console.log('[Dashboard] Sync unauthorized - stopping sync. Please login again.');
+        // Clear the interval to stop further attempts
+        if (syncIntervalRef.current) {
+          clearInterval(syncIntervalRef.current);
+          syncIntervalRef.current = null;
+        }
+        setError('로그인이 필요합니다');
       } else {
         const text = await response.text();
         console.error('[Dashboard] Sync failed:', response.status, text);
@@ -60,9 +69,10 @@ export default function SyncWrapper({ children }: { children: React.ReactNode })
       console.error('[Dashboard] Sync error:', err);
       setError('PMS 연결 실패');
     } finally {
+      isSyncingRef.current = false;
       setIsSyncing(false);
     }
-  }, [isSyncing]);
+  }, []); // Empty dependency array - stable callback
 
   // Expose syncNow function with force=true
   const syncNow = useCallback(async () => {
@@ -71,20 +81,36 @@ export default function SyncWrapper({ children }: { children: React.ReactNode })
 
   // Initial sync and periodic sync
   useEffect(() => {
-    // Initial sync on mount
-    syncFromPMS(false);
+    // Prevent double-mounting issues in React Strict Mode
+    let isMounted = true;
+    
+    // Initial sync on mount (but only once)
+    const doInitialSync = async () => {
+      if (!isMounted) return;
+      console.log('[SyncWrapper] Initial sync on mount');
+      await syncFromPMS(false);
+    };
+    
+    doInitialSync();
 
-    // Set up periodic sync
+    // Set up periodic sync (5 minutes)
+    console.log('[SyncWrapper] Setting up periodic sync, interval:', SYNC_INTERVAL);
     syncIntervalRef.current = setInterval(() => {
-      syncFromPMS(false);
+      if (isMounted) {
+        console.log('[SyncWrapper] Periodic sync triggered');
+        syncFromPMS(false);
+      }
     }, SYNC_INTERVAL);
 
     return () => {
+      isMounted = false;
+      console.log('[SyncWrapper] Cleanup - clearing interval');
       if (syncIntervalRef.current) {
         clearInterval(syncIntervalRef.current);
+        syncIntervalRef.current = null;
       }
     };
-  }, [syncFromPMS]);
+  }, []); // Empty array - run once on mount only (syncFromPMS is stable)
 
   const contextValue: SyncContextValue = {
     syncNow,

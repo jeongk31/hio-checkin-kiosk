@@ -88,7 +88,8 @@ export default function RoomManager({
   initialProject,
 }: RoomManagerProps) {
   const [activeTab, setActiveTab] = useState<Tab>('today');
-  const [selectedProjectId, setSelectedProjectId] = useState(isSuperAdmin ? 'all' : (defaultProjectId || ''));
+  // For super admin, start with the first project selected (not 'all') to match initial data
+  const [selectedProjectId, setSelectedProjectId] = useState(defaultProjectId || '');
   const [roomTypes, setRoomTypes] = useState<RoomType[]>(initialRoomTypes);
   const [reservations, setReservations] = useState<Reservation[]>(initialReservations);
   const [rooms, setRooms] = useState<Room[]>(initialRooms);

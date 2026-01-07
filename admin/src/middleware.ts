@@ -26,6 +26,15 @@ export async function middleware(request: NextRequest) {
   const sessionToken = request.cookies.get(SESSION_COOKIE_NAME)?.value;
   const isAuthPage = pathname === '/login';
   const isPublicPage = pathname === '/';
+  const hasErrorParam = request.nextUrl.searchParams.has('error');
+
+  // If login page has error parameter, clear cookies and allow access
+  if (isAuthPage && hasErrorParam) {
+    const response = NextResponse.next();
+    // Clear session cookie
+    response.cookies.delete(SESSION_COOKIE_NAME);
+    return response;
+  }
 
   // Check if user has valid local session
   let isAuthenticated = false;
@@ -41,8 +50,8 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // Authenticated and on login page - redirect to dashboard
-  if (isAuthenticated && isAuthPage) {
+  // Authenticated and on login page - redirect to dashboard (unless there's an error)
+  if (isAuthenticated && isAuthPage && !hasErrorParam) {
     const url = request.nextUrl.clone();
     url.pathname = '/dashboard';
     return NextResponse.redirect(url);

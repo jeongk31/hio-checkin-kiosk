@@ -1,7 +1,47 @@
 import { getCurrentProfile } from '@/lib/auth';
-import { query, queryOne } from '@/lib/db';
+import { query, queryOne, execute } from '@/lib/db';
 import { redirect } from 'next/navigation';
+import { cookies } from 'next/headers';
 import RoomManager from './RoomManager';
+
+// Import PMS auth functions for server-side sync
+import { fetchAllPMSProjects, fetchPMSProject, PMSProject } from '@/lib/pms-auth';
+
+/**
+ * Sync a single project from PMS to Kiosk database
+ */
+async function syncProjectToKiosk(pmsProject: PMSProject): Promise<void> {
+  // Get existing settings to preserve kiosk-specific settings like daily_reset_time
+  const existing = await queryOne<{ settings: Record<string, unknown> | null }>(
+    'SELECT settings FROM projects WHERE id = $1',
+    [pmsProject.id]
+  );
+
+  const existingSettings = existing?.settings || {};
+  const newSettings = {
+    ...existingSettings, // Preserve existing kiosk settings
+    type: pmsProject.type || existingSettings.type || null,
+    province: pmsProject.province || existingSettings.province || null,
+    location: pmsProject.location || pmsProject.province || existingSettings.location || null,
+  };
+
+  const slug = pmsProject.name
+    .toLowerCase()
+    .replace(/[^a-z0-9가-힣]+/g, '-')
+    .replace(/^-|-$/g, '') || `project-${pmsProject.id.substring(0, 8)}`;
+
+  await execute(
+    `INSERT INTO projects (id, name, slug, logo_url, settings, is_active)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     ON CONFLICT (id) DO UPDATE SET
+       name = EXCLUDED.name,
+       logo_url = COALESCE(EXCLUDED.logo_url, projects.logo_url),
+       settings = $5,
+       is_active = EXCLUDED.is_active,
+       updated_at = NOW()`,
+    [pmsProject.id, pmsProject.name, slug, pmsProject.logo_url || null, JSON.stringify(newSettings), pmsProject.is_active]
+  );
+}
 
 interface Project {
   id: string;
@@ -67,6 +107,35 @@ export default async function RoomsPage() {
   // Only project admins and super admins can access this page
   if (profile.role !== 'super_admin' && profile.role !== 'project_admin') {
     redirect('/dashboard');
+  }
+
+  // Get PMS token for syncing projects
+  const cookieStore = await cookies();
+  const pmsToken = cookieStore.get('pms_token')?.value;
+
+  // Sync projects from PMS if token available
+  if (pmsToken) {
+    try {
+      if (profile.role === 'super_admin') {
+        // Sync all projects for super admin
+        const projectsResult = await fetchAllPMSProjects(pmsToken);
+        if (projectsResult.success) {
+          for (const pmsProject of projectsResult.projects) {
+            await syncProjectToKiosk(pmsProject);
+          }
+          console.log(`[Rooms Page] Synced ${projectsResult.projects.length} projects from PMS`);
+        }
+      } else if (profile.project_id) {
+        // Sync single project for project admin
+        const projectResult = await fetchPMSProject(profile.project_id, pmsToken);
+        if (projectResult.success) {
+          await syncProjectToKiosk(projectResult.project);
+          console.log(`[Rooms Page] Synced project ${profile.project_id} from PMS`);
+        }
+      }
+    } catch (error) {
+      console.error('[Rooms Page] Project sync error:', error);
+    }
   }
 
   // For super admin, get all projects to select from

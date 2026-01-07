@@ -137,34 +137,21 @@ async function syncSingleUser(pmsUser: PMSUser): Promise<void> {
 /**
  * POST /api/sync
  * Sync projects and users from PMS
- * Called automatically on kiosk/dashboard access
+ * Public endpoint - no authentication required
+ * Uses server-to-server communication with PMS
  * Query params:
  *   - force=true: Skip cache and force sync
+ *   - project_id=xxx: Sync specific project only
  */
 export async function POST(request: Request) {
   try {
-    const profile = await getCurrentProfile();
-    if (!profile) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
     // Check if force sync is requested
     const url = new URL(request.url);
     const forceSync = url.searchParams.get('force') === 'true';
+    const specificProjectId = url.searchParams.get('project_id');
 
-    // Get PMS token from session/cookie
-    const cookieStore = await cookies();
-    const pmsToken = cookieStore.get('pms_token')?.value;
-
-    if (!pmsToken) {
-      return NextResponse.json({
-        error: 'No PMS token available',
-        message: 'Please login again to sync with PMS'
-      }, { status: 401 });
-    }
-
-    // Check cache to prevent too frequent syncs (skip if force=true)
-    const cacheKey = `sync-${profile.user_id}`;
+    // Use global cache key for public sync
+    const cacheKey = specificProjectId ? `sync-project-${specificProjectId}` : 'sync-all';
     const lastSync = syncCache.get(cacheKey);
     const now = Date.now();
 
@@ -177,35 +164,54 @@ export async function POST(request: Request) {
       });
     }
 
+    // Try to get PMS token from cookie (optional - for user-specific syncs)
+    const cookieStore = await cookies();
+    const pmsToken = cookieStore.get('pms_token')?.value;
+
     let projectsSynced = 0;
     let usersSynced = 0;
 
-    // Super admins sync everything, others just their project
-    if (profile.role === 'super_admin') {
-      // Sync all projects
-      const projectsResult = await fetchAllPMSProjects(pmsToken);
-      if (projectsResult.success) {
-        for (const pmsProject of projectsResult.projects) {
-          await syncSingleProject(pmsProject);
-          projectsSynced++;
+    // If we have a token, use it for full sync including users
+    if (pmsToken) {
+      const profile = await getCurrentProfile();
+      
+      if (profile?.role === 'super_admin' || !specificProjectId) {
+        // Sync all projects
+        const projectsResult = await fetchAllPMSProjects(pmsToken);
+        if (projectsResult.success) {
+          for (const pmsProject of projectsResult.projects) {
+            await syncSingleProject(pmsProject);
+            projectsSynced++;
+          }
         }
-      }
 
-      // Sync all kiosk users
-      const usersResult = await fetchAllPMSKioskUsers(pmsToken);
-      if (usersResult.success) {
-        for (const pmsUser of usersResult.users) {
-          await syncSingleUser(pmsUser);
-          usersSynced++;
+        // Sync all kiosk users
+        const usersResult = await fetchAllPMSKioskUsers(pmsToken);
+        if (usersResult.success) {
+          for (const pmsUser of usersResult.users) {
+            await syncSingleUser(pmsUser);
+            usersSynced++;
+          }
+        }
+      } else if (specificProjectId || profile?.project_id) {
+        // Sync specific project
+        const projectId = specificProjectId || profile?.project_id;
+        if (projectId) {
+          const projectResult = await fetchPMSProject(projectId, pmsToken);
+          if (projectResult.success) {
+            await syncSingleProject(projectResult.project);
+            projectsSynced = 1;
+          }
         }
       }
-    } else if (profile.project_id) {
-      // Non-super admins just sync their own project
-      const projectResult = await fetchPMSProject(profile.project_id, pmsToken);
-      if (projectResult.success) {
-        await syncSingleProject(projectResult.project);
-        projectsSynced = 1;
-      }
+    } else {
+      // No token - just return success without syncing
+      // Projects will be synced when user logs in
+      return NextResponse.json({
+        success: true,
+        message: 'No PMS token - sync will happen on login',
+        synced: { projects: 0, users: 0 },
+      });
     }
 
     // Update cache
@@ -227,21 +233,16 @@ export async function POST(request: Request) {
 
 /**
  * GET /api/sync
- * Check sync status
+ * Check sync status - public endpoint
  */
 export async function GET() {
   try {
-    const profile = await getCurrentProfile();
-    if (!profile) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const cacheKey = `sync-${profile.user_id}`;
-    const lastSync = syncCache.get(cacheKey);
+    // Check both global and user-specific cache
+    const globalLastSync = syncCache.get('sync-all');
 
     return NextResponse.json({
-      lastSync: lastSync ? new Date(lastSync).toISOString() : null,
-      cacheExpiresIn: lastSync ? Math.max(0, SYNC_CACHE_MS - (Date.now() - lastSync)) : 0,
+      lastSync: globalLastSync ? new Date(globalLastSync).toISOString() : null,
+      cacheExpiresIn: globalLastSync ? Math.max(0, SYNC_CACHE_MS - (Date.now() - globalLastSync)) : 0,
     });
   } catch (error) {
     console.error('[Sync] Status check error:', error);
