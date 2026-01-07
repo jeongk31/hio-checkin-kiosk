@@ -502,3 +502,10 @@ DROP TRIGGER IF EXISTS cleanup_screen_frames ON kiosk_screen_frames;
 CREATE TRIGGER cleanup_screen_frames
     AFTER INSERT ON kiosk_screen_frames
     FOR EACH ROW EXECUTE FUNCTION cleanup_old_screen_frames();
+
+-- ============================================
+-- Additional Project Columns (for filtering)
+-- ============================================
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS type VARCHAR(100);
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS province VARCHAR(100);
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS location VARCHAR(255);
