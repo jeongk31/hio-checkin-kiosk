@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
+import './ProjectSelector.css';
 
 const PROJECT_TYPES = ['호텔', '펜션', '캠핑', 'F&B', '기타'] as const;
 
@@ -78,15 +79,14 @@ export default function ProjectSelector({
   const selectedSettings = selectedProject?.settings as ProjectSettings | null;
 
   return (
-    <div className="bg-white rounded-lg shadow-sm border">
-      {/* Filter Bar */}
-      <div className="p-4 border-b space-y-3">
+    <div className="project-search-wrapper">
+      <div className="project-search-bar">
         {/* Filters Row */}
-        <div className="flex items-center gap-3">
+        <div className="project-filters-row">
           <select
             value={typeFilter}
             onChange={(e) => setTypeFilter(e.target.value)}
-            className="px-3 py-2 border border-gray-300 rounded-md text-sm bg-white"
+            className="search-filter-select"
           >
             <option value="">전체</option>
             {PROJECT_TYPES.map((type) => (
@@ -99,7 +99,7 @@ export default function ProjectSelector({
           <select
             value={provinceFilter}
             onChange={(e) => setProvinceFilter(e.target.value)}
-            className="px-3 py-2 border border-gray-300 rounded-md text-sm bg-white"
+            className="search-filter-select"
           >
             <option value="">시 선택</option>
             {availableProvinces.map((province) => (
@@ -109,26 +109,24 @@ export default function ProjectSelector({
             ))}
           </select>
 
-          <div className="flex-1 relative">
+          <div className="search-input-wrapper">
             <input
               type="text"
               value={searchText}
               onChange={(e) => setSearchText(e.target.value)}
               placeholder="프로젝트명 검색"
-              className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-md text-sm"
+              className="search-text-input"
             />
-            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400">
-              🔍
-            </span>
+            <span className="search-icon">🔍</span>
           </div>
         </div>
 
         {/* Project Dropdown Row */}
-        <div className="flex items-center gap-3">
+        <div className="project-dropdown-row">
           <select
             value={selectedProjectId}
             onChange={(e) => onProjectChange(e.target.value)}
-            className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm bg-white"
+            className="project-select"
           >
             {showAllOption && <option value="all">전체</option>}
             <option value="">프로젝트 선택</option>
@@ -136,61 +134,53 @@ export default function ProjectSelector({
               const settings = project.settings as ProjectSettings | null;
               return (
                 <option key={project.id} value={project.id}>
-                  {project.name} · {settings?.location || '-'}
+                  {project.name}{settings?.location ? ` · ${settings.location}` : ''}
                 </option>
               );
             })}
           </select>
-          <div className="text-sm text-gray-500 whitespace-nowrap">
+          <div className="project-count">
             {filteredProjects.length}개 프로젝트
           </div>
         </div>
       </div>
 
       {/* Selected Project Badge */}
-      {selectedProjectId === 'all' ? (
-        <div className="p-4 bg-gray-50">
-          <div className="flex items-start gap-3 p-3 bg-white border-2 border-purple-500 rounded-lg">
-            <span className="flex items-center justify-center w-8 h-8 bg-purple-100 text-purple-600 rounded-full font-bold">
-              ★
-            </span>
-            <div className="flex-1 min-w-0">
-              <div className="text-xs text-gray-500 mb-0.5">선택된 프로젝트</div>
-              <div className="font-semibold text-gray-900 truncate">
-                전체 프로젝트
-              </div>
-              <div className="text-sm text-gray-600 mt-1">
-                모든 프로젝트의 데이터를 표시합니다
-              </div>
+      <div className="project-selection-header">
+        {selectedProjectId === 'all' ? (
+          <div className="project-badge selected all">
+            <span className="project-icon">★</span>
+            <div className="project-badge-content">
+              <span className="project-badge-label">선택된 프로젝트</span>
+              <span className="project-badge-name">전체 프로젝트</span>
+              <span className="project-badge-location">모든 프로젝트의 데이터를 표시합니다</span>
             </div>
           </div>
-        </div>
-      ) : selectedProject && (
-        <div className="p-4 bg-gray-50">
-          <div className="flex items-start gap-3 p-3 bg-white border-2 border-blue-500 rounded-lg">
-            <span className="flex items-center justify-center w-8 h-8 bg-blue-100 text-blue-600 rounded-full font-bold">
-              ✓
-            </span>
-            <div className="flex-1 min-w-0">
-              <div className="text-xs text-gray-500 mb-0.5">선택된 프로젝트</div>
-              <div className="font-semibold text-gray-900 truncate">
-                {selectedProject.name}
-              </div>
+        ) : selectedProject ? (
+          <div className="project-badge selected">
+            <span className="project-icon">✓</span>
+            <div className="project-badge-content">
+              <span className="project-badge-label">선택된 프로젝트</span>
+              <span className="project-badge-name">{selectedProject.name}</span>
               {selectedSettings?.location && (
-                <div className="text-sm text-gray-600 flex items-center gap-1 mt-1">
-                  <span>📍</span>
-                  <span>{selectedSettings.location}</span>
-                </div>
+                <span className="project-badge-location">📍 {selectedSettings.location}</span>
               )}
             </div>
             {selectedSettings?.type && (
-              <span className="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-800">
-                {selectedSettings.type}
-              </span>
+              <span className="project-type-tag">{selectedSettings.type}</span>
             )}
           </div>
-        </div>
-      )}
+        ) : (
+          <div className="project-badge warning">
+            <span className="project-icon">⚠️</span>
+            <div className="project-badge-content">
+              <span className="project-badge-label">프로젝트 미선택</span>
+              <span className="project-badge-name">프로젝트를 선택해주세요</span>
+              <span className="project-badge-location">위 검색 바를 사용해 프로젝트를 선택하세요</span>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
