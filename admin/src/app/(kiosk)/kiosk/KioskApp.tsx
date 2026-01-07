@@ -1486,7 +1486,6 @@ function CheckinReservationScreen({
         <TopButtonRow onStaffCall={openStaffModal} callStatus={callProps.callStatus} callDuration={callProps.callDuration} onEndCall={callProps.onEndCall} isCallActive={callProps.isCallActive} />
         <div className="container">
           <NavArrow direction="left" label="이전" onClick={() => goToScreen('start')} disabled={isValidating} />
-          <NavArrow direction="right" label={isValidating ? '확인 중...' : '다음'} onClick={handleNext} disabled={!reservationNumber.trim() || isValidating} />
           <div className="logo">
             <Image src="/logo.png" alt="HiO" width={200} height={80} className="logo-image" />
           </div>
@@ -1512,6 +1511,13 @@ function CheckinReservationScreen({
               )}
             </div>
           </div>
+          <button
+            className="bottom-next-btn"
+            onClick={handleNext}
+            disabled={!reservationNumber.trim() || isValidating}
+          >
+            {isValidating ? '확인 중...' : '다음'}
+          </button>
         </div>
       </div>
     </div>
@@ -1571,7 +1577,6 @@ function ConsentScreen({
         <TopButtonRow onStaffCall={openStaffModal} callStatus={callProps.callStatus} callDuration={callProps.callDuration} onEndCall={callProps.onEndCall} isCallActive={callProps.isCallActive} />
         <div className="container">
           <NavArrow direction="left" label="이전" onClick={handleBack} />
-          <NavArrow direction="right" label="다음" onClick={handleNext} disabled={!agreed || !signature.trim()} />
           <div className="logo">
             <Image src="/logo.png" alt="HiO" width={200} height={80} className="logo-image" />
           </div>
@@ -1607,6 +1612,13 @@ function ConsentScreen({
               />
             </div>
           </div>
+          <button
+            className="bottom-next-btn"
+            onClick={handleNext}
+            disabled={!agreed || !signature.trim()}
+          >
+            다음
+          </button>
         </div>
       </div>
     </div>
@@ -1637,9 +1649,17 @@ function IDVerificationScreen({
 }) {
   const [guestCount, setGuestCount] = useState(1);
   const [currentGuest, setCurrentGuest] = useState(0);
-  const [verificationStep, setVerificationStep] = useState<'idle' | 'capturing-id' | 'capturing-face' | 'verifying' | 'success' | 'error'>('idle');
+  const [verificationStep, setVerificationStep] = useState<'idle' | 'capturing-id' | 'id-preview' | 'ocr-confirm' | 'capturing-face' | 'verifying' | 'success' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState('');
   const [idCardImage, setIdCardImage] = useState<string | null>(null);
+  const [editedOcrData, setEditedOcrData] = useState<{
+    name: string;
+    juminNo1: string;
+    juminNo2: string;
+    issueDate: string;
+    idType: string;
+    driverNo?: string;
+  } | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -1691,6 +1711,7 @@ function IDVerificationScreen({
   };
 
   // Capture ID card image - crops to match the mask area (x=7.5%, y=15%, w=85%, h=70%)
+  // Note: We capture the raw video data without flipping - CSS transform only affects display
   const captureIdCardImage = (): string | null => {
     if (!videoRef.current || !canvasRef.current) return null;
     const video = videoRef.current;
@@ -1711,7 +1732,7 @@ function IDVerificationScreen({
     canvas.width = cropWidth;
     canvas.height = cropHeight;
 
-    // Draw only the cropped region
+    // Draw only the cropped region (no flip - raw video data is what we need)
     context.drawImage(
       video,
       cropX, cropY, cropWidth, cropHeight,  // Source (from video)
@@ -1722,6 +1743,7 @@ function IDVerificationScreen({
   };
 
   // Capture face image - crops to match the ellipse mask area (rx=25%, ry=35%)
+  // Note: We capture the raw video data without flipping - CSS transform only affects display
   const captureFaceImage = (): string | null => {
     if (!videoRef.current || !canvasRef.current) return null;
     const video = videoRef.current;
@@ -1743,7 +1765,7 @@ function IDVerificationScreen({
     canvas.width = cropWidth;
     canvas.height = cropHeight;
 
-    // Draw only the cropped region
+    // Draw only the cropped region (no flip - raw video data is what we need)
     context.drawImage(
       video,
       cropX, cropY, cropWidth, cropHeight,  // Source (from video)
@@ -1776,12 +1798,81 @@ function IDVerificationScreen({
     await startCamera();
   };
 
+  // Step 1: Capture ID card and show preview
   const handleCaptureIdCard = () => {
     const image = captureIdCardImage();
     if (image) {
       setIdCardImage(image);
-      setVerificationStep('capturing-face');
+      stopCamera();
+      setVerificationStep('id-preview');
     }
+  };
+
+  // Step 2: From preview, retake or proceed to OCR
+  const handleIdPreviewRetake = async () => {
+    setIdCardImage(null);
+    setVerificationStep('capturing-id');
+    await startCamera();
+  };
+
+  const handleIdPreviewProceed = async () => {
+    if (!idCardImage) return;
+    setVerificationStep('verifying');
+
+    // Call OCR to get ID card data
+    try {
+      const response = await fetch('/api/identity-verification', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          idCardImage: idCardImage,
+          action: 'ocr',
+        }),
+        credentials: 'include',
+      });
+
+      const result = await response.json();
+
+      if (result.success && result.data?.ocrResult?.data) {
+        const ocr = result.data.ocrResult.data;
+        const extractedData = {
+          name: ocr.name || '',
+          juminNo1: ocr.juminNo1 || '',
+          juminNo2: ocr.juminNo2 || '',
+          issueDate: ocr.issueDate || '',
+          idType: ocr.idType || '1',
+          driverNo: ocr.driverNo,
+        };
+        setEditedOcrData({ ...extractedData });
+        setVerificationStep('ocr-confirm');
+      } else {
+        // OCR failed
+        let errorMsg = result.error || result.data?.ocrResult?.error || '신분증 인식에 실패했습니다';
+        if (result.data?.ocrResult?.errorCode === 'O003') {
+          errorMsg = '주민등록증 또는 운전면허증만 인증 가능합니다.';
+        }
+        setErrorMessage(errorMsg);
+        setVerificationStep('error');
+      }
+    } catch (error) {
+      console.error('OCR API error:', error);
+      setErrorMessage('서버 연결에 실패했습니다. 다시 시도해주세요.');
+      setVerificationStep('error');
+    }
+  };
+
+  // Step 3: OCR confirmation - user can edit or proceed
+  const handleOcrConfirm = async () => {
+    if (!editedOcrData) return;
+    setVerificationStep('capturing-face');
+    await startCamera();
+  };
+
+  const handleOcrRetake = async () => {
+    setEditedOcrData(null);
+    setIdCardImage(null);
+    setVerificationStep('capturing-id');
+    await startCamera();
   };
 
   const handleCaptureSelfie = async () => {
@@ -1817,13 +1908,15 @@ function IDVerificationScreen({
 
   const performVerification = async (idCard: string, selfie: string) => {
     try {
+      // Use confirmed OCR data for status verification + face auth
       const response = await fetch('/api/identity-verification', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           idCardImage: idCard,
           faceImage: selfie,
-          action: 'full',
+          action: 'status-and-face',
+          confirmedOcrData: editedOcrData, // Pass the user-confirmed/edited OCR data
           projectId,
           reservationId,
           guestIndex: currentGuest - 1,
@@ -1881,6 +1974,7 @@ function IDVerificationScreen({
   const handleRetry = async () => {
     setErrorMessage('');
     setIdCardImage(null);
+    setEditedOcrData(null);
     setVerificationStep('capturing-id');
     await startCamera();
   };
@@ -1888,6 +1982,18 @@ function IDVerificationScreen({
   const handleBack = () => {
     stopCamera();
     if (verificationStep === 'capturing-face') {
+      // Go back to OCR confirm (keep the OCR data)
+      setVerificationStep('ocr-confirm');
+      return;
+    }
+    if (verificationStep === 'ocr-confirm') {
+      // Go back to ID preview
+      setEditedOcrData(null);
+      setVerificationStep('id-preview');
+      return;
+    }
+    if (verificationStep === 'id-preview') {
+      // Retake ID photo
       setIdCardImage(null);
       setVerificationStep('capturing-id');
       startCamera();
@@ -1921,7 +2027,6 @@ function IDVerificationScreen({
           <TopButtonRow onStaffCall={openStaffModal} callStatus={callProps.callStatus} callDuration={callProps.callDuration} onEndCall={callProps.onEndCall} isCallActive={callProps.isCallActive} />
           <div className="container">
             <NavArrow direction="left" label="이전" onClick={handleBack} />
-            <NavArrow direction="right" label="인증 시작" onClick={handleStartVerification} />
             <div className="logo"><Image src="/logo.png" alt="HiO" width={200} height={80} className="logo-image" /></div>
             <h2 className="screen-title">{screenTitle}</h2>
             <div className="verification-intro" style={{ whiteSpace: 'pre-wrap' }}>
@@ -1930,11 +2035,16 @@ function IDVerificationScreen({
             <div className="guest-count-section">
               <div className="number-selector">
                 <button className="number-btn" onClick={decreaseCount}>-</button>
-                <span className="number-display">{guestCount}</span>
+                <span className="number-display">{guestCount}<span className="number-unit">명</span></span>
                 <button className="number-btn" onClick={increaseCount}>+</button>
               </div>
-              <p className="guest-count-label">명</p>
             </div>
+            <button
+              className="bottom-next-btn"
+              onClick={handleStartVerification}
+            >
+              인증 시작
+            </button>
           </div>
         </div>
       </div>
@@ -1989,7 +2099,84 @@ function IDVerificationScreen({
     );
   }
 
-  // Verifying screen
+  // ID Preview screen - shows captured image before sending to OCR
+  if (verificationStep === 'id-preview' && idCardImage) {
+    return (
+      <div className="screen">
+        <div className="screen-wrapper">
+          <TopButtonRow onStaffCall={openStaffModal} callStatus={callProps.callStatus} callDuration={callProps.callDuration} onEndCall={callProps.onEndCall} isCallActive={callProps.isCallActive} />
+          <div className="container">
+            <NavArrow direction="left" label="다시 촬영" onClick={handleIdPreviewRetake} />
+            <div className="logo"><Image src="/logo.png" alt="HiO" width={200} height={80} className="logo-image" /></div>
+            <h2 className="screen-title">촬영된 신분증 확인</h2>
+            <p className="screen-description">신분증이 정확하게 촬영되었는지 확인해주세요</p>
+
+            {/* Captured image preview */}
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              margin: '24px auto',
+              maxWidth: '480px',
+            }}>
+              <div style={{
+                position: 'relative',
+                width: '100%',
+                borderRadius: '12px',
+                overflow: 'hidden',
+                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
+                border: '3px solid #e5e7eb',
+              }}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={`data:image/jpeg;base64,${idCardImage}`}
+                  alt="촬영된 신분증"
+                  style={{ width: '100%', height: 'auto', display: 'block' }}
+                />
+              </div>
+            </div>
+
+            {/* Action buttons */}
+            <div style={{ display: 'flex', gap: '16px', justifyContent: 'center', marginTop: '24px' }}>
+              <button
+                onClick={handleIdPreviewRetake}
+                style={{
+                  padding: '14px 32px',
+                  fontSize: '16px',
+                  fontWeight: 500,
+                  color: '#64748b',
+                  background: '#f1f5f9',
+                  border: 'none',
+                  borderRadius: '12px',
+                  cursor: 'pointer',
+                }}
+              >
+                다시 촬영
+              </button>
+              <button
+                onClick={handleIdPreviewProceed}
+                style={{
+                  padding: '14px 48px',
+                  fontSize: '16px',
+                  fontWeight: 600,
+                  color: 'white',
+                  background: '#2563eb',
+                  border: 'none',
+                  borderRadius: '12px',
+                  cursor: 'pointer',
+                  boxShadow: '0 4px 12px rgba(37, 99, 235, 0.3)',
+                }}
+              >
+                확인 완료
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Verifying screen (shows spinner during OCR or final verification)
   if (verificationStep === 'verifying') {
     return (
       <div className="screen">
@@ -2004,9 +2191,190 @@ function IDVerificationScreen({
             <div style={{ textAlign: 'center', padding: '20px' }}>
               <div style={{ width: '40px', height: '40px', border: '3px solid #e5e7eb', borderTopColor: '#3b82f6', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 12px' }} />
               <p>인증 중입니다...</p>
-              <p style={{ color: '#666', fontSize: '13px' }}>신분증과 얼굴을 비교하고 있습니다</p>
+              <p style={{ color: '#666', fontSize: '13px' }}>신분증 진위확인 및 얼굴 인증을 진행하고 있습니다</p>
             </div>
             <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // OCR Confirmation screen - allows user to verify/edit extracted data
+  if (verificationStep === 'ocr-confirm' && editedOcrData) {
+    return (
+      <div className="screen">
+        <div className="screen-wrapper">
+          <TopButtonRow onStaffCall={openStaffModal} callStatus={callProps.callStatus} callDuration={callProps.callDuration} onEndCall={callProps.onEndCall} isCallActive={callProps.isCallActive} />
+          <div className="container">
+            <NavArrow direction="left" label="다시 촬영" onClick={handleOcrRetake} />
+            <div className="logo"><Image src="/logo.png" alt="HiO" width={200} height={80} className="logo-image" /></div>
+            <h2 className="screen-title">신분증 정보 확인</h2>
+            <p className="screen-description">인식된 정보가 맞는지 확인해주세요. 틀린 부분은 수정할 수 있습니다.</p>
+
+            <div style={{
+              background: '#f8fafc',
+              borderRadius: '16px',
+              padding: '20px 24px',
+              maxWidth: '480px',
+              margin: '16px auto',
+            }}>
+              {/* ID Type Badge */}
+              <div style={{ marginBottom: '16px', textAlign: 'center' }}>
+                <span style={{
+                  display: 'inline-block',
+                  padding: '6px 16px',
+                  borderRadius: '20px',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  background: editedOcrData.idType === '2' ? '#fef3c7' : '#dbeafe',
+                  color: editedOcrData.idType === '2' ? '#92400e' : '#1e40af',
+                }}>
+                  {editedOcrData.idType === '2' ? '운전면허증' : '주민등록증'}
+                </span>
+              </div>
+
+              {/* Form Fields */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, color: '#64748b', marginBottom: '4px' }}>
+                    이름
+                  </label>
+                  <input
+                    type="text"
+                    value={editedOcrData.name}
+                    onChange={(e) => setEditedOcrData({ ...editedOcrData, name: e.target.value })}
+                    style={{
+                      width: '100%',
+                      padding: '10px 14px',
+                      fontSize: '16px',
+                      border: '1px solid #e2e8f0',
+                      borderRadius: '8px',
+                      background: 'white',
+                    }}
+                  />
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, color: '#64748b', marginBottom: '4px' }}>
+                      생년월일
+                    </label>
+                    <input
+                      type="text"
+                      value={editedOcrData.juminNo1}
+                      onChange={(e) => setEditedOcrData({ ...editedOcrData, juminNo1: e.target.value.replace(/[^0-9]/g, '').slice(0, 6) })}
+                      placeholder="YYMMDD"
+                      maxLength={6}
+                      style={{
+                        width: '100%',
+                        padding: '10px 14px',
+                        fontSize: '16px',
+                        border: '1px solid #e2e8f0',
+                        borderRadius: '8px',
+                        background: 'white',
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, color: '#64748b', marginBottom: '4px' }}>
+                      주민번호 뒷자리
+                    </label>
+                    <input
+                      type="text"
+                      value={editedOcrData.juminNo2}
+                      onChange={(e) => setEditedOcrData({ ...editedOcrData, juminNo2: e.target.value.replace(/[^0-9]/g, '').slice(0, 7) })}
+                      placeholder="7자리"
+                      maxLength={7}
+                      style={{
+                        width: '100%',
+                        padding: '10px 14px',
+                        fontSize: '16px',
+                        border: '1px solid #e2e8f0',
+                        borderRadius: '8px',
+                        background: 'white',
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, color: '#64748b', marginBottom: '4px' }}>
+                    발급일자
+                  </label>
+                  <input
+                    type="text"
+                    value={editedOcrData.issueDate}
+                    onChange={(e) => setEditedOcrData({ ...editedOcrData, issueDate: e.target.value.replace(/[^0-9]/g, '').slice(0, 8) })}
+                    placeholder="YYYYMMDD"
+                    maxLength={8}
+                    style={{
+                      width: '100%',
+                      padding: '10px 14px',
+                      fontSize: '16px',
+                      border: '1px solid #e2e8f0',
+                      borderRadius: '8px',
+                      background: 'white',
+                    }}
+                  />
+                </div>
+
+                {editedOcrData.idType === '2' && editedOcrData.driverNo && (
+                  <div>
+                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, color: '#64748b', marginBottom: '4px' }}>
+                      운전면허번호
+                    </label>
+                    <input
+                      type="text"
+                      value={editedOcrData.driverNo}
+                      onChange={(e) => setEditedOcrData({ ...editedOcrData, driverNo: e.target.value })}
+                      style={{
+                        width: '100%',
+                        padding: '10px 14px',
+                        fontSize: '16px',
+                        border: '1px solid #e2e8f0',
+                        borderRadius: '8px',
+                        background: 'white',
+                      }}
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Buttons */}
+            <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', marginTop: '16px' }}>
+              <button
+                onClick={handleOcrRetake}
+                style={{
+                  padding: '12px 24px',
+                  fontSize: '15px',
+                  fontWeight: 500,
+                  color: '#64748b',
+                  background: '#f1f5f9',
+                  border: 'none',
+                  borderRadius: '10px',
+                  cursor: 'pointer',
+                }}
+              >
+                다시 촬영
+              </button>
+              <button
+                onClick={handleOcrConfirm}
+                style={{
+                  padding: '12px 32px',
+                  fontSize: '15px',
+                  fontWeight: 600,
+                  color: 'white',
+                  background: '#2563eb',
+                  border: 'none',
+                  borderRadius: '10px',
+                  cursor: 'pointer',
+                }}
+              >
+                확인 후 다음
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -2028,10 +2396,10 @@ function IDVerificationScreen({
           {verificationStep === 'capturing-face' && (
             <p className="screen-description">얼굴을 카메라에 잘 보이게 서 주세요</p>
           )}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '16px', margin: '12px auto', maxWidth: '520px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '16px', margin: '12px auto', maxWidth: '520px' }}>
             <div style={{
               position: 'relative',
-              flex: 1,
+              width: '100%',
               maxWidth: '420px',
               borderRadius: '12px',
               overflow: 'hidden',
@@ -2040,7 +2408,7 @@ function IDVerificationScreen({
               alignItems: 'center',
               justifyContent: 'center',
             }}>
-              {/* Video with clip-path mask */}
+              {/* Video with clip-path mask - mirrored for natural preview */}
               <video
                 ref={videoRef}
                 autoPlay
@@ -2050,6 +2418,7 @@ function IDVerificationScreen({
                   width: '100%',
                   height: 'auto',
                   display: 'block',
+                  transform: 'scaleX(-1)', // Mirror the video for natural preview
                   clipPath: verificationStep === 'capturing-face'
                     ? 'ellipse(25% 35% at 50% 50%)'
                     : 'inset(15% 7.5% 15% 7.5% round 8px)',
@@ -2129,22 +2498,21 @@ function IDVerificationScreen({
                 건너뛰기 (DEBUG)
               </button>
             </div>
-            {/* Camera capture button */}
+            {/* Camera capture button - positioned below camera */}
             <button
               onClick={verificationStep === 'capturing-id' ? handleCaptureIdCard : handleCaptureSelfie}
               style={{
                 display: 'flex',
-                flexDirection: 'column',
+                flexDirection: 'row',
                 alignItems: 'center',
                 justifyContent: 'center',
-                gap: '8px',
-                padding: '20px',
+                gap: '12px',
+                padding: '16px 48px',
                 backgroundColor: '#2563eb',
                 color: 'white',
                 border: 'none',
                 borderRadius: '16px',
                 cursor: 'pointer',
-                minWidth: '80px',
                 boxShadow: '0 4px 12px rgba(37, 99, 235, 0.3)',
                 transition: 'transform 0.1s, box-shadow 0.1s',
               }}
@@ -2152,11 +2520,11 @@ function IDVerificationScreen({
               onMouseUp={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
               onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
             >
-              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
                 <circle cx="12" cy="13" r="4" />
               </svg>
-              <span style={{ fontSize: '12px', fontWeight: 600, whiteSpace: 'nowrap' }}>
+              <span style={{ fontSize: '16px', fontWeight: 600, whiteSpace: 'nowrap' }}>
                 {verificationStep === 'capturing-id' ? '신분증 촬영' : '얼굴 촬영'}
               </span>
             </button>
@@ -2170,10 +2538,6 @@ function IDVerificationScreen({
               <span style={{ width: '20px', height: '20px', borderRadius: '50%', background: verificationStep === 'capturing-face' ? '#3b82f6' : '#ccc', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px' }}>2</span>
               <span style={{ fontSize: '13px' }}>얼굴 촬영</span>
             </div>
-          </div>
-          <div className="verification-notice">
-            <p>본인 확인을 위해 신분증 사진과 실제 얼굴을 대조합니다</p>
-            <p>미성년자는 체크인이 불가합니다</p>
           </div>
         </div>
       </div>
@@ -2550,7 +2914,6 @@ function RoomSelectionScreen({
         <TopButtonRow onStaffCall={openStaffModal} callStatus={callProps.callStatus} callDuration={callProps.callDuration} onEndCall={callProps.onEndCall} isCallActive={callProps.isCallActive} />
         <div className="container">
           <NavArrow direction="left" label="이전" onClick={() => goToScreen('start')} />
-          <NavArrow direction="right" label="다음" onClick={handleNext} disabled={!selected || availableRoomTypes.length === 0} />
           <div className="logo">
             <Image src="/logo.png" alt="HiO" width={200} height={80} className="logo-image" />
           </div>
@@ -2564,64 +2927,73 @@ function RoomSelectionScreen({
               <p style={{ color: '#999', fontSize: '13px' }}>프론트 데스크로 문의해 주세요.</p>
             </div>
           ) : (
-            <div className="room-grid-container">
-              {/* Left scroll arrow - only show if can scroll left */}
-              {canScrollLeft && (
-                <button
-                  className="room-scroll-arrow left"
-                  onClick={scrollLeftHandler}
-                >
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <polyline points="15 18 9 12 15 6" />
-                  </svg>
-                </button>
-              )}
-
-              {/* Right scroll arrow - only show if can scroll right */}
-              {canScrollRight && (
-                <button
-                  className="room-scroll-arrow right"
-                  onClick={scrollRightHandler}
-                >
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <polyline points="9 18 15 12 9 6" />
-                  </svg>
-                </button>
-              )}
-
-              {/* Horizontal scrollable room cards */}
-              <div className="room-grid-scroll" ref={scrollContainerRef}>
-                {availableRoomTypes.map((roomType) => (
-                  <div
-                    key={roomType.id}
-                    className={`room-grid-card ${selected === roomType.id ? 'selected' : ''}`}
-                    onClick={() => handleSelectRoom(roomType.id)}
+            <>
+              <div className="room-grid-container">
+                {/* Left scroll arrow - only show if can scroll left */}
+                {canScrollLeft && (
+                  <button
+                    className="room-scroll-arrow left"
+                    onClick={scrollLeftHandler}
                   >
-                    {roomType.image_url ? (
-                      <div className="room-grid-image">
-                        <img src={roomType.image_url} alt={roomType.name} />
-                      </div>
-                    ) : (
-                      <div className="room-grid-image placeholder">
-                        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                          <rect x="3" y="3" width="18" height="18" rx="2" />
-                          <circle cx="8.5" cy="8.5" r="1.5" />
-                          <path d="M21 15l-5-5L5 21" />
-                        </svg>
-                      </div>
-                    )}
-                    <div className="room-grid-info">
-                      <h3>{roomType.name}</h3>
-                      <p className="room-grid-capacity">최대 {roomType.max_guests}인 · 잔여 {availableCounts[roomType.id] || 0}실</p>
-                      <div className="room-grid-price">
-                        <span className="price-value">{roomType.base_price.toLocaleString()}</span>
-                        <span className="price-unit">원</span>
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <polyline points="15 18 9 12 15 6" />
+                    </svg>
+                  </button>
+                )}
+
+                {/* Right scroll arrow - only show if can scroll right */}
+                {canScrollRight && (
+                  <button
+                    className="room-scroll-arrow right"
+                    onClick={scrollRightHandler}
+                  >
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <polyline points="9 18 15 12 9 6" />
+                    </svg>
+                  </button>
+                )}
+
+                {/* Horizontal scrollable room cards */}
+                <div className="room-grid-scroll" ref={scrollContainerRef}>
+                  {availableRoomTypes.map((roomType) => (
+                    <div
+                      key={roomType.id}
+                      className={`room-grid-card ${selected === roomType.id ? 'selected' : ''}`}
+                      onClick={() => handleSelectRoom(roomType.id)}
+                    >
+                      {roomType.image_url ? (
+                        <div className="room-grid-image">
+                          <img src={roomType.image_url} alt={roomType.name} />
+                        </div>
+                      ) : (
+                        <div className="room-grid-image placeholder">
+                          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                            <rect x="3" y="3" width="18" height="18" rx="2" />
+                            <circle cx="8.5" cy="8.5" r="1.5" />
+                            <path d="M21 15l-5-5L5 21" />
+                          </svg>
+                        </div>
+                      )}
+                      <div className="room-grid-info">
+                        <h3>{roomType.name}</h3>
+                        <p className="room-grid-capacity">최대 {roomType.max_guests}인 · 잔여 {availableCounts[roomType.id] || 0}실</p>
+                        <div className="room-grid-price">
+                          <span className="price-value">{Math.round(roomType.base_price).toLocaleString('ko-KR')}</span>
+                          <span className="price-unit">원</span>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
-            </div>
+              <button
+                className="bottom-next-btn"
+                onClick={handleNext}
+                disabled={!selected}
+              >
+                다음
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -2676,7 +3048,7 @@ function PaymentConfirmScreen({
             <div className="payment-total">
               <span className="total-label">총 결제 금액</span>
               <span className="total-price">
-                {(selectedRoom?.price || 65000).toLocaleString()}원
+                {Math.round(selectedRoom?.price || 65000).toLocaleString('ko-KR')}원
               </span>
             </div>
           </div>
@@ -2864,7 +3236,7 @@ function PaymentProcessScreen({
             <div className="payment-amount">
               <span className="amount-label">총 결제 금액</span>
               <span className="amount-value">
-                {(selectedRoom?.price || 65000).toLocaleString()}원
+                {Math.round(selectedRoom?.price || 65000).toLocaleString('ko-KR')}원
               </span>
             </div>
             <div className="payment-instructions">
@@ -2881,16 +3253,33 @@ function PaymentProcessScreen({
 
 // Checkout Screen
 function CheckoutScreen({ goToScreen, t, openStaffModal, callProps }: { goToScreen: (screen: ScreenName) => void; t: (key: string) => string; openStaffModal: () => void; callProps: CallProps }) {
+  const [countdown, setCountdown] = useState(10);
+
   const handleComplete = () => {
     goToScreen('start');
   };
+
+  // Auto-redirect to home after 10 seconds
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCountdown((prev) => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          goToScreen('start');
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [goToScreen]);
 
   return (
     <div className="screen">
       <div className="screen-wrapper">
         <TopButtonRow onStaffCall={openStaffModal} callStatus={callProps.callStatus} callDuration={callProps.callDuration} onEndCall={callProps.onEndCall} isCallActive={callProps.isCallActive} />
         <div className="container">
-          <NavArrow direction="right" label="완료" onClick={handleComplete} />
           <div className="logo">
             <Image src="/logo.png" alt="HiO" width={200} height={80} className="logo-image" />
           </div>
@@ -2899,6 +3288,37 @@ function CheckoutScreen({ goToScreen, t, openStaffModal, callProps }: { goToScre
             <p className="thank-you">{t('checkout_thank_you')}</p>
             <div style={{ whiteSpace: 'pre-wrap' }}>{t('checkout_instructions')}</div>
             <p className="thank-you">{t('checkout_final_thanks')}</p>
+          </div>
+
+          {/* Complete button and auto-redirect notice */}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginTop: '32px', gap: '16px' }}>
+            <button
+              onClick={handleComplete}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '12px',
+                padding: '16px 64px',
+                backgroundColor: '#2563eb',
+                color: 'white',
+                border: 'none',
+                borderRadius: '16px',
+                cursor: 'pointer',
+                fontSize: '18px',
+                fontWeight: 600,
+                boxShadow: '0 4px 12px rgba(37, 99, 235, 0.3)',
+                transition: 'transform 0.1s, box-shadow 0.1s',
+              }}
+              onMouseDown={(e) => { e.currentTarget.style.transform = 'scale(0.95)'; }}
+              onMouseUp={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
+            >
+              완료
+            </button>
+            <p style={{ color: '#666', fontSize: '14px' }}>
+              {countdown}초 후 자동으로 처음 화면으로 돌아갑니다
+            </p>
           </div>
         </div>
       </div>

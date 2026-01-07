@@ -1,4 +1,4 @@
-import { createSession, setSessionCookie } from '@/lib/db/auth';
+import { createSession, setSessionCookie, verifyPassword } from '@/lib/db/auth';
 import { queryOne, execute } from '@/lib/db';
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
@@ -11,6 +11,22 @@ import {
   PMSProject,
   PMSUser,
 } from '@/lib/pms-auth';
+
+// Local user type for database auth
+interface LocalUser {
+  id: string;
+  email: string;
+  password_hash: string;
+}
+
+interface LocalProfile {
+  id: string;
+  user_id: string;
+  email: string;
+  role: string;
+  is_active: boolean;
+  project_id: string | null;
+}
 
 interface ProfileRow {
   id?: string;
@@ -55,10 +71,17 @@ async function syncAllFromPMS(pmsToken: string): Promise<void> {
 
 // Sync a single project from PMS
 async function syncSingleProject(pmsProject: PMSProject): Promise<void> {
+  // Use city/district from PMS, fall back to legacy province/location fields
+  const city = pmsProject.city || pmsProject.province || null;
+  const district = pmsProject.district || null;
+  const fullLocation = district ? `${city} ${district}` : city;
+
   const settings = JSON.stringify({
     type: pmsProject.type || null,
-    province: pmsProject.province || null,
-    location: pmsProject.location || pmsProject.province || null,
+    city: city,
+    district: district,
+    province: city,
+    location: fullLocation,
   });
 
   const slug = pmsProject.name
@@ -67,15 +90,19 @@ async function syncSingleProject(pmsProject: PMSProject): Promise<void> {
     .replace(/^-|-$/g, '') || `project-${pmsProject.id.substring(0, 8)}`;
 
   await execute(
-    `INSERT INTO projects (id, name, slug, logo_url, settings, is_active)
-     VALUES ($1, $2, $3, $4, $5, $6)
+    `INSERT INTO projects (id, name, slug, logo_url, settings, region, type, province, location, is_active)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
      ON CONFLICT (id) DO UPDATE SET
        name = EXCLUDED.name,
        logo_url = COALESCE(EXCLUDED.logo_url, projects.logo_url),
        settings = EXCLUDED.settings,
+       region = EXCLUDED.region,
+       type = EXCLUDED.type,
+       province = EXCLUDED.province,
+       location = EXCLUDED.location,
        is_active = EXCLUDED.is_active,
        updated_at = NOW()`,
-    [pmsProject.id, pmsProject.name, slug, pmsProject.logo_url || null, settings, pmsProject.is_active]
+    [pmsProject.id, pmsProject.name, slug, pmsProject.logo_url || null, settings, city, pmsProject.type || null, city, fullLocation, pmsProject.is_active]
   );
 }
 
@@ -136,11 +163,18 @@ async function syncProjectFromPMS(
   if (pmsResult.success) {
     const pmsProject: PMSProject = pmsResult.project;
 
-    // Create settings object with type and province from PMS
+    // Use city/district from PMS, fall back to legacy province/location fields
+    const city = pmsProject.city || pmsProject.province || null;
+    const district = pmsProject.district || null;
+    const fullLocation = district ? `${city} ${district}` : city;
+
+    // Create settings object with type and location from PMS
     const settings = JSON.stringify({
       type: pmsProject.type || null,
-      province: pmsProject.province || null,
-      location: pmsProject.location || pmsProject.province || null,
+      city: city,
+      district: district,
+      province: city,
+      location: fullLocation,
     });
 
     // Generate slug from project name
@@ -151,12 +185,16 @@ async function syncProjectFromPMS(
 
     // Upsert project with full details from PMS
     await execute(
-      `INSERT INTO projects (id, name, slug, logo_url, settings, is_active)
-       VALUES ($1, $2, $3, $4, $5, $6)
+      `INSERT INTO projects (id, name, slug, logo_url, settings, region, type, province, location, is_active)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        ON CONFLICT (id) DO UPDATE SET
          name = EXCLUDED.name,
          logo_url = COALESCE(EXCLUDED.logo_url, projects.logo_url),
          settings = EXCLUDED.settings,
+         region = EXCLUDED.region,
+         type = EXCLUDED.type,
+         province = EXCLUDED.province,
+         location = EXCLUDED.location,
          is_active = EXCLUDED.is_active,
          updated_at = NOW()`,
       [
@@ -165,6 +203,10 @@ async function syncProjectFromPMS(
         slug,
         pmsProject.logo_url || null,
         settings,
+        city,
+        pmsProject.type || null,
+        city,
+        fullLocation,
         pmsProject.is_active
       ]
     );
@@ -202,12 +244,59 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Username/email and password are required' }, { status: 400 });
     }
 
-    // Authenticate against PMS (central auth provider)
-    // PMS already accepts both username and email in the 'username' field
+    // First try PMS authentication (central auth provider)
     const pmsResult = await authenticateWithPMS(identifier, password);
 
+    // If PMS fails due to connection error, try local database authentication
     if (!pmsResult.success) {
-      return NextResponse.json({ error: pmsResult.error }, { status: 401 });
+      // Check if it's a connection error (PMS unavailable)
+      const isConnectionError = pmsResult.error?.includes('fetch failed') ||
+                                pmsResult.error?.includes('ECONNREFUSED') ||
+                                pmsResult.error?.includes('Failed to authenticate');
+
+      if (isConnectionError) {
+        console.log('[Auth] PMS unavailable, trying local database authentication...');
+
+        // Try local database authentication
+        const localUser = await queryOne<LocalUser>(
+          'SELECT id, email, password_hash FROM users WHERE email = $1',
+          [identifier]
+        );
+
+        if (localUser && localUser.password_hash !== 'pms-managed') {
+          const isValidPassword = await verifyPassword(password, localUser.password_hash);
+
+          if (isValidPassword) {
+            // Get local profile
+            const localProfile = await queryOne<LocalProfile>(
+              'SELECT id, user_id, email, role, is_active, project_id FROM profiles WHERE user_id = $1',
+              [localUser.id]
+            );
+
+            if (localProfile && localProfile.is_active) {
+              // Create session and set cookie
+              const token = await createSession(localProfile.user_id);
+              await setSessionCookie(token);
+
+              // Set role cookie
+              const cookieStore = await cookies();
+              cookieStore.set('user_role', localProfile.role, {
+                httpOnly: true,
+                secure: false,
+                sameSite: 'lax',
+                maxAge: 7 * 24 * 60 * 60,
+                path: '/',
+              });
+
+              const redirectUrl = localProfile.role === 'kiosk' ? '/kiosk' : '/dashboard';
+              console.log('[Auth] Local authentication successful for:', identifier);
+              return NextResponse.json({ success: true, redirectUrl });
+            }
+          }
+        }
+      }
+
+      return NextResponse.json({ error: pmsResult.error || 'Invalid credentials' }, { status: 401 });
     }
 
     const { data: pmsData } = pmsResult;

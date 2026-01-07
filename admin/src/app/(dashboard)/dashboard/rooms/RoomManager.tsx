@@ -126,12 +126,25 @@ export default function RoomManager({
   const [roomTypeForm, setRoomTypeForm] = useState({
     name: '',
     maxGuests: '2',
+    basePrice: '',
     description: '',
     imageUrl: '',
   });
   const [uploadingImage, setUploadingImage] = useState(false);
 
   const today = new Date().toISOString().split('T')[0];
+
+  // Helper to format number with commas
+  const formatNumberWithCommas = (value: string): string => {
+    const numericValue = value.replace(/[^\d]/g, '');
+    if (!numericValue) return '';
+    return Number(numericValue).toLocaleString('ko-KR');
+  };
+
+  // Helper to parse formatted number back to numeric string
+  const parseFormattedNumber = (value: string): number => {
+    return parseFloat(value.replace(/,/g, '')) || 0;
+  };
 
   // Get today's reservations mapped by room number
   const todayReservations = reservations.filter(
@@ -461,6 +474,7 @@ export default function RoomManager({
             projectId: selectedProjectId,
             name: roomTypeForm.name,
             maxGuests: parseInt(roomTypeForm.maxGuests) || 2,
+            basePrice: parseFormattedNumber(roomTypeForm.basePrice),
             description: roomTypeForm.description || null,
             imageUrl: roomTypeForm.imageUrl || null,
           }
@@ -468,6 +482,7 @@ export default function RoomManager({
             projectId: selectedProjectId,
             name: roomTypeForm.name,
             maxGuests: parseInt(roomTypeForm.maxGuests) || 2,
+            basePrice: parseFormattedNumber(roomTypeForm.basePrice),
             description: roomTypeForm.description || null,
             imageUrl: roomTypeForm.imageUrl || null,
           };
@@ -528,6 +543,7 @@ export default function RoomManager({
     setRoomTypeForm({
       name: roomType.name,
       maxGuests: roomType.max_guests.toString(),
+      basePrice: roomType.base_price ? roomType.base_price.toLocaleString('ko-KR') : '',
       description: roomType.description || '',
       imageUrl: roomType.image_url || '',
     });
@@ -538,6 +554,7 @@ export default function RoomManager({
     setRoomTypeForm({
       name: '',
       maxGuests: '2',
+      basePrice: '',
       description: '',
       imageUrl: '',
     });
@@ -870,6 +887,11 @@ export default function RoomManager({
                           <span className="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-800">
                             최대 {roomType.max_guests}명
                           </span>
+                          {roomType.base_price > 0 && (
+                            <span className="px-2 py-1 text-xs rounded-full bg-green-100 text-green-800">
+                              {Math.round(roomType.base_price).toLocaleString('ko-KR')}원
+                            </span>
+                          )}
                           <span className="text-sm text-gray-500">
                             {roomCount}개 객실
                           </span>
@@ -1036,6 +1058,19 @@ export default function RoomManager({
                   min="1"
                   value={roomTypeForm.maxGuests}
                   onChange={(e) => setRoomTypeForm({ ...roomTypeForm, maxGuests: e.target.value })}
+                  className="w-full px-3 py-2 border rounded-lg text-gray-900"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  기본 가격 (원)
+                </label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={roomTypeForm.basePrice}
+                  onChange={(e) => setRoomTypeForm({ ...roomTypeForm, basePrice: formatNumberWithCommas(e.target.value) })}
+                  placeholder="예: 100,000"
                   className="w-full px-3 py-2 border rounded-lg text-gray-900"
                 />
               </div>

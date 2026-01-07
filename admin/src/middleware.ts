@@ -45,23 +45,17 @@ export async function middleware(request: NextRequest) {
 
   // Not authenticated - redirect to login (except for login/public pages)
   if (!isAuthenticated && !isAuthPage && !isPublicPage) {
-    const url = request.nextUrl.clone();
-    url.pathname = '/login';
-    return NextResponse.redirect(url);
+    return NextResponse.redirect(new URL('/login', request.url));
   }
 
   // Authenticated and on login page - redirect to dashboard (unless there's an error)
   if (isAuthenticated && isAuthPage && !hasErrorParam) {
-    const url = request.nextUrl.clone();
-    url.pathname = '/dashboard';
-    return NextResponse.redirect(url);
+    return NextResponse.redirect(new URL('/dashboard', request.url));
   }
 
-  // Authenticated and on public page - redirect to dashboard  
+  // Authenticated and on public page - redirect to dashboard
   if (isAuthenticated && isPublicPage) {
-    const url = request.nextUrl.clone();
-    url.pathname = '/dashboard';
-    return NextResponse.redirect(url);
+    return NextResponse.redirect(new URL('/dashboard', request.url));
   }
 
   return NextResponse.next();

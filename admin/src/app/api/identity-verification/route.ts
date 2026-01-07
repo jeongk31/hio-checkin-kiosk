@@ -71,6 +71,7 @@ export async function POST(request: Request) {
       idCardImage,
       faceImage,
       action = 'full',
+      confirmedOcrData, // User-confirmed/edited OCR data from kiosk
       projectId,
       reservationId,
       guestIndex = 0,
@@ -134,17 +135,109 @@ export async function POST(request: Request) {
           };
         } else {
           // OCR failed - check if it's an unsupported ID type
-          const isUnsupportedIdType = ocrResult.errorCode === 'O003' || 
+          const isUnsupportedIdType = ocrResult.errorCode === 'O003' ||
                                        (ocrResult.error && ocrResult.error.includes('주민등록번호 없음'));
-          
+
           result = {
             success: false,
             ocrResult,
-            error: isUnsupportedIdType 
+            error: isUnsupportedIdType
               ? '지원하지 않는 신분증 형식입니다. 주민등록증 또는 운전면허증을 사용해주세요.'
               : (ocrResult.error || 'OCR 실패로 진위확인을 수행할 수 없습니다'),
           };
         }
+        break;
+
+      case 'status-and-face':
+        // 진위확인 + Face Auth using user-confirmed OCR data (no re-OCR)
+        if (!faceImage) {
+          return NextResponse.json(
+            { success: false, error: '얼굴 사진이 필요합니다' },
+            { status: 400 }
+          );
+        }
+
+        if (!confirmedOcrData) {
+          return NextResponse.json(
+            { success: false, error: '신분증 정보가 필요합니다' },
+            { status: 400 }
+          );
+        }
+
+        // Use the confirmed OCR data directly for status verification
+        ocrResult = {
+          success: true,
+          data: {
+            idType: confirmedOcrData.idType || '1',
+            name: confirmedOcrData.name,
+            juminNo1: confirmedOcrData.juminNo1,
+            juminNo2: confirmedOcrData.juminNo2,
+            issueDate: confirmedOcrData.issueDate,
+            driverNo: confirmedOcrData.driverNo,
+          },
+        };
+
+        // Perform 진위확인 with confirmed data
+        statusVerificationResult = await verifyIdStatus(ocrResult.data);
+
+        if (!statusVerificationResult.success || !statusVerificationResult.verified) {
+          result = {
+            success: false,
+            ocrResult,
+            statusVerificationResult,
+            error: statusVerificationResult.error || '진위확인에 실패했습니다. 신분증 정보를 확인해주세요.',
+          };
+          break;
+        }
+
+        // Perform face authentication
+        faceAuthResult = await performFaceAuth(faceImage, idCardImage);
+
+        if (!faceAuthResult.success || !faceAuthResult.matched) {
+          result = {
+            success: false,
+            ocrResult,
+            statusVerificationResult,
+            faceAuthResult,
+            error: '안면인증 실패 - 얼굴이 신분증 사진과 일치하지 않습니다',
+          };
+          break;
+        }
+
+        // Calculate if adult (based on juminNo1 and juminNo2)
+        const birthYear = parseInt(confirmedOcrData.juminNo1.substring(0, 2));
+        const genderDigit = parseInt(confirmedOcrData.juminNo2.charAt(0));
+        const fullYear = (genderDigit <= 2) ? 1900 + birthYear : 2000 + birthYear;
+        const birthMonth = parseInt(confirmedOcrData.juminNo1.substring(2, 4));
+        const birthDay = parseInt(confirmedOcrData.juminNo1.substring(4, 6));
+        const birthDate = new Date(fullYear, birthMonth - 1, birthDay);
+        const today = new Date();
+        let age = today.getFullYear() - birthDate.getFullYear();
+        const monthDiff = today.getMonth() - birthDate.getMonth();
+        if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+          age--;
+        }
+        const isAdult = age >= 19;
+
+        if (!isAdult) {
+          result = {
+            success: false,
+            ocrResult,
+            statusVerificationResult,
+            faceAuthResult,
+            isAdult: false,
+            error: '만 19세 미만은 체크인이 불가합니다.',
+          };
+          break;
+        }
+
+        result = {
+          success: true,
+          ocrResult,
+          statusVerificationResult,
+          faceAuthResult,
+          isAdult: true,
+        };
         break;
 
       case 'full':

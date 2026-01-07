@@ -20,7 +20,7 @@
   max-height: 100vh;
   overflow: hidden;
   background: var(--gray-50);
-  padding: 32px;
+  padding: 24px;
 }
 
 /* Profile Info (Top Left) */
@@ -73,14 +73,15 @@
 
 /* 화면 컨테이너 */
 .screen {
-  padding: 24px 32px;
+  padding: 12px 32px;
   animation: fadeIn 0.3s ease;
   height: 100vh;
   max-height: 100vh;
   overflow: hidden;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
+  padding-top: 20px;
 }
 
 /* 화면 내부 래퍼 (staff call + container) */
@@ -90,7 +91,7 @@
   align-items: flex-end;
   gap: 8px;
   width: 1600px;
-  max-height: calc(100vh - 80px);
+  max-height: calc(100vh - 60px);
 }
 
 /* Top Button Row - call indicator (left) + staff button (right) */
@@ -193,11 +194,11 @@
   width: 1600px;
   background: white;
   border-radius: 28px;
-  padding: 48px 80px 48px;
+  padding: 20px 80px 20px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04);
   position: relative;
-  max-height: calc(100vh - 140px);
-  overflow: hidden;
+  max-height: calc(100vh - 100px);
+  overflow: visible;
 }
 
 /* Arrow Navigation */
@@ -254,16 +255,43 @@
   color: var(--primary);
 }
 
+/* Bottom Next Button */
+.bottom-next-btn {
+  display: block;
+  width: 100%;
+  max-width: 240px;
+  margin: 12px auto 0;
+  padding: 12px 28px;
+  font-size: 15px;
+  font-weight: 600;
+  color: white;
+  background-color: var(--primary);
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.bottom-next-btn:hover:not(:disabled) {
+  background-color: var(--primary-dark, #1d4ed8);
+  transform: translateY(-1px);
+}
+
+.bottom-next-btn:disabled {
+  background-color: var(--gray-300);
+  cursor: not-allowed;
+}
+
 /* 로고 */
 .logo {
   display: flex;
   justify-content: center;
   align-items: center;
-  margin-bottom: 16px;
+  margin-bottom: 8px;
 }
 
 .logo-image {
-  height: 100px;
+  height: 70px;
   width: auto;
   object-fit: contain;
 }
@@ -316,7 +344,7 @@
 .progress-bar {
   display: flex;
   justify-content: space-between;
-  margin-bottom: 40px;
+  margin-bottom: 32px;
   position: relative;
   padding-top: 16px;
 }
@@ -338,7 +366,7 @@
   text-align: center;
   font-size: 16px;
   color: var(--gray-200);
-  padding: 10px;
+  padding: 12px;
   background: white;
   z-index: 1;
   font-weight: 500;
@@ -376,9 +404,9 @@
 
 /* 화면 제목 */
 .screen-title {
-  font-size: 28px;
+  font-size: 26px;
   color: var(--gray-900);
-  margin-bottom: 24px;
+  margin-bottom: 8px;
   text-align: center;
   font-weight: 600;
   letter-spacing: -0.5px;
@@ -458,6 +486,16 @@
   color: var(--gray-900);
   min-width: 60px;
   text-align: center;
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 4px;
+}
+
+.number-unit {
+  font-size: 20px;
+  font-weight: 500;
+  color: var(--gray-500);
 }
 
 /* 체크박스 */
@@ -976,8 +1014,8 @@
 .screen-description {
   text-align: center;
   color: var(--gray-400);
-  font-size: 17px;
-  margin-bottom: 20px;
+  font-size: 15px;
+  margin-bottom: 8px;
   font-weight: 400;
 }
 
@@ -985,7 +1023,7 @@
   text-align: center;
   color: var(--gray-300);
   font-size: 15px;
-  margin-bottom: 16px;
+  margin-bottom: 24px;
   font-weight: 400;
 }
 
@@ -1132,7 +1170,7 @@
 .room-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
   margin-bottom: 16px;
 }
 
@@ -1555,7 +1593,7 @@
 
   .container {
     width: 1700px;
-    padding: 56px 100px;
+    padding: 24px 100px;
   }
 
   .nav-arrow.left {
@@ -1574,7 +1612,7 @@
 
   .container {
     width: 1400px;
-    padding: 40px 70px;
+    padding: 20px 70px;
   }
 }
 
@@ -1585,7 +1623,7 @@
 
   .container {
     width: 1200px;
-    padding: 36px 60px;
+    padding: 20px 60px;
   }
 }
 
@@ -1596,7 +1634,7 @@
 
   .container {
     width: 1000px;
-    padding: 32px 50px;
+    padding: 20px 50px;
   }
 
   .nav-arrow.left {
@@ -1621,7 +1659,7 @@
 
   .container {
     width: 100%;
-    padding: 28px 40px;
+    padding: 20px 40px;
     border-radius: 20px;
   }
 

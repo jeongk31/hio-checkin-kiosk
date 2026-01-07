@@ -155,8 +155,10 @@ export interface PMSProject {
   id: string;
   name: string;
   type?: string;        // 업종: 호텔, 펜션, 캠핑, F&B, 기타
-  province?: string;    // 시/도
-  location?: string;    // 위치 (detailed address)
+  city?: string;        // 시/도 (e.g., "제주특별자치도")
+  district?: string;    // 구/군 (e.g., "제주시")
+  province?: string;    // Legacy field
+  location?: string;    // Legacy field
   logo_url?: string;
   is_active: boolean;
 }
