@@ -104,6 +104,7 @@ function validateAuthToken(authHeader: string | null): boolean {
 function mapRoomStatus(pmsStatus: string): string {
   const statusMap: Record<string, string> = {
     'available': 'available',
+    'vacant': 'available',  // PMS uses 'vacant' for available rooms
     'occupied': 'occupied',
     'cleaning': 'cleaning',
     'maintenance': 'maintenance',

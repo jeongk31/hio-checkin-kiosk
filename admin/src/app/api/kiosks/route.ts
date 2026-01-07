@@ -193,9 +193,20 @@ export async function PUT(request: NextRequest) {
     let whereClause = `id = $${paramIndex++}`;
 
     // Non-super admins can only update kiosks in their project
+    // Kiosk users can only update their own kiosk (linked via profile_id)
     if (profile.role !== 'super_admin') {
-      values.push(profile.project_id);
-      whereClause += ` AND project_id = $${paramIndex}`;
+      if (profile.role === 'kiosk') {
+        // Kiosk users can only update their own kiosk
+        values.push(profile.id);
+        whereClause += ` AND profile_id = $${paramIndex}`;
+      } else if (profile.project_id) {
+        // Project admins can update any kiosk in their project
+        values.push(profile.project_id);
+        whereClause += ` AND project_id = $${paramIndex}`;
+      } else {
+        // No project assigned, deny access
+        return NextResponse.json({ error: 'No project assigned to user' }, { status: 403 });
+      }
     }
 
     const sql = `

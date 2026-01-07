@@ -88,11 +88,14 @@ export async function GET(request: Request) {
     }
 
     if (availableOnly) {
-      conditions.push(`r.status = 'available'`);
+      // Accept both 'available' and 'vacant' as available rooms
+      conditions.push(`r.status IN ('available', 'vacant')`);
       conditions.push(`r.is_active = true`);
     }
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    console.log('[Rooms API] Query params:', { projectId, roomTypeId, status, availableOnly, whereClause });
 
     const rooms = await query<RoomRow>(
       `SELECT r.*,
@@ -106,6 +109,40 @@ export async function GET(request: Request) {
        ORDER BY r.room_number ASC`,
       params
     );
+
+    console.log('[Rooms API] Found rooms:', rooms.map(r => ({ 
+      room_number: r.room_number, 
+      status: r.status, 
+      is_active: r.is_active,
+      room_type_id: r.room_type_id,
+      room_type_name: r.room_type_name
+    })));
+
+    // Also log all rooms if availableOnly to see what we're filtering out
+    if (availableOnly && rooms.length === 0) {
+      const allRooms = await query<RoomRow>(
+        `SELECT r.room_number, r.status, r.is_active, r.room_type_id, r.project_id, rt.name as room_type_name
+         FROM rooms r
+         LEFT JOIN room_types rt ON r.room_type_id = rt.id
+         WHERE r.project_id = $1
+         ORDER BY r.room_number ASC`,
+        [profile.role === 'super_admin' && projectId ? projectId : profile.project_id]
+      );
+      console.log('[Rooms API] All rooms in project (for debugging):', allRooms);
+      
+      // Also check if there are rooms in OTHER projects
+      const allRoomsAnyProject = await query<RoomRow>(
+        `SELECT r.room_number, r.status, r.is_active, r.room_type_id, r.project_id, rt.name as room_type_name
+         FROM rooms r
+         LEFT JOIN room_types rt ON r.room_type_id = rt.id
+         ORDER BY r.room_number ASC
+         LIMIT 10`,
+        []
+      );
+      console.log('[Rooms API] All rooms in ANY project (sample):', allRoomsAnyProject);
+      console.log('[Rooms API] Current user project_id:', profile.project_id);
+      console.log('[Rooms API] Query projectId param:', projectId);
+    }
 
     return NextResponse.json({ rooms: rooms.map(transformRoom) });
   } catch (error) {

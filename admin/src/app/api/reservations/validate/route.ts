@@ -39,6 +39,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Project ID is required' }, { status: 400 });
     }
 
+    console.log('[Reservation Validate] Searching for reservation:', {
+      reservationNumber,
+      targetProjectId,
+      profileProjectId: profile.project_id,
+      passedProjectId: projectId,
+    });
+
     // Look up the reservation
     const reservation = await queryOne<Reservation>(
       `SELECT r.*, rt.name as room_type_name
@@ -47,6 +54,14 @@ export async function POST(request: Request) {
        WHERE r.project_id = $1 AND r.reservation_number = $2`,
       [targetProjectId, reservationNumber]
     );
+
+    console.log('[Reservation Validate] Query result:', reservation ? {
+      id: reservation.id,
+      reservation_number: reservation.reservation_number,
+      status: reservation.status,
+      check_in_date: reservation.check_in_date,
+      check_out_date: reservation.check_out_date,
+    } : 'NOT FOUND');
 
     if (!reservation) {
       return NextResponse.json({
