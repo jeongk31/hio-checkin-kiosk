@@ -1088,12 +1088,6 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
     onClose();
   };
 
-  const handleBackdropClick = (e: React.MouseEvent) => {
-    if (e.target === e.currentTarget) {
-      handleClose();
-    }
-  };
-
   // For connecting/connected states, just render audio element (indicator is in TopButtonRow)
   if (callStatus === 'connecting' || callStatus === 'connected') {
     return <audio ref={remoteAudioRef} autoPlay playsInline style={{ display: 'none' }} />;

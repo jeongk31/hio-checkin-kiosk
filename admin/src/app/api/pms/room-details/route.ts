@@ -181,7 +181,7 @@ export async function POST(request: Request) {
     const { room, reservation, guest } = payload;
 
     // Check if project exists, auto-create if not (from PMS sync)
-    let project = await queryOne<{ id: string }>(
+    const project = await queryOne<{ id: string }>(
       'SELECT id FROM projects WHERE id = $1',
       [room.project_id]
     );
