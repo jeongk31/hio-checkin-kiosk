@@ -53,10 +53,10 @@ npm install
 Copy the example environment file:
 
 ```bash
-cp .env.example .env.local
+cp .env.example .env
 ```
 
-Edit `.env.local` with your settings:
+Edit `.env` with your settings:
 
 ```env
 POSTGRES_HOST=localhost
@@ -66,6 +66,10 @@ POSTGRES_USER=orange
 POSTGRES_PASSWORD=00oo00oo
 JWT_SECRET=your-super-secret-jwt-key-change-in-production
 NEXT_PUBLIC_APP_URL=http://localhost:3000
+
+# For production, comment local URLs and uncomment production URLs
+# PMS_AUTH_URL=http://localhost:8000
+# PMS_AUTH_URL=https://pmsapi.hio.ai.kr
 ```
 
 ### 4. Initialize Database

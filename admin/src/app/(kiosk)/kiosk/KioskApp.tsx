@@ -1103,7 +1103,7 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
 
   // Show modal for calling/ringing/ended/failed states
   return (
-    <div className="modal active" onClick={handleBackdropClick}>
+    <div className="modal active">
       <div className="modal-content">
         <div className="modal-header">
           <h3>

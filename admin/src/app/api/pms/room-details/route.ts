@@ -180,17 +180,32 @@ export async function POST(request: Request) {
 
     const { room, reservation, guest } = payload;
 
-    // Validate project exists
-    const project = await queryOne<{ id: string }>(
+    // Check if project exists, auto-create if not (from PMS sync)
+    let project = await queryOne<{ id: string }>(
       'SELECT id FROM projects WHERE id = $1',
       [room.project_id]
     );
 
     if (!project) {
-      return NextResponse.json(
-        { error: `Project not found: ${room.project_id}` },
-        { status: 404 }
-      );
+      // Auto-create project from PMS data
+      console.log(`[PMS Sync] Project ${room.project_id} not found, creating...`);
+      try {
+        // Generate a unique slug from project_id
+        const slug = `pms-${room.project_id.substring(0, 8)}`;
+        await execute(
+          `INSERT INTO projects (id, name, slug, is_active, settings, created_at, updated_at)
+           VALUES ($1, $2, $3, true, '{}', NOW(), NOW())
+           ON CONFLICT (id) DO NOTHING`,
+          [room.project_id, `PMS Project ${room.project_id.substring(0, 8)}`, slug]
+        );
+        console.log(`[PMS Sync] Created project ${room.project_id}`);
+      } catch (createError) {
+        console.error('[PMS Sync] Failed to create project:', createError);
+        return NextResponse.json(
+          { error: `Failed to create project: ${room.project_id}` },
+          { status: 500 }
+        );
+      }
     }
 
     // Process room data - upsert room

@@ -72,7 +72,12 @@ Default admin credentials:
 
 ### Environment Configuration
 
-Create `admin/.env.local`:
+Create `admin/.env` from the example file:
+```bash
+cp admin/.env.example admin/.env
+```
+
+Edit `admin/.env`:
 ```env
 # Database
 POSTGRES_HOST=localhost
@@ -83,6 +88,12 @@ POSTGRES_PASSWORD=00oo00oo
 
 # Authentication
 JWT_SECRET=your-secure-random-string-here
+
+# PMS Authentication (for centralized auth)
+# Local
+PMS_AUTH_URL=http://localhost:8000
+# Production (uncomment for production)
+# PMS_AUTH_URL=https://pmsapi.hio.ai.kr
 
 # useB API (Optional)
 USEB_API_KEY=your-useb-api-key

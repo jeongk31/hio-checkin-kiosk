@@ -210,8 +210,7 @@ export default function KioskManagement({
       {/* Fullscreen Modal */}
       {fullscreenKiosk && (
         <div
-          className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center cursor-pointer"
-          onClick={() => setFullscreenKiosk(null)}
+          className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center"
         >
           <div className="relative w-full h-full flex flex-col">
             {/* Header */}

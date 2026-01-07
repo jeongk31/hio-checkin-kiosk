@@ -35,7 +35,7 @@ services:
       - FACE_CLIENT_ID=${FACE_CLIENT_ID}
       - FACE_CLIENT_SECRET=${FACE_CLIENT_SECRET}
     env_file:
-      - .env.production
+      - .env
     networks:
       - app-network
     healthcheck:
