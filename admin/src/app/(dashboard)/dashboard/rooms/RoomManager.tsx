@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import ProjectSelector from '@/components/ProjectSelector';
+import { getTodayKST } from '@/lib/timezone';
 
 interface Project {
   id: string;
@@ -132,7 +133,8 @@ export default function RoomManager({
   });
   const [uploadingImage, setUploadingImage] = useState(false);
 
-  const today = new Date().toISOString().split('T')[0];
+  // Use Korean Standard Time for date calculations
+  const today = getTodayKST();
 
   // Helper to format number with commas
   const formatNumberWithCommas = (value: string): string => {

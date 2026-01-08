@@ -1,6 +1,7 @@
 ﻿import { query, queryOne, execute } from '@/lib/db';
 import { getCurrentProfile } from '@/lib/auth';
 import { NextResponse } from 'next/server';
+import { formatDateKST } from '@/lib/timezone';
 
 interface RoomType {
   id: string;
@@ -231,7 +232,7 @@ export async function PATCH(request: Request) {
     const current = new Date(startDate);
     const end = new Date(endDate);
     while (current <= end) {
-      dates.push(current.toISOString().split('T')[0]);
+      dates.push(formatDateKST(current));
       current.setDate(current.getDate() + 1);
     }
 

@@ -1,6 +1,7 @@
 import { queryOne } from '@/lib/db';
 import { getCurrentProfile } from '@/lib/auth';
 import { NextResponse } from 'next/server';
+import { getTodayKST } from '@/lib/timezone';
 
 interface Reservation {
   id: string;
@@ -87,7 +88,7 @@ export async function POST(request: Request) {
     }
 
     // Check if check-in date is today or in the past (allow early check-in on the day of)
-    const today = new Date().toISOString().split('T')[0];
+    const today = getTodayKST();
     const checkInDate = reservation.check_in_date;
 
     if (checkInDate > today) {

@@ -1,6 +1,7 @@
 ﻿import { query, execute } from '@/lib/db';
 import { getCurrentProfile } from '@/lib/auth';
 import { NextResponse } from 'next/server';
+import { getTodayKST } from '@/lib/timezone';
 
 /**
  * POST /api/rooms/reset
@@ -39,7 +40,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Specific Project ID is required for room reset' }, { status: 400 });
     }
 
-    const today = new Date().toISOString().split('T')[0];
+    const today = getTodayKST();
 
     // 1. Count rooms before deletion
     const existingRooms = await query<{ id: string }>(

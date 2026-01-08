@@ -1,6 +1,7 @@
 ﻿import { queryOne } from '@/lib/db';
 import { getCurrentProfile } from '@/lib/auth';
 import { NextResponse } from 'next/server';
+import { getTodayKST, getTomorrowKST } from '@/lib/timezone';
 
 interface RoomType {
   id: string;
@@ -42,11 +43,11 @@ interface Reservation {
 
 // Generate a unique reservation number for walk-in
 function generateWalkinReservationNumber(): string {
+  const dateStr = getTodayKST().replace(/-/g, '');
   const now = new Date();
-  const date = now.toISOString().split('T')[0].replace(/-/g, '');
-  const time = now.toTimeString().split(' ')[0].replace(/:/g, '').slice(0, 4);
+  const time = now.toLocaleTimeString('en-US', { timeZone: 'Asia/Seoul', hour12: false }).replace(/:/g, '').slice(0, 4);
   const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
-  return `WI-${date}-${time}${random}`;
+  return `WI-${dateStr}-${time}${random}`;
 }
 
 // Assign an available room to a guest (used by kiosk during check-in)
@@ -66,7 +67,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Project ID is required' }, { status: 400 });
     }
 
-    const today = new Date().toISOString().split('T')[0];
+    const today = getTodayKST();
 
     let room: Room | null = null;
     let existingReservation: Reservation | null = null;
@@ -170,7 +171,7 @@ export async function POST(request: Request) {
       // Create a new reservation record for this walk-in booking
       const newReservationNumber = generateWalkinReservationNumber();
       const checkInDate = today;
-      const finalCheckOutDate = checkOutDate || new Date(new Date().setDate(new Date().getDate() + 1)).toISOString().split('T')[0];
+      const finalCheckOutDate = checkOutDate || getTomorrowKST();
 
       const newReservation = await queryOne<Reservation>(
         `INSERT INTO reservations (project_id, room_type_id, reservation_number, guest_name, guest_count, check_in_date, check_out_date, room_number, source, status)

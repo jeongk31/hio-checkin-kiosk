@@ -1,6 +1,7 @@
 import { getCurrentProfile } from '@/lib/auth';
 import { query, queryOne } from '@/lib/db';
 import { redirect } from 'next/navigation';
+import { getTodayKST } from '@/lib/timezone';
 
 interface RecentCheckin {
   id: string;
@@ -22,7 +23,7 @@ export default async function DashboardPage() {
   if (!profile) redirect('/login');
 
   const isSuperAdmin = profile.role === 'super_admin';
-  const today = new Date().toISOString().split('T')[0];
+  const today = getTodayKST();
 
   // Fetch stats based on role
   let kioskCount = 0;

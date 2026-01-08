@@ -3,6 +3,7 @@ import { query, queryOne, execute } from '@/lib/db';
 import { redirect } from 'next/navigation';
 import { cookies } from 'next/headers';
 import RoomManager from './RoomManager';
+import { getTodayKST } from '@/lib/timezone';
 
 // Import PMS auth functions for server-side sync
 import { fetchAllPMSProjects, fetchPMSProject, PMSProject } from '@/lib/pms-auth';
@@ -166,8 +167,8 @@ export default async function RoomsPage() {
     );
   }
 
-  // Get today's reservations only
-  const today = new Date().toISOString().split('T')[0];
+  // Get today's reservations only (using Korean Standard Time)
+  const today = getTodayKST();
   let reservations: Reservation[] | null = null;
   if (targetProjectId) {
     reservations = await query<Reservation>(
