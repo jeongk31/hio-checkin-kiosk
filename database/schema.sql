@@ -61,6 +61,9 @@ CREATE TABLE IF NOT EXISTS projects (
     name VARCHAR(255) NOT NULL,
     slug VARCHAR(100) UNIQUE NOT NULL,
     region VARCHAR(50) DEFAULT NULL,  -- Region code for access control (e.g., 'seoul', 'busan')
+    type VARCHAR(100) DEFAULT NULL,   -- 업종: 호텔, 펜션, 캠핑, F&B, 기타
+    province VARCHAR(100) DEFAULT NULL, -- 시/도 (e.g., "제주특별자치도")
+    location VARCHAR(255) DEFAULT NULL, -- Full location string (e.g., "제주특별자치도 제주시")
     logo_url TEXT,
     settings JSONB DEFAULT '{}'::jsonb,
     is_active BOOLEAN DEFAULT true,

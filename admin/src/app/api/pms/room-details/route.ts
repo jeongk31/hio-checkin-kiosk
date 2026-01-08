@@ -283,9 +283,10 @@ export async function POST(request: Request) {
       let guestEmail: string | null = null;
 
       if (guest) {
-        guestName = [guest.first_name, guest.middle_name, guest.last_name]
+        // Korean name order: last_name + first_name (성이름)
+        guestName = [guest.last_name, guest.first_name]
           .filter(Boolean)
-          .join(' ');
+          .join('');
         guestPhone = guest.phone_number || null;
         guestEmail = guest.email || null;
         guestId = guest.id;

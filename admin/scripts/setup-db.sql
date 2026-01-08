@@ -30,6 +30,9 @@ CREATE TABLE IF NOT EXISTS projects (
     logo_url TEXT,
     settings JSONB DEFAULT '{}',
     region VARCHAR(100),
+    type VARCHAR(100),           -- 업종: 호텔, 펜션, 캠핑, F&B, 기타
+    province VARCHAR(100),       -- 시/도 (e.g., "제주특별자치도")
+    location VARCHAR(255),       -- Full location string
     is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()

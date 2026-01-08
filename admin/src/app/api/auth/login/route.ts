@@ -56,9 +56,28 @@ async function syncAllFromPMS(pmsToken: string): Promise<void> {
     const usersResult = await fetchAllPMSKioskUsers(pmsToken);
     console.log('[PMS Sync] Users result:', usersResult.success ? `${usersResult.users.length} users` : usersResult.error);
     if (usersResult.success) {
+      // Get list of valid PMS user emails
+      const validPmsEmails = usersResult.users.map(u => u.email);
+      console.log('[PMS Sync] Valid PMS emails:', validPmsEmails);
+
+      // Sync each user from PMS
       for (const pmsUser of usersResult.users) {
         console.log('[PMS Sync] Syncing user:', pmsUser.id, pmsUser.email, 'project:', pmsUser.project_id);
         await syncSingleUser(pmsUser);
+      }
+
+      // Deactivate local kiosk profiles that are NOT in PMS anymore
+      // Only affects profiles with role='kiosk' and password_hash='pms-managed'
+      if (validPmsEmails.length > 0) {
+        const deactivated = await execute(
+          `UPDATE profiles SET is_active = false, updated_at = NOW()
+           WHERE role = 'kiosk'
+           AND email NOT IN (SELECT unnest($1::text[]))
+           AND user_id IN (SELECT id FROM users WHERE password_hash = 'pms-managed')
+           AND is_active = true`,
+          [validPmsEmails]
+        );
+        console.log('[PMS Sync] Deactivated stale kiosk profiles');
       }
     }
 
@@ -110,15 +129,30 @@ async function syncSingleProject(pmsProject: PMSProject): Promise<void> {
 async function syncSingleUser(pmsUser: PMSUser): Promise<void> {
   const kioskRole = getKioskRole(pmsUser.role);
 
-  // Create or update user
+  console.log('[PMS Sync] syncSingleUser called with:', JSON.stringify({
+    id: pmsUser.id,
+    email: pmsUser.email,
+    role: pmsUser.role,
+    project_id: pmsUser.project_id,
+    kioskRole: kioskRole,
+  }));
+
+  // Check if user exists by email (may have different local ID)
+  const existingUser = await queryOne<{ id: string }>('SELECT id FROM users WHERE email = $1', [pmsUser.email]);
+
+  // Use existing local ID if found, otherwise use PMS ID
+  const userId = existingUser?.id || pmsUser.id;
+
+  // Create or update user - use email as conflict key since it's unique
   await execute(
     `INSERT INTO users (id, email, password_hash)
      VALUES ($1, $2, $3)
-     ON CONFLICT (id) DO UPDATE SET email = $2`,
-    [pmsUser.id, pmsUser.email, 'pms-managed']
+     ON CONFLICT (email) DO UPDATE SET
+       password_hash = CASE WHEN users.password_hash = 'pms-managed' OR $3 = 'pms-managed' THEN 'pms-managed' ELSE users.password_hash END`,
+    [userId, pmsUser.email, 'pms-managed']
   );
 
-  // Create or update profile
+  // Create or update profile - use user_id we determined above
   await execute(
     `INSERT INTO profiles (user_id, email, full_name, role, is_active, project_id)
      VALUES ($1, $2, $3, $4, $5, $6)
@@ -129,19 +163,31 @@ async function syncSingleUser(pmsUser: PMSUser): Promise<void> {
        is_active = EXCLUDED.is_active,
        project_id = EXCLUDED.project_id,
        updated_at = NOW()`,
-    [pmsUser.id, pmsUser.email, pmsUser.username || null, kioskRole, pmsUser.is_active, pmsUser.project_id]
+    [userId, pmsUser.email, pmsUser.username || null, kioskRole, pmsUser.is_active, pmsUser.project_id]
   );
 
-  // Auto-create kiosk device for kiosk users
+  // Auto-create or update kiosk device for kiosk users
   if (kioskRole === 'kiosk' && pmsUser.project_id) {
-    const profile = await queryOne<{ id: string }>('SELECT id FROM profiles WHERE user_id = $1', [pmsUser.id]);
+    const profile = await queryOne<{ id: string }>('SELECT id FROM profiles WHERE user_id = $1', [userId]);
     if (profile) {
-      const existingKiosk = await queryOne('SELECT id FROM kiosks WHERE profile_id = $1', [profile.id]);
-      if (!existingKiosk) {
+      const existingKiosk = await queryOne<{ id: string; project_id: string }>(
+        'SELECT id, project_id FROM kiosks WHERE profile_id = $1',
+        [profile.id]
+      );
+      if (existingKiosk) {
+        // Update existing kiosk to correct project if needed
+        if (existingKiosk.project_id !== pmsUser.project_id) {
+          console.log(`[PMS Sync] Updating kiosk ${existingKiosk.id} project from ${existingKiosk.project_id} to ${pmsUser.project_id}`);
+          await execute(
+            `UPDATE kiosks SET project_id = $1, updated_at = NOW() WHERE id = $2`,
+            [pmsUser.project_id, existingKiosk.id]
+          );
+        }
+      } else {
+        // Create new kiosk
         await execute(
           `INSERT INTO kiosks (id, project_id, profile_id, name, location, status)
-           VALUES (gen_random_uuid(), $1, $2, $3, $4, 'offline')
-           ON CONFLICT DO NOTHING`,
+           VALUES (gen_random_uuid(), $1, $2, $3, $4, 'offline')`,
           [pmsUser.project_id, profile.id, `${pmsUser.username || pmsUser.email} Device`, 'Auto-created from PMS']
         );
       }
@@ -321,15 +367,20 @@ export async function POST(request: Request) {
     );
 
     if (!profile) {
-      // Create local profile linked to PMS user
-      const userId = pmsUser.id; // Use PMS user ID
+      // Check if user exists by email (may have different local ID)
+      const existingUser = await queryOne<{ id: string }>('SELECT id FROM users WHERE email = $1', [pmsUser.email]);
+
+      // Use existing local ID if found, otherwise use PMS ID
+      const userId = existingUser?.id || pmsUser.id;
+
       await execute(
-        `INSERT INTO users (id, email, password_hash) 
-         VALUES ($1, $2, $3) 
-         ON CONFLICT (id) DO UPDATE SET email = $2`,
+        `INSERT INTO users (id, email, password_hash)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (email) DO UPDATE SET
+           password_hash = CASE WHEN users.password_hash = 'pms-managed' THEN 'pms-managed' ELSE users.password_hash END`,
         [userId, pmsUser.email, 'pms-managed'] // Password managed by PMS
       );
-      
+
       // Insert or update profile and always get the profile ID
       profile = await queryOne<ProfileRow & { user_id: string }>(
         `INSERT INTO profiles (user_id, email, role, is_active, project_id)

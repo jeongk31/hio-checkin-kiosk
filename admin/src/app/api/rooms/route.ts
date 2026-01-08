@@ -63,6 +63,14 @@ export async function GET(request: Request) {
     const status = searchParams.get('status');
     const availableOnly = searchParams.get('availableOnly') === 'true';
 
+    // Debug logging for kiosk room fetch issues
+    console.log('[Rooms API] GET request:', {
+      role: profile.role,
+      profileProjectId: profile.project_id,
+      requestedProjectId: projectId,
+      availableOnly,
+    });
+
     const conditions: string[] = [];
     const params: unknown[] = [];
     let paramIndex = 1;
@@ -72,6 +80,12 @@ export async function GET(request: Request) {
         conditions.push(`r.project_id = $${paramIndex++}`);
         params.push(projectId);
       }
+    } else if (profile.role === 'kiosk' && projectId) {
+      // For kiosk users, trust the projectId from kiosk.project_id (passed from kiosk page)
+      // This handles cases where profile.project_id might be out of sync
+      conditions.push(`r.project_id = $${paramIndex++}`);
+      params.push(projectId);
+      console.log('[Rooms API] Kiosk using requested projectId:', projectId);
     } else {
       conditions.push(`r.project_id = $${paramIndex++}`);
       params.push(profile.project_id);
@@ -88,14 +102,11 @@ export async function GET(request: Request) {
     }
 
     if (availableOnly) {
-      // Accept both 'available' and 'vacant' as available rooms
-      conditions.push(`r.status IN ('available', 'vacant')`);
+      conditions.push(`r.status = 'available'`);
       conditions.push(`r.is_active = true`);
     }
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-
-    console.log('[Rooms API] Query params:', { projectId, roomTypeId, status, availableOnly, whereClause });
 
     const rooms = await query<RoomRow>(
       `SELECT r.*,
@@ -110,40 +121,7 @@ export async function GET(request: Request) {
       params
     );
 
-    console.log('[Rooms API] Found rooms:', rooms.map(r => ({ 
-      room_number: r.room_number, 
-      status: r.status, 
-      is_active: r.is_active,
-      room_type_id: r.room_type_id,
-      room_type_name: r.room_type_name
-    })));
-
-    // Also log all rooms if availableOnly to see what we're filtering out
-    if (availableOnly && rooms.length === 0) {
-      const allRooms = await query<RoomRow>(
-        `SELECT r.room_number, r.status, r.is_active, r.room_type_id, r.project_id, rt.name as room_type_name
-         FROM rooms r
-         LEFT JOIN room_types rt ON r.room_type_id = rt.id
-         WHERE r.project_id = $1
-         ORDER BY r.room_number ASC`,
-        [profile.role === 'super_admin' && projectId ? projectId : profile.project_id]
-      );
-      console.log('[Rooms API] All rooms in project (for debugging):', allRooms);
-      
-      // Also check if there are rooms in OTHER projects
-      const allRoomsAnyProject = await query<RoomRow>(
-        `SELECT r.room_number, r.status, r.is_active, r.room_type_id, r.project_id, rt.name as room_type_name
-         FROM rooms r
-         LEFT JOIN room_types rt ON r.room_type_id = rt.id
-         ORDER BY r.room_number ASC
-         LIMIT 10`,
-        []
-      );
-      console.log('[Rooms API] All rooms in ANY project (sample):', allRoomsAnyProject);
-      console.log('[Rooms API] Current user project_id:', profile.project_id);
-      console.log('[Rooms API] Query projectId param:', projectId);
-    }
-
+    console.log('[Rooms API] Found', rooms.length, 'rooms with conditions:', conditions);
     return NextResponse.json({ rooms: rooms.map(transformRoom) });
   } catch (error) {
     console.error('Error fetching rooms:', error);

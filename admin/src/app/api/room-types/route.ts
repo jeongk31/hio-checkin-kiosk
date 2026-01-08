@@ -27,6 +27,13 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const projectId = searchParams.get('projectId');
 
+    // Debug logging
+    console.log('[RoomTypes API] GET request:', {
+      role: profile.role,
+      profileProjectId: profile.project_id,
+      requestedProjectId: projectId,
+    });
+
     let sql: string;
     let params: (string | null)[];
 
@@ -38,12 +45,18 @@ export async function GET(request: Request) {
         sql = 'SELECT * FROM room_types ORDER BY display_order ASC';
         params = [];
       }
+    } else if (profile.role === 'kiosk' && projectId) {
+      // For kiosk users, trust the projectId from kiosk.project_id (passed from kiosk page)
+      sql = 'SELECT * FROM room_types WHERE project_id = $1 ORDER BY display_order ASC';
+      params = [projectId];
+      console.log('[RoomTypes API] Kiosk using requested projectId:', projectId);
     } else {
       sql = 'SELECT * FROM room_types WHERE project_id = $1 ORDER BY display_order ASC';
       params = [profile.project_id];
     }
 
     const data = await query<RoomType>(sql, params);
+    console.log('[RoomTypes API] Found', data.length, 'room types');
 
     return NextResponse.json({ roomTypes: data });
   } catch (error) {

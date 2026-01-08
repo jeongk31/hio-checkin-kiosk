@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useRef } from 'react';
 import ProjectSelector from '@/components/ProjectSelector';
-import { getTodayKST } from '@/lib/timezone';
 
 interface Project {
   id: string;
@@ -133,8 +132,7 @@ export default function RoomManager({
   });
   const [uploadingImage, setUploadingImage] = useState(false);
 
-  // Use Korean Standard Time for date calculations
-  const today = getTodayKST();
+  const today = new Date().toISOString().split('T')[0];
 
   // Helper to format number with commas
   const formatNumberWithCommas = (value: string): string => {
@@ -148,15 +146,20 @@ export default function RoomManager({
     return parseFloat(value.replace(/,/g, '')) || 0;
   };
 
-  // Get today's reservations mapped by room number
-  const todayReservations = reservations.filter(
-    (r) => r.check_in_date === today && r.status !== 'cancelled'
-  );
+  // Map reservations by room number (server already filters by today's date)
+  // Only exclude cancelled reservations
   const reservationsByRoom: Record<string, Reservation> = {};
-  todayReservations.forEach((r) => {
-    if (r.room_number) {
+  reservations.forEach((r) => {
+    if (r.room_number && r.status !== 'cancelled') {
       reservationsByRoom[r.room_number] = r;
     }
+  });
+
+  // Debug: log the mapping
+  console.log('[RoomManager] Mapping reservations:', {
+    totalReservations: reservations.length,
+    mappedRoomNumbers: Object.keys(reservationsByRoom),
+    sampleReservation: reservations[0],
   });
 
   // Fetch history when tab changes
@@ -344,10 +347,10 @@ export default function RoomManager({
 
         // Create or update reservation if hasReservation is checked
         if (roomForm.hasReservation && roomForm.reservationNumber) {
-          // Use editingReservation if available, otherwise search for existing pending reservation
+          // Use editingReservation if available, otherwise search for existing active reservation
+          const activeStatuses = ['pending', 'confirmed', 'reserved', 'checked_in'];
           const existingReservation = editingReservation || reservations.find(
-            (r) => r.room_number === roomForm.roomNumber &&
-              (r.status === 'pending' || r.status === 'checked_in')
+            (r) => r.room_number === roomForm.roomNumber && activeStatuses.includes(r.status)
           );
 
           const reservationBody = {
@@ -420,15 +423,15 @@ export default function RoomManager({
 
   const handleEditRoom = (room: Room) => {
     setEditingRoom(room);
-    // Find if there's an existing reservation for this room (pending, confirmed, reserved, or checked_in)
+    // Find if there's an existing reservation for this room (any active status)
+    const activeStatuses = ['pending', 'confirmed', 'reserved', 'checked_in'];
     const existingReservation = reservations.find(
-      (r) => r.room_number === room.room_number &&
-        (r.status === 'pending' || r.status === 'confirmed' || r.status === 'reserved' || r.status === 'checked_in')
+      (r) => r.room_number === room.room_number && activeStatuses.includes(r.status)
     );
     setEditingReservation(existingReservation || null);
 
-    // Show reservation info if room is reserved or occupied with a reservation
-    const hasExistingReservation = (room.status === 'reserved' || room.status === 'occupied') && !!existingReservation;
+    // Show reservation info if there's an existing reservation
+    const hasExistingReservation = !!existingReservation;
 
     setRoomForm({
       roomNumber: room.room_number,
@@ -622,12 +625,30 @@ export default function RoomManager({
     cleaning: { label: '청소중', class: 'bg-blue-100 text-blue-800' },
   };
 
-  const reservationStatusLabels: Record<string, { label: string; class: string }> = {
-    pending: { label: '대기', class: 'bg-yellow-100 text-yellow-800' },
-    checked_in: { label: '체크인', class: 'bg-green-100 text-green-800' },
-    checked_out: { label: '체크아웃', class: 'bg-gray-100 text-gray-800' },
-    cancelled: { label: '취소', class: 'bg-red-100 text-red-800' },
-    no_show: { label: '노쇼', class: 'bg-purple-100 text-purple-800' },
+  // Simple display: 예약됨 (has reservation), 체크인 (checked in), or 예약 없음 (no reservation)
+  const getReservationDisplay = (reservation: Reservation | undefined) => {
+    if (!reservation) {
+      return null;
+    }
+    if (reservation.status === 'checked_in') {
+      return { label: '체크인', class: 'bg-green-100 text-green-800' };
+    }
+    // Any other active status shows as 예약됨
+    return { label: '예약됨', class: 'bg-blue-100 text-blue-800' };
+  };
+
+  // For history and edit modal - shows full status info
+  const getHistoryStatusDisplay = (status: string) => {
+    const statusMap: Record<string, { label: string; class: string }> = {
+      pending: { label: '예약됨', class: 'bg-blue-100 text-blue-800' },
+      confirmed: { label: '예약됨', class: 'bg-blue-100 text-blue-800' },
+      reserved: { label: '예약됨', class: 'bg-blue-100 text-blue-800' },
+      checked_in: { label: '체크인', class: 'bg-green-100 text-green-800' },
+      checked_out: { label: '체크아웃', class: 'bg-gray-100 text-gray-800' },
+      cancelled: { label: '취소', class: 'bg-red-100 text-red-800' },
+      no_show: { label: '노쇼', class: 'bg-purple-100 text-purple-800' },
+    };
+    return statusMap[status] || { label: status, class: 'bg-gray-100 text-gray-800' };
   };
 
   return (
@@ -782,14 +803,14 @@ export default function RoomManager({
                         {reservation ? (
                           <div>
                             <div className="flex items-center gap-2">
-                              <span
-                                className={`px-2 py-1 text-xs rounded-full ${
-                                  reservationStatusLabels[reservation.status]?.class ||
-                                  'bg-gray-100 text-gray-800'
-                                }`}
-                              >
-                                {reservationStatusLabels[reservation.status]?.label || reservation.status}
-                              </span>
+                              {(() => {
+                                const display = getReservationDisplay(reservation);
+                                return display ? (
+                                  <span className={`px-2 py-1 text-xs rounded-full ${display.class}`}>
+                                    {display.label}
+                                  </span>
+                                ) : null;
+                              })()}
                               <span className="font-medium text-gray-900">
                                 {reservation.guest_name || '(이름 없음)'}
                               </span>
@@ -966,8 +987,7 @@ export default function RoomManager({
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
                     {historyReservations.map((reservation) => {
-                      const status =
-                        reservationStatusLabels[reservation.status] || reservationStatusLabels.pending;
+                      const status = getHistoryStatusDisplay(reservation.status);
                       return (
                         <tr key={reservation.id} className="hover:bg-gray-50">
                           <td className="px-6 py-4 whitespace-nowrap font-medium text-gray-900">
@@ -1276,11 +1296,14 @@ export default function RoomManager({
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <span className="text-sm font-medium text-gray-700">현재 예약 상태:</span>
-                        <span className={`px-2 py-1 text-xs rounded-full ${
-                          reservationStatusLabels[editingReservation.status]?.class || 'bg-gray-100 text-gray-800'
-                        }`}>
-                          {reservationStatusLabels[editingReservation.status]?.label || editingReservation.status}
-                        </span>
+                        {(() => {
+                          const display = getHistoryStatusDisplay(editingReservation.status);
+                          return (
+                            <span className={`px-2 py-1 text-xs rounded-full ${display.class}`}>
+                              {display.label}
+                            </span>
+                          );
+                        })()}
                       </div>
                       {editingReservation.source && (
                         <span className="text-xs text-gray-500">출처: {editingReservation.source}</span>
