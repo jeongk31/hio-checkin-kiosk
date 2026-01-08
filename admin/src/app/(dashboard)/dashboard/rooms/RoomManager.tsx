@@ -54,8 +54,8 @@ interface Reservation {
   guest_phone: string | null;
   guest_email: string | null;
   guest_count: number;
-  check_in_date: string;
-  check_out_date: string;
+  check_in_date: string | Date;
+  check_out_date: string | Date;
   room_number: string | null;
   status: string;
   source: string | null;
@@ -1045,10 +1045,18 @@ export default function RoomManager({
                             )}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-gray-900">
-                            {reservation.check_in_date}
+                            {typeof reservation.check_in_date === 'string' 
+                              ? reservation.check_in_date 
+                              : reservation.check_in_date instanceof Date 
+                                ? reservation.check_in_date.toISOString().split('T')[0]
+                                : '-'}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-gray-500">
-                            {reservation.check_out_date}
+                            {typeof reservation.check_out_date === 'string' 
+                              ? reservation.check_out_date 
+                              : reservation.check_out_date instanceof Date 
+                                ? reservation.check_out_date.toISOString().split('T')[0]
+                                : '-'}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
                             <span className={`px-2 py-1 text-xs rounded-full ${status.class}`}>

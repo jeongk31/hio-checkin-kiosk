@@ -9,8 +9,8 @@ interface RecentCheckin {
   guest_name: string | null;
   guest_count: number;
   room_number: string | null;
-  check_in_date: string;
-  created_at: string;
+  check_in_date: string | Date;
+  created_at: string | Date;
   status: string;
 }
 
@@ -157,7 +157,11 @@ export default async function DashboardPage() {
                         {checkin.guest_count}명
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-500">
-                        {checkin.check_in_date}
+                        {typeof checkin.check_in_date === 'string' 
+                          ? checkin.check_in_date 
+                          : checkin.check_in_date instanceof Date 
+                            ? checkin.check_in_date.toISOString().split('T')[0]
+                            : '-'}
                       </td>
                     </tr>
                   ))}

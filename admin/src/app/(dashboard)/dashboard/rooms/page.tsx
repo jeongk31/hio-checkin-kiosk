@@ -74,8 +74,8 @@ interface Reservation {
   guest_phone: string | null;
   guest_email: string | null;
   guest_count: number;
-  check_in_date: string;
-  check_out_date: string;
+  check_in_date: string | Date;
+  check_out_date: string | Date;
   room_number: string | null;
   status: string;
   source: string | null;
