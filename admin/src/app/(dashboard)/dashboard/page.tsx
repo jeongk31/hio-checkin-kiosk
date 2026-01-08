@@ -18,6 +18,10 @@ interface CountResult {
   count: number;
 }
 
+interface PaidAmountResult {
+  total_paid: number;
+}
+
 export default async function DashboardPage() {
   const profile = await getCurrentProfile();
   if (!profile) redirect('/login');
@@ -28,13 +32,18 @@ export default async function DashboardPage() {
   // Fetch stats based on role
   let kioskCount = 0;
   let todayCheckins = 0;
+  let totalPaidAmount = 0;
   let recentCheckins: RecentCheckin[] = [];
 
   if (isSuperAdmin) {
-    const [kiosksResult, checkinsResult, recent] = await Promise.all([
+    const [kiosksResult, checkinsResult, paidResult, recent] = await Promise.all([
       queryOne<CountResult>('SELECT COUNT(*)::int as count FROM kiosks'),
       queryOne<CountResult>(
         'SELECT COUNT(*)::int as count FROM reservations WHERE status = $1 AND check_in_date = $2',
+        ['checked_in', today]
+      ),
+      queryOne<PaidAmountResult>(
+        'SELECT COALESCE(SUM(paid_amount), 0)::numeric as total_paid FROM reservations WHERE status = $1 AND check_in_date = $2',
         ['checked_in', today]
       ),
       query<RecentCheckin>(
@@ -48,15 +57,20 @@ export default async function DashboardPage() {
     ]);
     kioskCount = kiosksResult?.count || 0;
     todayCheckins = checkinsResult?.count || 0;
+    totalPaidAmount = Number(paidResult?.total_paid) || 0;
     recentCheckins = recent || [];
   } else {
-    const [kiosksResult, checkinsResult, recent] = await Promise.all([
+    const [kiosksResult, checkinsResult, paidResult, recent] = await Promise.all([
       queryOne<CountResult>(
         'SELECT COUNT(*)::int as count FROM kiosks WHERE project_id = $1',
         [profile.project_id]
       ),
       queryOne<CountResult>(
         'SELECT COUNT(*)::int as count FROM reservations WHERE project_id = $1 AND status = $2 AND check_in_date = $3',
+        [profile.project_id, 'checked_in', today]
+      ),
+      queryOne<PaidAmountResult>(
+        'SELECT COALESCE(SUM(paid_amount), 0)::numeric as total_paid FROM reservations WHERE project_id = $1 AND status = $2 AND check_in_date = $3',
         [profile.project_id, 'checked_in', today]
       ),
       query<RecentCheckin>(
@@ -70,6 +84,7 @@ export default async function DashboardPage() {
     ]);
     kioskCount = kiosksResult?.count || 0;
     todayCheckins = checkinsResult?.count || 0;
+    totalPaidAmount = Number(paidResult?.total_paid) || 0;
     recentCheckins = recent || [];
   }
 
@@ -77,7 +92,7 @@ export default async function DashboardPage() {
     <div className="p-8">
       <h1 className="text-2xl font-bold text-gray-900 mb-8">대시보드</h1>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
         <div className="bg-white rounded-lg shadow p-6">
           <div className="text-sm text-gray-500">전체 키오스크</div>
           <div className="text-3xl font-bold text-gray-900 mt-2">{kioskCount}</div>
@@ -87,6 +102,13 @@ export default async function DashboardPage() {
           <div className="text-sm text-gray-500">오늘 체크인</div>
           <div className="text-3xl font-bold text-blue-600 mt-2">
             {todayCheckins}
+          </div>
+        </div>
+
+        <div className="bg-white rounded-lg shadow p-6">
+          <div className="text-sm text-gray-500">오늘 결제 총액</div>
+          <div className="text-3xl font-bold text-green-600 mt-2">
+            {totalPaidAmount.toLocaleString()}원
           </div>
         </div>
       </div>

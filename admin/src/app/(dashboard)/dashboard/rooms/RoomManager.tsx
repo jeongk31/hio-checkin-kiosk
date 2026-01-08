@@ -61,6 +61,7 @@ interface Reservation {
   source: string | null;
   notes: string | null;
   total_price: number | null;
+  paid_amount: number | null;
   room_type?: RoomType;
   created_at?: string;
   verified_guests?: VerifiedGuest[];
@@ -147,11 +148,16 @@ export default function RoomManager({
   };
 
   // Map reservations by room number (server already filters by today's date)
-  // Only exclude cancelled reservations
+  // Only exclude cancelled reservations, prioritize confirmed/reserved over checked_in
   const reservationsByRoom: Record<string, Reservation> = {};
   reservations.forEach((r) => {
     if (r.room_number && r.status !== 'cancelled') {
-      reservationsByRoom[r.room_number] = r;
+      const existing = reservationsByRoom[r.room_number];
+      // Prioritize confirmed/reserved status over checked_in
+      if (!existing || 
+          (r.status === 'confirmed' || r.status === 'reserved') && existing.status === 'checked_in') {
+        reservationsByRoom[r.room_number] = r;
+      }
     }
   });
 
@@ -827,6 +833,20 @@ export default function RoomManager({
                             <div className="text-xs text-gray-400 mt-1">
                               예약번호: {reservation.reservation_number}
                             </div>
+                            {/* Price information - show paid amount or total if not paid */}
+                            {(reservation.paid_amount !== null || reservation.total_price !== null) && (
+                              <div className="mt-2 text-xs">
+                                <span className="text-gray-500">결제금액:</span>
+                                <span className="ml-1 font-semibold text-green-600">
+                                  {((reservation.paid_amount || 0) > 0 
+                                    ? reservation.paid_amount 
+                                    : reservation.total_price || 0).toLocaleString()}원
+                                </span>
+                                {(reservation.paid_amount || 0) === 0 && reservation.total_price && (
+                                  <span className="ml-1 text-gray-400">(미결제)</span>
+                                )}
+                              </div>
+                            )}
                             {/* Verified guests from OCR */}
                             {reservation.verified_guests && reservation.verified_guests.length > 0 && (
                               <div className="mt-2 p-2 bg-green-50 rounded text-sm">
@@ -981,6 +1001,9 @@ export default function RoomManager({
                         상태
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                        결제금액
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                         출처
                       </th>
                     </tr>
@@ -1029,6 +1052,24 @@ export default function RoomManager({
                             <span className={`px-2 py-1 text-xs rounded-full ${status.class}`}>
                               {status.label}
                             </span>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            {(() => {
+                              const amount = (reservation.paid_amount || 0) > 0 
+                                ? reservation.paid_amount 
+                                : reservation.total_price || 0;
+                              const isPaid = (reservation.paid_amount || 0) > 0;
+                              return (
+                                <div>
+                                  <span className={isPaid ? "text-green-600 font-semibold" : "text-gray-600 font-semibold"}>
+                                    {amount.toLocaleString()}원
+                                  </span>
+                                  {!isPaid && reservation.total_price && (
+                                    <span className="ml-1 text-xs text-gray-400">(미결제)</span>
+                                  )}
+                                </div>
+                              );
+                            })()}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-gray-500">
                             {reservation.source || '-'}

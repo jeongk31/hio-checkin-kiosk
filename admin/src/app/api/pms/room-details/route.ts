@@ -292,14 +292,24 @@ export async function POST(request: Request) {
         guestId = guest.id;
       }
 
+      // Generate reservation number if not provided from PMS
+      // Format: PMS-{date}-{uuid_prefix}
+      let reservationNumber = reservation.reservation_number;
+      if (!reservationNumber) {
+        const dateStr = checkInDate.replace(/-/g, '');
+        const idPrefix = reservation.id.substring(0, 8).toUpperCase();
+        reservationNumber = `PMS-${dateStr}-${idPrefix}`;
+        console.warn(`[PMS Sync] Reservation ${reservation.id} has no reservation_number, generated: ${reservationNumber}`);
+      }
+
       // Upsert reservation - use PMS reservation ID as primary key
       await execute(
         `INSERT INTO reservations (
           id, project_id, room_type_id, reservation_number, guest_name, guest_phone,
           guest_email, guest_count, check_in_date, check_out_date, room_number,
-          status, source, notes, total_price, payment_status, data,
+          status, source, notes, total_price, paid_amount, payment_status, data,
           created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW(), NOW())
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, NOW(), NOW())
         ON CONFLICT (id) DO UPDATE SET
           project_id = EXCLUDED.project_id,
           room_type_id = EXCLUDED.room_type_id,
@@ -315,6 +325,7 @@ export async function POST(request: Request) {
           source = EXCLUDED.source,
           notes = EXCLUDED.notes,
           total_price = EXCLUDED.total_price,
+          paid_amount = EXCLUDED.paid_amount,
           payment_status = EXCLUDED.payment_status,
           data = EXCLUDED.data,
           updated_at = NOW()`,
@@ -322,7 +333,7 @@ export async function POST(request: Request) {
           reservation.id,
           reservation.project_id,
           roomTypeId,
-          reservation.reservation_number || `PMS-${reservation.id.substring(0, 8)}`,
+          reservationNumber, // Use generated reservation number (with fallback)
           guestName,
           guestPhone,
           guestEmail,
@@ -333,7 +344,8 @@ export async function POST(request: Request) {
           mapReservationStatus(reservation.status),
           reservation.channel_name || 'PMS',
           reservation.special_requests,
-          reservation.total_amount,
+          reservation.total_amount || 0, // total_price
+          reservation.paid_amount || 0,  // paid_amount
           reservation.payment_status,
           JSON.stringify({
             pms_reservation_id: reservation.id,
@@ -344,7 +356,6 @@ export async function POST(request: Request) {
             is_day_use: reservation.is_day_use,
             has_checked_in: reservation.has_checked_in,
             payment_method: reservation.payment_method,
-            paid_amount: reservation.paid_amount,
             adults: reservation.adults,
             children: reservation.children,
           }),
