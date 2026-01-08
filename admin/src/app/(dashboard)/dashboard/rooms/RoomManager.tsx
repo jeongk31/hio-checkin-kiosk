@@ -418,10 +418,10 @@ export default function RoomManager({
 
   const handleEditRoom = (room: Room) => {
     setEditingRoom(room);
-    // Find if there's an existing reservation for this room (pending, reserved, or checked_in)
+    // Find if there's an existing reservation for this room (pending, confirmed, reserved, or checked_in)
     const existingReservation = reservations.find(
       (r) => r.room_number === room.room_number &&
-        (r.status === 'pending' || r.status === 'checked_in')
+        (r.status === 'pending' || r.status === 'confirmed' || r.status === 'reserved' || r.status === 'checked_in')
     );
     setEditingReservation(existingReservation || null);
 

@@ -235,17 +235,16 @@ export async function POST(request: Request) {
       roomTypeId = room.room_type_id;
     }
 
-    // Upsert room - use PMS room ID as primary key
+    // Upsert room - use project_id + room_number as unique constraint
+    // This handles the case where PMS might send different IDs for the same room
     await execute(
       `INSERT INTO rooms (
         id, project_id, room_type_id, room_number, floor, status,
         room_password, key_box_number, key_box_password, notes, is_active,
         created_at, updated_at
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, true, NOW(), NOW())
-      ON CONFLICT (id) DO UPDATE SET
-        project_id = EXCLUDED.project_id,
+      ON CONFLICT (project_id, room_number) DO UPDATE SET
         room_type_id = EXCLUDED.room_type_id,
-        room_number = EXCLUDED.room_number,
         floor = EXCLUDED.floor,
         status = EXCLUDED.status,
         room_password = EXCLUDED.room_password,
@@ -367,9 +366,12 @@ export async function POST(request: Request) {
       },
     });
   } catch (error) {
-    console.error('[PMS Sync] Error processing room details:', error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorStack = error instanceof Error ? error.stack : undefined;
+    console.error('[PMS Sync] Error processing room details:', errorMessage);
+    console.error('[PMS Sync] Stack:', errorStack);
     return NextResponse.json(
-      { error: 'Failed to process room details' },
+      { error: 'Failed to process room details', details: errorMessage },
       { status: 500 }
     );
   }
