@@ -838,11 +838,13 @@ export default function RoomManager({
                               <div className="mt-2 text-xs">
                                 <span className="text-gray-500">결제금액:</span>
                                 <span className="ml-1 font-semibold text-green-600">
-                                  {((reservation.paid_amount || 0) > 0 
-                                    ? reservation.paid_amount 
-                                    : reservation.total_price || 0).toLocaleString()}원
+                                  {(() => {
+                                    const paidAmount = reservation.paid_amount ?? 0;
+                                    const totalPrice = reservation.total_price ?? 0;
+                                    return (paidAmount > 0 ? paidAmount : totalPrice).toLocaleString();
+                                  })()}원
                                 </span>
-                                {(reservation.paid_amount || 0) === 0 && reservation.total_price && (
+                                {(reservation.paid_amount ?? 0) === 0 && reservation.total_price && (
                                   <span className="ml-1 text-gray-400">(미결제)</span>
                                 )}
                               </div>
@@ -1055,10 +1057,10 @@ export default function RoomManager({
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
                             {(() => {
-                              const amount = (reservation.paid_amount || 0) > 0 
-                                ? reservation.paid_amount 
-                                : reservation.total_price || 0;
-                              const isPaid = (reservation.paid_amount || 0) > 0;
+                              const paidAmount = reservation.paid_amount ?? 0;
+                              const totalPrice = reservation.total_price ?? 0;
+                              const amount = paidAmount > 0 ? paidAmount : totalPrice;
+                              const isPaid = paidAmount > 0;
                               return (
                                 <div>
                                   <span className={isPaid ? "text-green-600 font-semibold" : "text-gray-600 font-semibold"}>

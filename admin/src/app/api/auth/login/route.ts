@@ -69,7 +69,7 @@ async function syncAllFromPMS(pmsToken: string): Promise<void> {
       // Deactivate local kiosk profiles that are NOT in PMS anymore
       // Only affects profiles with role='kiosk' and password_hash='pms-managed'
       if (validPmsEmails.length > 0) {
-        const deactivated = await execute(
+        await execute(
           `UPDATE profiles SET is_active = false, updated_at = NOW()
            WHERE role = 'kiosk'
            AND email NOT IN (SELECT unnest($1::text[]))

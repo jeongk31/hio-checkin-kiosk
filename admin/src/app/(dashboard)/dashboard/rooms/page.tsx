@@ -81,6 +81,7 @@ interface Reservation {
   source: string | null;
   notes: string | null;
   total_price: number | null;
+  paid_amount: number | null;
   room_type?: RoomType;
   created_at?: string;
 }
