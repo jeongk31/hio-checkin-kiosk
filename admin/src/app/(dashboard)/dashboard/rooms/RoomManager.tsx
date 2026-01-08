@@ -62,9 +62,20 @@ interface Reservation {
   notes: string | null;
   total_price: number | null;
   paid_amount: number | null;
+  amenity_total?: number | null;
   room_type?: RoomType;
   created_at?: string;
   verified_guests?: VerifiedGuest[];
+}
+
+interface Amenity {
+  id: string;
+  project_id: string;
+  name: string;
+  price: number;
+  description: string | null;
+  is_active: boolean;
+  display_order: number;
 }
 
 interface RoomManagerProps {
@@ -77,7 +88,7 @@ interface RoomManagerProps {
   initialProject?: Project | null;
 }
 
-type Tab = 'today' | 'roomTypes' | 'history';
+type Tab = 'today' | 'roomTypes' | 'amenities' | 'history';
 
 export default function RoomManager({
   projects,
@@ -133,6 +144,16 @@ export default function RoomManager({
   });
   const [uploadingImage, setUploadingImage] = useState(false);
 
+  // Amenity state
+  const [amenities, setAmenities] = useState<Amenity[]>([]);
+  const [showAmenityForm, setShowAmenityForm] = useState(false);
+  const [editingAmenity, setEditingAmenity] = useState<Amenity | null>(null);
+  const [amenityForm, setAmenityForm] = useState({
+    name: '',
+    price: '',
+    description: '',
+  });
+
   const today = new Date().toISOString().split('T')[0];
 
   // Helper to format number with commas
@@ -173,13 +194,30 @@ export default function RoomManager({
     if (activeTab === 'history' && historyReservations.length === 0) {
       fetchHistory();
     }
+    if (activeTab === 'amenities' && amenities.length === 0) {
+      fetchAmenities();
+    }
   }, [activeTab]);
+
+  const fetchAmenities = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/amenities?projectId=${selectedProjectId}`);
+      const data = await res.json();
+      setAmenities(data.amenities || []);
+    } catch (error) {
+      console.error('Error fetching amenities:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const fetchHistory = async () => {
     setLoading(true);
     try {
+      // Show all checked-in reservations (including today's check-ins)
       const res = await fetch(
-        `/api/reservations?projectId=${selectedProjectId}&beforeDate=${today}&limit=200`
+        `/api/reservations?projectId=${selectedProjectId}&status=checked_in&limit=200`
       );
       const data = await res.json();
       setHistoryReservations(data.reservations || []);
@@ -193,6 +231,7 @@ export default function RoomManager({
   const handleProjectChange = async (projectId: string) => {
     setSelectedProjectId(projectId);
     setHistoryReservations([]);
+    setAmenities([]);
 
     // When "all" is selected, restore initial data (all projects)
     if (projectId === 'all') {
@@ -206,22 +245,25 @@ export default function RoomManager({
     setLoading(true);
 
     try {
-      const [roomTypesRes, reservationsRes, roomsRes, projectRes] = await Promise.all([
+      const [roomTypesRes, reservationsRes, roomsRes, projectRes, amenitiesRes] = await Promise.all([
         fetch(`/api/room-types?projectId=${projectId}`),
         fetch(`/api/reservations?projectId=${projectId}&checkInDate=${today}`),
         fetch(`/api/rooms?projectId=${projectId}`),
         fetch(`/api/projects/${projectId}`),
+        fetch(`/api/amenities?projectId=${projectId}`),
       ]);
 
       const roomTypesData = await roomTypesRes.json();
       const reservationsData = await reservationsRes.json();
       const roomsData = await roomsRes.json();
       const projectData = await projectRes.json();
+      const amenitiesData = await amenitiesRes.json();
 
       setRoomTypes(roomTypesData.roomTypes || []);
       setReservations(reservationsData.reservations || []);
       setRooms(roomsData.rooms || []);
       setResetTime(projectData.project?.settings?.daily_reset_time || '11:00');
+      setAmenities(amenitiesData.amenities || []);
     } catch (error) {
       console.error('Error fetching data:', error);
     } finally {
@@ -353,11 +395,9 @@ export default function RoomManager({
 
         // Create or update reservation if hasReservation is checked
         if (roomForm.hasReservation && roomForm.reservationNumber) {
-          // Use editingReservation if available, otherwise search for existing active reservation
-          const activeStatuses = ['pending', 'confirmed', 'reserved', 'checked_in'];
-          const existingReservation = editingReservation || reservations.find(
-            (r) => r.room_number === roomForm.roomNumber && activeStatuses.includes(r.status)
-          );
+          // ONLY use editingReservation when editing an existing room
+          // When creating a NEW room, always create a new reservation (don't search by room_number)
+          const existingReservation = editingRoom ? editingReservation : null;
 
           const reservationBody = {
             projectId: selectedProjectId,
@@ -407,6 +447,10 @@ export default function RoomManager({
   };
 
   const handleDeleteRoom = async (id: string) => {
+    // Find the room to get its room_number
+    const roomToDelete = rooms.find((r) => r.id === id);
+    if (!roomToDelete) return;
+
     if (!confirm('이 객실을 삭제하시겠습니까?')) return;
 
     setLoading(true);
@@ -418,7 +462,15 @@ export default function RoomManager({
       });
 
       if (res.ok) {
+        // Remove room from local state
         setRooms(rooms.filter((r) => r.id !== id));
+
+        // Also remove associated reservations from local state (but keep in DB for history)
+        // This prevents stale data from interfering when adding new rooms
+        const activeStatuses = ['pending', 'confirmed', 'reserved'];
+        setReservations(reservations.filter(
+          (r) => !(r.room_number === roomToDelete.room_number && activeStatuses.includes(r.status))
+        ));
       }
     } catch (error) {
       console.error('Error deleting room:', error);
@@ -568,6 +620,95 @@ export default function RoomManager({
       basePrice: '',
       description: '',
       imageUrl: '',
+    });
+  };
+
+  // Amenity CRUD
+  const handleSaveAmenity = async () => {
+    setLoading(true);
+    try {
+      const method = editingAmenity ? 'PUT' : 'POST';
+      const body = editingAmenity
+        ? {
+            id: editingAmenity.id,
+            projectId: selectedProjectId,
+            name: amenityForm.name,
+            price: parseFormattedNumber(amenityForm.price),
+            description: amenityForm.description || null,
+          }
+        : {
+            projectId: selectedProjectId,
+            name: amenityForm.name,
+            price: parseFormattedNumber(amenityForm.price),
+            description: amenityForm.description || null,
+          };
+
+      const res = await fetch('/api/amenities', {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (editingAmenity) {
+          setAmenities(amenities.map((a) => (a.id === data.amenity.id ? data.amenity : a)));
+        } else {
+          setAmenities([...amenities, data.amenity]);
+        }
+        setShowAmenityForm(false);
+        setEditingAmenity(null);
+        resetAmenityForm();
+      } else {
+        const data = await res.json();
+        alert(data.error || '오류가 발생했습니다');
+      }
+    } catch (error) {
+      console.error('Error saving amenity:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteAmenity = async (id: string) => {
+    if (!confirm('이 어메니티를 삭제하시겠습니까?')) return;
+
+    setLoading(true);
+    try {
+      const res = await fetch('/api/amenities', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, projectId: selectedProjectId }),
+      });
+
+      if (res.ok) {
+        setAmenities(amenities.filter((a) => a.id !== id));
+      } else {
+        const data = await res.json();
+        alert(data.error || '삭제할 수 없습니다');
+      }
+    } catch (error) {
+      console.error('Error deleting amenity:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleEditAmenity = (amenity: Amenity) => {
+    setEditingAmenity(amenity);
+    setAmenityForm({
+      name: amenity.name,
+      price: amenity.price ? amenity.price.toLocaleString('ko-KR') : '',
+      description: amenity.description || '',
+    });
+    setShowAmenityForm(true);
+  };
+
+  const resetAmenityForm = () => {
+    setAmenityForm({
+      name: '',
+      price: '',
+      description: '',
     });
   };
 
@@ -726,6 +867,16 @@ export default function RoomManager({
               }`}
             >
               객실 타입
+            </button>
+            <button
+              onClick={() => setActiveTab('amenities')}
+              className={`px-6 py-3 border-b-2 font-medium text-sm ${
+                activeTab === 'amenities'
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              어메니티
             </button>
             <button
               onClick={() => setActiveTab('history')}
@@ -972,6 +1123,72 @@ export default function RoomManager({
             </div>
           )}
 
+          {/* Amenities Tab */}
+          {activeTab === 'amenities' && (
+            <div className="space-y-4">
+              <div className="flex justify-between items-center">
+                <h2 className="text-lg font-semibold text-gray-900">어메니티 관리</h2>
+                <button
+                  onClick={() => {
+                    setEditingAmenity(null);
+                    resetAmenityForm();
+                    setShowAmenityForm(true);
+                  }}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                >
+                  + 어메니티 추가
+                </button>
+              </div>
+
+              {/* Amenities List */}
+              <div className="space-y-3">
+                {amenities.map((amenity) => (
+                  <div
+                    key={amenity.id}
+                    className="bg-white border rounded-lg p-4 flex items-center justify-between"
+                  >
+                    <div className="flex-1">
+                      <div className="flex items-center gap-3">
+                        <span className="text-lg font-bold text-gray-900">{amenity.name}</span>
+                        <span className="px-2 py-1 text-xs rounded-full bg-green-100 text-green-800">
+                          {amenity.price.toLocaleString('ko-KR')}원
+                        </span>
+                        {!amenity.is_active && (
+                          <span className="px-2 py-1 text-xs rounded-full bg-gray-100 text-gray-600">
+                            비활성
+                          </span>
+                        )}
+                      </div>
+                      {amenity.description && (
+                        <div className="text-sm text-gray-500 mt-1">{amenity.description}</div>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => handleEditAmenity(amenity)}
+                        className="text-blue-600 hover:text-blue-900 text-sm"
+                      >
+                        수정
+                      </button>
+                      <button
+                        onClick={() => handleDeleteAmenity(amenity.id)}
+                        className="text-red-600 hover:text-red-900 text-sm"
+                      >
+                        삭제
+                      </button>
+                    </div>
+                  </div>
+                ))}
+
+                {amenities.length === 0 && (
+                  <div className="text-center py-12 text-gray-500">
+                    등록된 어메니티가 없습니다. 어메니티를 추가해주세요.
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* History Tab */}
           {activeTab === 'history' && (
             <div className="space-y-4">
@@ -995,9 +1212,6 @@ export default function RoomManager({
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                         체크인
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                        체크아웃
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                         상태
@@ -1045,17 +1259,10 @@ export default function RoomManager({
                             )}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-gray-900">
-                            {typeof reservation.check_in_date === 'string' 
-                              ? reservation.check_in_date 
-                              : reservation.check_in_date instanceof Date 
+                            {typeof reservation.check_in_date === 'string'
+                              ? reservation.check_in_date
+                              : reservation.check_in_date instanceof Date
                                 ? reservation.check_in_date.toISOString().split('T')[0]
-                                : '-'}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-gray-500">
-                            {typeof reservation.check_out_date === 'string' 
-                              ? reservation.check_out_date 
-                              : reservation.check_out_date instanceof Date 
-                                ? reservation.check_out_date.toISOString().split('T')[0]
                                 : '-'}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
@@ -1067,14 +1274,18 @@ export default function RoomManager({
                             {(() => {
                               const paidAmount = reservation.paid_amount ?? 0;
                               const totalPrice = reservation.total_price ?? 0;
-                              const amount = paidAmount > 0 ? paidAmount : totalPrice;
+                              const amenityTotal = reservation.amenity_total ?? 0;
+                              const amount = paidAmount > 0 ? paidAmount : (totalPrice + amenityTotal);
                               const isPaid = paidAmount > 0;
                               return (
                                 <div>
                                   <span className={isPaid ? "text-green-600 font-semibold" : "text-gray-600 font-semibold"}>
                                     {amount.toLocaleString()}원
                                   </span>
-                                  {!isPaid && reservation.total_price && (
+                                  {amenityTotal > 0 && (
+                                    <span className="ml-1 text-xs text-blue-500">(어메니티 {amenityTotal.toLocaleString()}원 포함)</span>
+                                  )}
+                                  {!isPaid && (totalPrice > 0 || amenityTotal > 0) && (
                                     <span className="ml-1 text-xs text-gray-400">(미결제)</span>
                                   )}
                                 </div>
@@ -1089,7 +1300,7 @@ export default function RoomManager({
                     })}
                     {historyReservations.length === 0 && (
                       <tr>
-                        <td colSpan={8} className="px-6 py-12 text-center text-gray-500">
+                        <td colSpan={7} className="px-6 py-12 text-center text-gray-500">
                           이전 예약 기록이 없습니다
                         </td>
                       </tr>
@@ -1458,6 +1669,75 @@ export default function RoomManager({
                   (roomForm.accessType === 'card' && (!roomForm.keyBoxNumber || !roomForm.keyBoxPassword)) ||
                   (roomForm.hasReservation && (!roomForm.reservationNumber || !roomForm.guestName || !roomForm.guestCount))
                 }
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400"
+              >
+                저장
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Amenity Form Modal */}
+      {showAmenityForm && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-lg w-full mx-4">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">
+              {editingAmenity ? '어메니티 수정' : '새 어메니티 추가'}
+            </h3>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  어메니티 이름 *
+                </label>
+                <input
+                  type="text"
+                  value={amenityForm.name}
+                  onChange={(e) => setAmenityForm({ ...amenityForm, name: e.target.value })}
+                  placeholder="예: 생수, 칫솔세트, 수건"
+                  className="w-full px-3 py-2 border rounded-lg text-gray-900"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  가격 (원) *
+                </label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={amenityForm.price}
+                  onChange={(e) => setAmenityForm({ ...amenityForm, price: formatNumberWithCommas(e.target.value) })}
+                  placeholder="예: 1,000"
+                  className="w-full px-3 py-2 border rounded-lg text-gray-900"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  설명
+                </label>
+                <input
+                  type="text"
+                  value={amenityForm.description}
+                  onChange={(e) => setAmenityForm({ ...amenityForm, description: e.target.value })}
+                  placeholder="예: 500ml 생수 1병"
+                  className="w-full px-3 py-2 border rounded-lg text-gray-900"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 mt-6">
+              <button
+                onClick={() => {
+                  setShowAmenityForm(false);
+                  setEditingAmenity(null);
+                  resetAmenityForm();
+                }}
+                className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg"
+              >
+                취소
+              </button>
+              <button
+                onClick={handleSaveAmenity}
+                disabled={!amenityForm.name || !amenityForm.price}
                 className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400"
               >
                 저장

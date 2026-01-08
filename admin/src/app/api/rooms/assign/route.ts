@@ -59,7 +59,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { projectId, roomTypeId, guestName, guestCount, checkOutDate, reservationId, reservationNumber: existingReservationNumber } = await request.json();
+    const { projectId, roomTypeId, guestName, guestCount, checkOutDate, reservationId, reservationNumber: existingReservationNumber, totalPrice, amenityTotal } = await request.json();
 
     const targetProjectId = profile.project_id || projectId;
 
@@ -173,9 +173,12 @@ export async function POST(request: Request) {
       const checkInDate = today;
       const finalCheckOutDate = checkOutDate || getTomorrowKST();
 
+      // Get room type price if totalPrice not provided
+      const finalTotalPrice = totalPrice ?? (roomType?.base_price || 0);
+
       const newReservation = await queryOne<Reservation>(
-        `INSERT INTO reservations (project_id, room_type_id, reservation_number, guest_name, guest_count, check_in_date, check_out_date, room_number, source, status)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        `INSERT INTO reservations (project_id, room_type_id, reservation_number, guest_name, guest_count, check_in_date, check_out_date, room_number, source, status, total_price, amenity_total, paid_amount)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
          RETURNING *`,
         [
           targetProjectId,
@@ -188,6 +191,9 @@ export async function POST(request: Request) {
           updatedRoom.room_number,
           'kiosk_walkin',
           'checked_in',
+          finalTotalPrice,
+          amenityTotal || 0,
+          finalTotalPrice + (amenityTotal || 0), // paid_amount = total + amenities
         ]
       );
 

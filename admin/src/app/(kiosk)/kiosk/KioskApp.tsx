@@ -332,14 +332,32 @@ type ScreenName =
   | 'checkin-reservation'
   | 'checkin-consent'
   | 'checkin-id-verification'
+  | 'checkin-amenity-selection'
   | 'checkin-info'
   | 'room-selection'
   | 'walkin-consent'
   | 'walkin-id-verification'
+  | 'walkin-amenity-selection'
   | 'payment-confirm'
   | 'payment-process'
   | 'walkin-info'
   | 'checkout';
+
+// Amenity data from database
+interface AmenityData {
+  id: string;
+  name: string;
+  price: number;
+  description: string | null;
+}
+
+// Selected amenity with quantity
+interface SelectedAmenity {
+  amenityId: string;
+  name: string;
+  quantity: number;
+  unitPrice: number;
+}
 
 // Reservation data from validation
 interface ReservationData {
@@ -394,6 +412,16 @@ export default function KioskApp({ kiosk, content, paymentResult }: KioskAppProp
   const [inputData, setInputData] = useState<InputData>({});
   const [paymentState, setPaymentState] = useState<'idle' | 'processing' | 'success' | 'failed'>('idle');
   const [paymentError, setPaymentError] = useState<string | null>(null);
+  // Amenity state
+  const [selectedAmenities, setSelectedAmenities] = useState<SelectedAmenity[]>([]);
+  const [amenityTotal, setAmenityTotal] = useState(0);
+
+  // Reset amenity selections (called when returning to home)
+  const resetAmenities = () => {
+    setSelectedAmenities([]);
+    setAmenityTotal(0);
+  };
+
   // Incoming call from manager
   const [incomingCallSession, setIncomingCallSession] = useState<{ id: string; room_name: string } | null>(null);
   const [showIncomingCall, setShowIncomingCall] = useState(false);
@@ -743,20 +771,24 @@ export default function KioskApp({ kiosk, content, paymentResult }: KioskAppProp
         return <ConsentScreen goToScreen={goToScreen} flowType="checkin" syncInputData={syncInputData} t={t} openStaffModal={openStaffModal} callProps={callProps} />;
       case 'checkin-id-verification':
         return <IDVerificationScreen goToScreen={goToScreen} flowType="checkin" syncInputData={syncInputData} t={t} projectId={kiosk?.project_id} reservationId={inputData.reservation?.id} openStaffModal={openStaffModal} signatureName={inputData.signature} callProps={callProps} />;
+      case 'checkin-amenity-selection':
+        return <AmenitySelectionScreen goToScreen={goToScreen} flowType="checkin" t={t} projectId={kiosk?.project_id} openStaffModal={openStaffModal} callProps={callProps} selectedAmenities={selectedAmenities} setSelectedAmenities={setSelectedAmenities} amenityTotal={amenityTotal} setAmenityTotal={setAmenityTotal} reservationId={inputData.reservation?.id} />;
       case 'checkin-info':
-        return <HotelInfoScreen goToScreen={goToScreen} flowType="checkin" t={t} projectId={kiosk?.project_id} syncInputData={syncInputData} inputData={inputData} openStaffModal={openStaffModal} callProps={callProps} />;
+        return <HotelInfoScreen goToScreen={goToScreen} flowType="checkin" t={t} projectId={kiosk?.project_id} syncInputData={syncInputData} inputData={inputData} openStaffModal={openStaffModal} callProps={callProps} amenityTotal={amenityTotal} selectedAmenities={selectedAmenities} resetAmenities={resetAmenities} />;
       case 'room-selection':
         return <RoomSelectionScreen goToScreen={goToScreen} setSelectedRoom={setSelectedRoom} syncInputData={syncInputData} t={t} projectId={kiosk?.project_id} openStaffModal={openStaffModal} callProps={callProps} />;
       case 'walkin-consent':
         return <ConsentScreen goToScreen={goToScreen} flowType="walkin" syncInputData={syncInputData} t={t} openStaffModal={openStaffModal} callProps={callProps} />;
       case 'walkin-id-verification':
         return <IDVerificationScreen goToScreen={goToScreen} flowType="walkin" syncInputData={syncInputData} t={t} projectId={kiosk?.project_id} openStaffModal={openStaffModal} signatureName={inputData.signature} callProps={callProps} />;
+      case 'walkin-amenity-selection':
+        return <AmenitySelectionScreen goToScreen={goToScreen} flowType="walkin" t={t} projectId={kiosk?.project_id} openStaffModal={openStaffModal} callProps={callProps} selectedAmenities={selectedAmenities} setSelectedAmenities={setSelectedAmenities} amenityTotal={amenityTotal} setAmenityTotal={setAmenityTotal} selectedRoom={selectedRoom} />;
       case 'payment-confirm':
-        return <PaymentConfirmScreen goToScreen={goToScreen} selectedRoom={selectedRoom} t={t} openStaffModal={openStaffModal} callProps={callProps} />;
+        return <PaymentConfirmScreen goToScreen={goToScreen} selectedRoom={selectedRoom} t={t} openStaffModal={openStaffModal} callProps={callProps} amenityTotal={amenityTotal} />;
       case 'payment-process':
-        return <PaymentProcessScreen goToScreen={goToScreen} selectedRoom={selectedRoom} t={t} openStaffModal={openStaffModal} kioskId={kiosk?.id} paymentState={paymentState} paymentError={paymentError} setPaymentState={setPaymentState} setPaymentError={setPaymentError} callProps={callProps} />;
+        return <PaymentProcessScreen goToScreen={goToScreen} selectedRoom={selectedRoom} t={t} openStaffModal={openStaffModal} kioskId={kiosk?.id} paymentState={paymentState} paymentError={paymentError} setPaymentState={setPaymentState} setPaymentError={setPaymentError} callProps={callProps} amenityTotal={amenityTotal} />;
       case 'walkin-info':
-        return <HotelInfoScreen goToScreen={goToScreen} flowType="walkin" t={t} projectId={kiosk?.project_id} selectedRoomTypeId={selectedRoom?.id} syncInputData={syncInputData} inputData={inputData} openStaffModal={openStaffModal} callProps={callProps} />;
+        return <HotelInfoScreen goToScreen={goToScreen} flowType="walkin" t={t} projectId={kiosk?.project_id} selectedRoomTypeId={selectedRoom?.id} syncInputData={syncInputData} inputData={inputData} openStaffModal={openStaffModal} callProps={callProps} amenityTotal={amenityTotal} selectedAmenities={selectedAmenities} selectedRoom={selectedRoom} resetAmenities={resetAmenities} />;
       case 'checkout':
         return <CheckoutScreen goToScreen={goToScreen} t={t} openStaffModal={openStaffModal} callProps={callProps} />;
       default:
@@ -1891,9 +1923,9 @@ function IDVerificationScreen({
       setVerificationStep('success');
       setTimeout(() => {
         if (flowType === 'checkin') {
-          goToScreen('checkin-info');
+          goToScreen('checkin-amenity-selection');
         } else {
-          goToScreen('payment-confirm');
+          goToScreen('walkin-amenity-selection');
         }
       }, 1500);
     } else {
@@ -1933,9 +1965,9 @@ function IDVerificationScreen({
           setVerificationStep('success');
           setTimeout(() => {
             if (flowType === 'checkin') {
-              goToScreen('checkin-info');
+              goToScreen('checkin-amenity-selection');
             } else {
-              goToScreen('payment-confirm');
+              goToScreen('walkin-amenity-selection');
             }
           }, 1500);
         } else {
@@ -2556,12 +2588,20 @@ function HotelInfoScreen({
   inputData,
   openStaffModal,
   callProps,
+  amenityTotal,
+  selectedAmenities,
+  selectedRoom,
+  resetAmenities,
 }: {
   goToScreen: (screen: ScreenName) => void;
   flowType: 'checkin' | 'walkin';
   t: (key: string) => string;
   projectId?: string;
   selectedRoomTypeId?: string | null;
+  amenityTotal?: number;
+  selectedAmenities?: SelectedAmenity[];
+  selectedRoom?: Room | null;
+  resetAmenities?: () => void;
   syncInputData?: (data: Partial<InputData>) => void;
   inputData?: InputData;
   openStaffModal: () => void;
@@ -2586,6 +2626,9 @@ function HotelInfoScreen({
       hasAssignedRef.current = true;
 
       try {
+        // Get room price only (amenityTotal is added separately in the API)
+        const roomPrice = selectedRoom?.price || inputData?.reservation?.roomType?.price || 0;
+
         const response = await fetch('/api/rooms/assign', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -2597,6 +2640,9 @@ function HotelInfoScreen({
             // Pass reservation info for pre-assigned reserved rooms
             reservationId: inputData?.reservation?.id,
             reservationNumber: inputData?.reservation?.reservationNumber,
+            // Pass price info (totalPrice = room price, amenityTotal added in API)
+            totalPrice: roomPrice,
+            amenityTotal: amenityTotal || 0,
           }),
           credentials: 'include',
         });
@@ -2607,6 +2653,28 @@ function HotelInfoScreen({
           setAssignedRoom(data.room);
           if (syncInputData) {
             syncInputData({ assignedRoom: data.room });
+          }
+
+          // Save selected amenities to reservation if any
+          if (data.reservation && selectedAmenities && selectedAmenities.length > 0) {
+            try {
+              await fetch('/api/reservation-amenities', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  reservationId: data.reservation.id,
+                  amenities: selectedAmenities.map(a => ({
+                    amenityId: a.amenityId,
+                    quantity: a.quantity,
+                    unitPrice: a.unitPrice,
+                  })),
+                }),
+                credentials: 'include',
+              });
+            } catch (amenityErr) {
+              console.error('Error saving amenities:', amenityErr);
+              // Don't fail the whole process if amenity saving fails
+            }
           }
         } else {
           setError(data.error || '객실 배정 중 오류가 발생했습니다');
@@ -2623,7 +2691,33 @@ function HotelInfoScreen({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, selectedRoomTypeId]);
 
+  // Auto-redirect countdown
+  const [countdown, setCountdown] = useState(10);
+
+  useEffect(() => {
+    // Only start countdown when room is assigned successfully
+    if (!loading && assignedRoom && !error) {
+      const timer = setInterval(() => {
+        setCountdown((prev) => {
+          if (prev <= 1) {
+            clearInterval(timer);
+            handleComplete();
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+
+      return () => clearInterval(timer);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, assignedRoom, error]);
+
   const handleComplete = () => {
+    // Reset amenity selections
+    if (resetAmenities) {
+      resetAmenities();
+    }
     goToScreen('start');
   };
 
@@ -2674,8 +2768,6 @@ function HotelInfoScreen({
       <div className="screen-wrapper">
         <TopButtonRow onStaffCall={openStaffModal} callStatus={callProps.callStatus} callDuration={callProps.callDuration} onEndCall={callProps.onEndCall} isCallActive={callProps.isCallActive} />
         <div className="container">
-          <NavArrow direction="right" label="완료" onClick={handleComplete} />
-
           <div className="logo">
             <Image src="/logo.png" alt="HiO" width={200} height={80} className="logo-image" />
           </div>
@@ -2743,6 +2835,30 @@ function HotelInfoScreen({
                 </div>
               </div>
             </div>
+          </div>
+
+          {/* Complete button at bottom */}
+          <div style={{ marginTop: '32px', textAlign: 'center' }}>
+            <button
+              onClick={handleComplete}
+              className="primary-button"
+              style={{
+                padding: '16px 48px',
+                fontSize: '18px',
+                fontWeight: 600,
+                backgroundColor: '#2563eb',
+                color: 'white',
+                border: 'none',
+                borderRadius: '12px',
+                cursor: 'pointer',
+                minWidth: '200px',
+              }}
+            >
+              완료 ({countdown}초)
+            </button>
+            <p style={{ marginTop: '12px', fontSize: '14px', color: '#6b7280' }}>
+              {countdown}초 후 자동으로 처음 화면으로 돌아갑니다
+            </p>
           </div>
         </div>
       </div>
@@ -3001,6 +3117,341 @@ function RoomSelectionScreen({
   );
 }
 
+// Amenity Selection Screen
+function AmenitySelectionScreen({
+  goToScreen,
+  flowType,
+  t,
+  projectId,
+  openStaffModal,
+  callProps,
+  selectedAmenities,
+  setSelectedAmenities,
+  amenityTotal,
+  setAmenityTotal,
+  selectedRoom,
+  reservationId,
+}: {
+  goToScreen: (screen: ScreenName) => void;
+  flowType: 'checkin' | 'walkin';
+  t: (key: string) => string;
+  projectId?: string;
+  openStaffModal: () => void;
+  callProps: CallProps;
+  selectedAmenities: SelectedAmenity[];
+  setSelectedAmenities: (amenities: SelectedAmenity[]) => void;
+  amenityTotal: number;
+  setAmenityTotal: (total: number) => void;
+  selectedRoom?: Room | null;
+  reservationId?: string;
+}) {
+  const [amenities, setAmenities] = useState<AmenityData[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // Reset amenities when screen opens (always start fresh)
+  useEffect(() => {
+    setSelectedAmenities([]);
+    setAmenityTotal(0);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Fetch amenities for this project
+  useEffect(() => {
+    const fetchAmenities = async () => {
+      if (!projectId) {
+        setLoading(false);
+        return;
+      }
+      try {
+        const res = await fetch(`/api/amenities?projectId=${projectId}&activeOnly=true`);
+        const data = await res.json();
+        setAmenities(data.amenities || []);
+      } catch (error) {
+        console.error('Error fetching amenities:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchAmenities();
+  }, [projectId]);
+
+  // If no amenities available, skip to next screen
+  useEffect(() => {
+    if (!loading && amenities.length === 0) {
+      if (flowType === 'checkin') {
+        goToScreen('checkin-info');
+      } else {
+        goToScreen('payment-confirm');
+      }
+    }
+  }, [loading, amenities, flowType, goToScreen]);
+
+  const handleQuantityChange = (amenity: AmenityData, delta: number) => {
+    const existing = selectedAmenities.find((a) => a.amenityId === amenity.id);
+    let updated: SelectedAmenity[];
+
+    if (existing) {
+      const newQuantity = Math.max(0, existing.quantity + delta);
+      if (newQuantity === 0) {
+        updated = selectedAmenities.filter((a) => a.amenityId !== amenity.id);
+      } else {
+        updated = selectedAmenities.map((a) =>
+          a.amenityId === amenity.id ? { ...a, quantity: newQuantity } : a
+        );
+      }
+    } else if (delta > 0) {
+      updated = [
+        ...selectedAmenities,
+        { amenityId: amenity.id, name: amenity.name, quantity: 1, unitPrice: amenity.price },
+      ];
+    } else {
+      updated = selectedAmenities;
+    }
+
+    setSelectedAmenities(updated);
+    const newTotal = updated.reduce((sum, a) => sum + a.quantity * a.unitPrice, 0);
+    setAmenityTotal(newTotal);
+  };
+
+  const getQuantity = (amenityId: string) => {
+    return selectedAmenities.find((a) => a.amenityId === amenityId)?.quantity || 0;
+  };
+
+  const handleSkip = () => {
+    setSelectedAmenities([]);
+    setAmenityTotal(0);
+    if (flowType === 'checkin') {
+      goToScreen('checkin-info');
+    } else {
+      goToScreen('payment-confirm');
+    }
+  };
+
+  const handleNext = async () => {
+    // Save amenities to reservation if we have amenities selected
+    if (selectedAmenities.length > 0 && reservationId) {
+      try {
+        await fetch('/api/reservation-amenities', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            reservationId,
+            amenities: selectedAmenities,
+          }),
+        });
+      } catch (error) {
+        console.error('Error saving amenities:', error);
+      }
+    }
+
+    if (flowType === 'checkin') {
+      // For reserved customers: if amenities selected, go to payment, else go to info
+      if (amenityTotal > 0) {
+        goToScreen('payment-confirm');
+      } else {
+        goToScreen('checkin-info');
+      }
+    } else {
+      // For walk-in: always go to payment
+      goToScreen('payment-confirm');
+    }
+  };
+
+  const handleBack = () => {
+    if (flowType === 'checkin') {
+      goToScreen('checkin-id-verification');
+    } else {
+      goToScreen('walkin-id-verification');
+    }
+  };
+
+  const screenTitle = flowType === 'checkin' ? t('checkin_title') : t('walkin_title');
+  const roomPrice = selectedRoom?.price || 0;
+
+  if (loading) {
+    return (
+      <div className="screen">
+        <div className="screen-wrapper">
+          <TopButtonRow onStaffCall={openStaffModal} callStatus={callProps.callStatus} callDuration={callProps.callDuration} onEndCall={callProps.onEndCall} isCallActive={callProps.isCallActive} />
+          <div className="container">
+            <div className="logo">
+              <Image src="/logo.png" alt="HiO" width={200} height={80} className="logo-image" />
+            </div>
+            <div style={{ textAlign: 'center', padding: '40px' }}>
+              <div style={{ width: '40px', height: '40px', border: '3px solid #e5e7eb', borderTopColor: '#3b82f6', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto' }} />
+              <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="screen">
+      <div className="screen-wrapper">
+        <TopButtonRow onStaffCall={openStaffModal} callStatus={callProps.callStatus} callDuration={callProps.callDuration} onEndCall={callProps.onEndCall} isCallActive={callProps.isCallActive} />
+        <div className="container">
+          <NavArrow direction="left" label="이전" onClick={handleBack} />
+          <div className="logo">
+            <Image src="/logo.png" alt="HiO" width={200} height={80} className="logo-image" />
+          </div>
+          <h2 className="screen-title">{screenTitle}</h2>
+          <p className="screen-description">
+            추가 어메니티를 선택해 주세요
+          </p>
+
+          <div className="amenity-list" style={{ marginTop: '24px', maxWidth: '400px', width: '100%' }}>
+            {amenities.map((amenity) => {
+              const quantity = getQuantity(amenity.id);
+              return (
+                <div
+                  key={amenity.id}
+                  className="amenity-item"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '16px',
+                    marginBottom: '12px',
+                    backgroundColor: quantity > 0 ? '#eff6ff' : '#f9fafb',
+                    borderRadius: '12px',
+                    border: quantity > 0 ? '2px solid #3b82f6' : '1px solid #e5e7eb',
+                  }}
+                >
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 600, fontSize: '16px', color: '#111827' }}>{amenity.name}</div>
+                    {amenity.description && (
+                      <div style={{ fontSize: '13px', color: '#6b7280', marginTop: '2px' }}>{amenity.description}</div>
+                    )}
+                    <div style={{ fontSize: '15px', color: '#2563eb', fontWeight: 500, marginTop: '4px' }}>
+                      {amenity.price.toLocaleString('ko-KR')}원
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <button
+                      onClick={() => handleQuantityChange(amenity, -1)}
+                      disabled={quantity === 0}
+                      style={{
+                        width: '36px',
+                        height: '36px',
+                        borderRadius: '50%',
+                        border: 'none',
+                        backgroundColor: quantity === 0 ? '#e5e7eb' : '#3b82f6',
+                        color: 'white',
+                        fontSize: '20px',
+                        fontWeight: 700,
+                        cursor: quantity === 0 ? 'not-allowed' : 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      -
+                    </button>
+                    <span style={{ fontSize: '18px', fontWeight: 600, minWidth: '24px', textAlign: 'center' }}>
+                      {quantity}
+                    </span>
+                    <button
+                      onClick={() => handleQuantityChange(amenity, 1)}
+                      style={{
+                        width: '36px',
+                        height: '36px',
+                        borderRadius: '50%',
+                        border: 'none',
+                        backgroundColor: '#3b82f6',
+                        color: 'white',
+                        fontSize: '20px',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Summary */}
+          {(roomPrice > 0 || amenityTotal > 0) && (
+            <div style={{ marginTop: '24px', padding: '16px', backgroundColor: '#f3f4f6', borderRadius: '12px', maxWidth: '400px', width: '100%' }}>
+              {flowType === 'walkin' && roomPrice > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                  <span style={{ color: '#6b7280' }}>객실 요금</span>
+                  <span style={{ fontWeight: 500 }}>{roomPrice.toLocaleString('ko-KR')}원</span>
+                </div>
+              )}
+              {amenityTotal > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                  <span style={{ color: '#6b7280' }}>어메니티</span>
+                  <span style={{ fontWeight: 500, color: '#2563eb' }}>+{amenityTotal.toLocaleString('ko-KR')}원</span>
+                </div>
+              )}
+              {flowType === 'walkin' && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: '12px', borderTop: '1px solid #d1d5db' }}>
+                  <span style={{ fontWeight: 700, fontSize: '16px' }}>총 결제 금액</span>
+                  <span style={{ fontWeight: 700, fontSize: '18px', color: '#111827' }}>
+                    {(roomPrice + amenityTotal).toLocaleString('ko-KR')}원
+                  </span>
+                </div>
+              )}
+              {flowType === 'checkin' && amenityTotal > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: '12px', borderTop: '1px solid #d1d5db' }}>
+                  <span style={{ fontWeight: 700, fontSize: '16px' }}>추가 결제 금액</span>
+                  <span style={{ fontWeight: 700, fontSize: '18px', color: '#2563eb' }}>
+                    {amenityTotal.toLocaleString('ko-KR')}원
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Buttons */}
+          <div style={{ display: 'flex', gap: '16px', marginTop: '32px', maxWidth: '400px', width: '100%' }}>
+            <button
+              onClick={handleSkip}
+              style={{
+                flex: 1,
+                padding: '16px',
+                fontSize: '16px',
+                fontWeight: 600,
+                color: '#4b5563',
+                backgroundColor: '#f3f4f6',
+                border: 'none',
+                borderRadius: '12px',
+                cursor: 'pointer',
+              }}
+            >
+              건너뛰기
+            </button>
+            <button
+              onClick={handleNext}
+              style={{
+                flex: 1,
+                padding: '16px',
+                fontSize: '16px',
+                fontWeight: 600,
+                color: 'white',
+                backgroundColor: '#2563eb',
+                border: 'none',
+                borderRadius: '12px',
+                cursor: 'pointer',
+              }}
+            >
+              {amenityTotal > 0 ? '다음' : '확인'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Payment Confirm Screen
 function PaymentConfirmScreen({
   goToScreen,
@@ -3008,14 +3459,18 @@ function PaymentConfirmScreen({
   t,
   openStaffModal,
   callProps,
+  amenityTotal = 0,
 }: {
   goToScreen: (screen: ScreenName) => void;
   selectedRoom: Room | null;
   t: (key: string) => string;
   openStaffModal: () => void;
   callProps: CallProps;
+  amenityTotal?: number;
 }) {
   const [isProcessing, setIsProcessing] = useState(false);
+  const roomPrice = selectedRoom?.price || 65000;
+  const totalPrice = roomPrice + amenityTotal;
 
   const handlePayment = () => {
     setIsProcessing(true);
@@ -3031,7 +3486,7 @@ function PaymentConfirmScreen({
       <div className="screen-wrapper">
         <TopButtonRow onStaffCall={openStaffModal} callStatus={callProps.callStatus} callDuration={callProps.callDuration} onEndCall={callProps.onEndCall} isCallActive={callProps.isCallActive} />
         <div className="container">
-          <NavArrow direction="left" label="이전" onClick={() => goToScreen('walkin-id-verification')} />
+          <NavArrow direction="left" label="이전" onClick={() => goToScreen('walkin-amenity-selection')} />
           <div className="logo">
             <Image src="/logo.png" alt="HiO" width={200} height={80} className="logo-image" />
           </div>
@@ -3046,9 +3501,23 @@ function PaymentConfirmScreen({
               <p className="room-capacity">{selectedRoom?.capacity || '기준 2인 / 최대 2인'}</p>
             </div>
             <div className="payment-total">
-              <span className="total-label">총 결제 금액</span>
+              <span className="total-label">객실 요금</span>
               <span className="total-price">
-                {Math.round(selectedRoom?.price || 65000).toLocaleString('ko-KR')}원
+                {Math.round(roomPrice).toLocaleString('ko-KR')}원
+              </span>
+            </div>
+            {amenityTotal > 0 && (
+              <div className="payment-total" style={{ marginTop: '8px' }}>
+                <span className="total-label">어메니티</span>
+                <span className="total-price" style={{ color: '#2563eb' }}>
+                  +{amenityTotal.toLocaleString('ko-KR')}원
+                </span>
+              </div>
+            )}
+            <div className="payment-total" style={{ marginTop: '16px', borderTop: '2px solid #e5e7eb', paddingTop: '16px' }}>
+              <span className="total-label" style={{ fontWeight: 700, fontSize: '18px' }}>총 결제 금액</span>
+              <span className="total-price" style={{ fontSize: '24px' }}>
+                {Math.round(totalPrice).toLocaleString('ko-KR')}원
               </span>
             </div>
           </div>
@@ -3102,6 +3571,7 @@ function PaymentProcessScreen({
   setPaymentState,
   setPaymentError,
   callProps,
+  amenityTotal,
 }: {
   goToScreen: (screen: ScreenName) => void;
   selectedRoom: Room | null;
@@ -3113,9 +3583,11 @@ function PaymentProcessScreen({
   setPaymentState: (state: 'idle' | 'processing' | 'success' | 'failed') => void;
   setPaymentError: (error: string | null) => void;
   callProps: CallProps;
+  amenityTotal?: number;
 }) {
   const handlePayment = () => {
-    const amount = selectedRoom?.price || 65000;
+    const roomPrice = selectedRoom?.price || 65000;
+    const amount = roomPrice + (amenityTotal || 0);
 
     // Build payment request
     const paymentRequest: EasyCheckPaymentRequest = {
