@@ -14,7 +14,12 @@ function LoginForm() {
     // Handle error parameter from URL (e.g., ?error=Access%20denied)
     const errorParam = searchParams.get('error');
     if (errorParam) {
-      setError(decodeURIComponent(errorParam));
+      // Show user-friendly message for session expiry
+      const errorMessage = errorParam === 'session_expired' 
+        ? '세션이 만료되었습니다. 다시 로그인해 주세요.'
+        : decodeURIComponent(errorParam);
+      
+      setError(errorMessage);
       
       // Clear all cookies to prevent redirect loops
       document.cookie.split(';').forEach((c) => {

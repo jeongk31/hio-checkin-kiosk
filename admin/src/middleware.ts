@@ -41,11 +41,21 @@ export async function middleware(request: NextRequest) {
   if (sessionToken) {
     const payload = await verifyToken(sessionToken);
     isAuthenticated = !!payload?.userId;
+    
+    // If token exists but is invalid, clear it to prevent redirect loops
+    if (!isAuthenticated && !isAuthPage) {
+      const response = NextResponse.redirect(new URL('/login?error=session_expired', request.url));
+      response.cookies.delete(SESSION_COOKIE_NAME);
+      return response;
+    }
   }
 
   // Not authenticated - redirect to login (except for login/public pages)
   if (!isAuthenticated && !isAuthPage && !isPublicPage) {
-    return NextResponse.redirect(new URL('/login', request.url));
+    const response = NextResponse.redirect(new URL('/login', request.url));
+    // Clear any stale cookies
+    response.cookies.delete(SESSION_COOKIE_NAME);
+    return response;
   }
 
   // Authenticated and on login page - redirect to home
