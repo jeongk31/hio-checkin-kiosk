@@ -10,7 +10,7 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 -- ENUM Types
 -- ============================================
 DO $$ BEGIN
-    CREATE TYPE user_role AS ENUM ('super_admin', 'project_admin', 'kiosk');
+    CREATE TYPE user_role AS ENUM ('super_admin', 'project_admin', 'kiosk', 'call_test');
 EXCEPTION
     WHEN duplicate_object THEN null;
 END $$;
@@ -177,6 +177,7 @@ CREATE TABLE IF NOT EXISTS reservations (
     source VARCHAR(100),
     notes TEXT,
     total_price INTEGER,
+    paid_amount INTEGER DEFAULT 0,
     payment_status VARCHAR(50) DEFAULT 'unpaid',
     data JSONB DEFAULT '{}'::jsonb,
     verification_data JSONB DEFAULT '[]'::jsonb,
@@ -320,6 +321,25 @@ CREATE INDEX IF NOT EXISTS idx_signaling_session_id ON signaling_messages(sessio
 CREATE INDEX IF NOT EXISTS idx_signaling_created_at ON signaling_messages(created_at);
 
 -- ============================================
+-- Amenities Table (Add-on services per project)
+-- ============================================
+CREATE TABLE IF NOT EXISTS amenities (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    price INTEGER DEFAULT 0,
+    is_active BOOLEAN DEFAULT true,
+    display_order INTEGER DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE(project_id, name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_amenities_project_id ON amenities(project_id);
+CREATE INDEX IF NOT EXISTS idx_amenities_is_active ON amenities(is_active);
+
+-- ============================================
 -- Indexes
 -- ============================================
 CREATE INDEX IF NOT EXISTS idx_profiles_user_id ON profiles(user_id);
@@ -431,6 +451,11 @@ CREATE TRIGGER update_identity_verifications_updated_at
 DROP TRIGGER IF EXISTS update_payments_updated_at ON payments;
 CREATE TRIGGER update_payments_updated_at
     BEFORE UPDATE ON payments
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+DROP TRIGGER IF EXISTS update_amenities_updated_at ON amenities;
+CREATE TRIGGER update_amenities_updated_at
+    BEFORE UPDATE ON amenities
     FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
 -- ============================================

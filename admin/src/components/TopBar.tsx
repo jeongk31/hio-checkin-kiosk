@@ -135,7 +135,7 @@ export default function TopBar({ profile }: TopBarProps) {
               <div className="text-left hidden sm:block">
                 <p className="text-sm font-medium">{profile.full_name || profile.email}</p>
                 <p className="text-xs text-gray-500">
-                  {isSuperAdmin ? 'Super Admin' : 'Project Admin'}
+                  {isSuperAdmin ? 'Super Admin' : profile.role === 'call_test' ? 'Call Test' : 'Project Admin'}
                   {profile.project && ` - ${profile.project.name}`}
                 </p>
               </div>

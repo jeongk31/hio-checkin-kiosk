@@ -44,7 +44,7 @@ export async function POST(request: NextRequest) {
 export async function GET(_request: NextRequest) {
   try {
     const profile = await getCurrentProfile();
-    if (!profile || profile.role !== 'kiosk') {
+    if (!profile || (profile.role !== 'kiosk' && profile.role !== 'call_test')) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 

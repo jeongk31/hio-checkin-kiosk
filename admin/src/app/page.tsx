@@ -8,7 +8,12 @@ export default async function Home() {
   const profile = await getCurrentProfile();
 
   if (profile) {
-    redirect('/dashboard');
+    // Redirect based on role
+    if (profile.role === 'kiosk' || profile.role === 'call_test') {
+      redirect('/kiosk');
+    } else {
+      redirect('/dashboard');
+    }
   }
   
   redirect('/login');

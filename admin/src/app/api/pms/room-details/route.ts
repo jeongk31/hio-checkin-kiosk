@@ -171,6 +171,23 @@ export async function POST(request: Request) {
       );
     }
 
+    // DEBUG: Log incoming payload
+    console.log('[PMS Sync] ===== INCOMING PAYLOAD =====');
+    console.log('[PMS Sync] Room:', JSON.stringify(payload.room, null, 2));
+    console.log('[PMS Sync] Reservation:', payload.reservation ? JSON.stringify({
+      id: payload.reservation.id,
+      reservation_number: payload.reservation.reservation_number,
+      status: payload.reservation.status,
+      check_in: payload.reservation.check_in,
+      check_out: payload.reservation.check_out,
+    }, null, 2) : 'null');
+    console.log('[PMS Sync] Guest:', payload.guest ? JSON.stringify({
+      id: payload.guest.id,
+      first_name: payload.guest.first_name,
+      last_name: payload.guest.last_name,
+    }, null, 2) : 'null');
+    console.log('[PMS Sync] ==============================');
+
     // Validate payload
     if (!payload.room) {
       return NextResponse.json(

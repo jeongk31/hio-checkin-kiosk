@@ -984,19 +984,31 @@ export default function RoomManager({
                             <div className="text-xs text-gray-400 mt-1">
                               예약번호: {reservation.reservation_number}
                             </div>
-                            {/* Price information - show paid amount or total if not paid */}
-                            {(reservation.paid_amount !== null || reservation.total_price !== null) && (
-                              <div className="mt-2 text-xs">
-                                <span className="text-gray-500">결제금액:</span>
-                                <span className="ml-1 font-semibold text-green-600">
-                                  {(() => {
-                                    const paidAmount = reservation.paid_amount ?? 0;
-                                    const totalPrice = reservation.total_price ?? 0;
-                                    return (paidAmount > 0 ? paidAmount : totalPrice).toLocaleString();
-                                  })()}원
-                                </span>
-                                {(reservation.paid_amount ?? 0) === 0 && reservation.total_price && (
-                                  <span className="ml-1 text-gray-400">(미결제)</span>
+                            {/* Price information - show total and paid amount */}
+                            {(reservation.total_price !== null || reservation.paid_amount !== null) && (
+                              <div className="mt-2 space-y-1">
+                                {reservation.total_price !== null && reservation.total_price > 0 && (
+                                  <div className="text-xs">
+                                    <span className="text-gray-500">총금액:</span>
+                                    <span className="ml-1 font-semibold text-blue-600">
+                                      {Math.round(reservation.total_price).toLocaleString('ko-KR')}원
+                                    </span>
+                                  </div>
+                                )}
+                                {reservation.paid_amount !== null && reservation.paid_amount > 0 && (
+                                  <div className="text-xs">
+                                    <span className="text-gray-500">결제금액:</span>
+                                    <span className="ml-1 font-semibold text-green-600">
+                                      {Math.round(reservation.paid_amount).toLocaleString('ko-KR')}원
+                                    </span>
+                                    {reservation.total_price && reservation.paid_amount < reservation.total_price && (
+                                      <span className="ml-1 text-orange-500">(부분결제)</span>
+                                    )}
+                                  </div>
+                                )}
+                                {(reservation.paid_amount === null || reservation.paid_amount === 0) && 
+                                 reservation.total_price && reservation.total_price > 0 && (
+                                  <span className="text-xs text-red-500">(미결제)</span>
                                 )}
                               </div>
                             )}

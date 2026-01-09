@@ -20,6 +20,14 @@ export default function Sidebar({ profile }: SidebarProps) {
 
   const isSuperAdmin = profile.role === 'super_admin';
   const isProjectAdmin = profile.role === 'project_admin';
+  const isCallTest = profile.role === 'call_test';
+
+  const getRoleDisplayName = () => {
+    if (isSuperAdmin) return 'Super Admin';
+    if (isProjectAdmin) return 'Project Admin';
+    if (isCallTest) return 'Call Test';
+    return 'Kiosk';
+  };
 
   const superAdminLinks = [
     { href: '/dashboard', label: '대시보드', icon: '📊' },
@@ -42,7 +50,7 @@ export default function Sidebar({ profile }: SidebarProps) {
       <div className="p-4 border-b border-gray-800">
         <h1 className="text-xl font-bold">키오스크 관리</h1>
         <p className="text-sm text-gray-400 mt-1">
-          {isSuperAdmin ? 'Super Admin' : isProjectAdmin ? 'Project Admin' : 'Kiosk'}
+          {getRoleDisplayName()}
         </p>
       </div>
 

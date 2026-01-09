@@ -23,6 +23,8 @@ const PMS_TO_KIOSK_ROLE: Record<string, string> = {
   "project": "project_admin",
   "Kiosk": "kiosk",
   "kiosk": "kiosk",
+  "Call Test": "call_test",
+  "call_test": "call_test",
 };
 
 export function getKioskRole(pmsRole: string | { name: string }): string {

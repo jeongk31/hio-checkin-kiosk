@@ -1,5 +1,5 @@
 import { getCurrentProfile } from '@/lib/auth';
-import { queryOne, query } from '@/lib/db';
+import { queryOne, query, execute } from '@/lib/db';
 import { redirect } from 'next/navigation';
 import KioskApp from './KioskApp';
 import { Kiosk } from '@/types/database';
@@ -33,16 +33,31 @@ export default async function KioskPage({ searchParams }: KioskPageProps) {
     redirect('/login');
   }
 
-  // Only kiosk users can access this page
-  if (profile.role !== 'kiosk') {
+  // Only kiosk and call_test users can access this page
+  if (profile.role !== 'kiosk' && profile.role !== 'call_test') {
     redirect('/dashboard');
   }
 
   // Get the kiosk associated with this profile
-  const kiosk = await queryOne<Kiosk>(
+  let kiosk = await queryOne<Kiosk>(
     `SELECT * FROM kiosks WHERE profile_id = $1`,
     [profile.id]
   );
+
+  // Auto-create kiosk device if not exists and user has a project
+  if (!kiosk && profile.project_id) {
+    console.log('[Kiosk] Auto-creating kiosk device for profile:', profile.id);
+    await execute(
+      `INSERT INTO kiosks (id, project_id, profile_id, name, location, status)
+       VALUES (gen_random_uuid(), $1, $2, $3, $4, 'offline')`,
+      [profile.project_id, profile.id, `${profile.full_name || profile.email} Device`, 'Auto-created']
+    );
+    // Fetch the newly created kiosk
+    kiosk = await queryOne<Kiosk>(
+      `SELECT * FROM kiosks WHERE profile_id = $1`,
+      [profile.id]
+    );
+  }
 
   if (!kiosk) {
     console.error('Kiosk not found for profile:', profile.id);
@@ -53,8 +68,11 @@ export default async function KioskPage({ searchParams }: KioskPageProps) {
           <p className="text-gray-600 mb-4">
             이 계정에 연결된 키오스크를 찾을 수 없습니다.
           </p>
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-gray-500 mb-2">
             프로필 ID: {profile.id}
+          </p>
+          <p className="text-sm text-gray-500 mb-4">
+            프로젝트가 할당되어 있는지 확인해 주세요.
           </p>
           <a
             href="/api/auth/logout"
@@ -88,5 +106,5 @@ export default async function KioskPage({ searchParams }: KioskPageProps) {
     errorMessage: params.message,
   } : undefined;
 
-  return <KioskApp kiosk={kiosk} content={content} paymentResult={paymentResult} />;
+  return <KioskApp kiosk={kiosk} content={content} paymentResult={paymentResult} userRole={profile.role} />;
 }

@@ -237,6 +237,7 @@ interface KioskAppProps {
   kiosk: Kiosk | null;
   content: Record<string, string>;
   paymentResult?: PaymentResult;
+  userRole?: string;
 }
 
 // Default content values (fallback when not set in database)
@@ -395,11 +396,14 @@ interface CallProps {
   isCallActive: boolean;
 }
 
-export default function KioskApp({ kiosk, content, paymentResult }: KioskAppProps) {
+export default function KioskApp({ kiosk, content, paymentResult, userRole }: KioskAppProps) {
   // Helper for this component
   const t = (key: string) => getContent(content, key);
   const router = useRouter();
   const [currentScreen, setCurrentScreen] = useState<ScreenName>('start');
+  
+  // Check if user is in call test mode (only sees call button)
+  const isCallTestMode = userRole === 'call_test';
   const [isStaffModalOpen, setIsStaffModalOpen] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   // Staff call state (lifted from StaffCallModal for TopButtonRow access)
@@ -764,7 +768,7 @@ export default function KioskApp({ kiosk, content, paymentResult }: KioskAppProp
   const renderScreen = () => {
     switch (currentScreen) {
       case 'start':
-        return <StartScreen goToScreen={goToScreen} t={t} openStaffModal={openStaffModal} callProps={callProps} />;
+        return <StartScreen goToScreen={goToScreen} t={t} openStaffModal={openStaffModal} callProps={callProps} isCallTestMode={isCallTestMode} />;
       case 'checkin-reservation':
         return <CheckinReservationScreen goToScreen={goToScreen} syncInputData={syncInputData} t={t} projectId={kiosk?.project_id} openStaffModal={openStaffModal} callProps={callProps} />;
       case 'checkin-consent':
@@ -792,7 +796,7 @@ export default function KioskApp({ kiosk, content, paymentResult }: KioskAppProp
       case 'checkout':
         return <CheckoutScreen goToScreen={goToScreen} t={t} openStaffModal={openStaffModal} callProps={callProps} />;
       default:
-        return <StartScreen goToScreen={goToScreen} t={t} openStaffModal={openStaffModal} callProps={callProps} />;
+        return <StartScreen goToScreen={goToScreen} t={t} openStaffModal={openStaffModal} callProps={callProps} isCallTestMode={isCallTestMode} />;
     }
   };
 
@@ -1415,7 +1419,7 @@ function NavArrow({
 }
 
 // Start Screen
-function StartScreen({ goToScreen, t, openStaffModal, callProps }: { goToScreen: (screen: ScreenName) => void; t: (key: string) => string; openStaffModal: () => void; callProps: CallProps }) {
+function StartScreen({ goToScreen, t, openStaffModal, callProps, isCallTestMode }: { goToScreen: (screen: ScreenName) => void; t: (key: string) => string; openStaffModal: () => void; callProps: CallProps; isCallTestMode?: boolean }) {
   return (
     <div className="screen">
       <div className="screen-wrapper">
@@ -1424,24 +1428,33 @@ function StartScreen({ goToScreen, t, openStaffModal, callProps }: { goToScreen:
           <div className="logo">
             <Image src="/logo.png" alt="HiO" width={200} height={80} className="logo-image" />
           </div>
-          <div className="welcome-message">
-            <h2>{t('start_welcome_title')}</h2>
-            <p>{t('start_welcome_subtitle')}</p>
-          </div>
-          <div className="footer-info">
-            <p>{t('start_footer_info')}</p>
-          </div>
-          <div className="menu-buttons">
-            <button className="primary-btn large" onClick={() => goToScreen('checkin-reservation')}>
-              체크인
-            </button>
-            <button className="primary-btn large" onClick={() => goToScreen('room-selection')}>
-              예약없이 방문
-            </button>
-            <button className="primary-btn large" onClick={() => goToScreen('checkout')}>
-              체크아웃
-            </button>
-          </div>
+          {isCallTestMode ? (
+            <div className="welcome-message">
+              <h2>고객 서비스 테스트 모드</h2>
+              <p>상단의 '고객 서비스 요청' 버튼을 사용하여 통화 기능을 테스트하세요</p>
+            </div>
+          ) : (
+            <>
+              <div className="welcome-message">
+                <h2>{t('start_welcome_title')}</h2>
+                <p>{t('start_welcome_subtitle')}</p>
+              </div>
+              <div className="footer-info">
+                <p>{t('start_footer_info')}</p>
+              </div>
+              <div className="menu-buttons">
+                <button className="primary-btn large" onClick={() => goToScreen('checkin-reservation')}>
+                  체크인
+                </button>
+                <button className="primary-btn large" onClick={() => goToScreen('room-selection')}>
+                  예약없이 방문
+                </button>
+                <button className="primary-btn large" onClick={() => goToScreen('checkout')}>
+                  체크아웃
+                </button>
+              </div>
+            </>
+          )}
         </div>
       </div>
     </div>

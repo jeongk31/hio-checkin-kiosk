@@ -1,4 +1,4 @@
-export type UserRole = 'super_admin' | 'project_admin' | 'kiosk';
+export type UserRole = 'super_admin' | 'project_admin' | 'kiosk' | 'call_test';
 export type KioskStatus = 'online' | 'offline' | 'busy' | 'error';
 export type VoiceCallCallerType = 'kiosk' | 'manager';
 

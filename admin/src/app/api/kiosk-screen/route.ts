@@ -13,7 +13,7 @@ interface ScreenFrameRow {
 export async function POST(request: NextRequest) {
   try {
     const profile = await getCurrentProfile();
-    if (!profile || profile.role !== 'kiosk') {
+    if (!profile || (profile.role !== 'kiosk' && profile.role !== 'call_test')) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 

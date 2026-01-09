@@ -175,22 +175,25 @@ export async function POST(request: Request) {
     if (pmsToken) {
       const profile = await getCurrentProfile();
       
-      if (profile?.role === 'super_admin' || !specificProjectId) {
-        // Sync all projects
-        const projectsResult = await fetchAllPMSProjects(pmsToken);
-        if (projectsResult.success) {
-          for (const pmsProject of projectsResult.projects) {
-            await syncSingleProject(pmsProject);
-            projectsSynced++;
+      // Only super_admin can sync all users
+      if (profile?.role === 'super_admin') {
+        if (!specificProjectId) {
+          // Sync all projects
+          const projectsResult = await fetchAllPMSProjects(pmsToken);
+          if (projectsResult.success) {
+            for (const pmsProject of projectsResult.projects) {
+              await syncSingleProject(pmsProject);
+              projectsSynced++;
+            }
           }
-        }
 
-        // Sync all kiosk users
-        const usersResult = await fetchAllPMSKioskUsers(pmsToken);
-        if (usersResult.success) {
-          for (const pmsUser of usersResult.users) {
-            await syncSingleUser(pmsUser);
-            usersSynced++;
+          // Sync all kiosk users (only for super_admin)
+          const usersResult = await fetchAllPMSKioskUsers(pmsToken);
+          if (usersResult.success) {
+            for (const pmsUser of usersResult.users) {
+              await syncSingleUser(pmsUser);
+              usersSynced++;
+            }
           }
         }
       } else if (specificProjectId || profile?.project_id) {

@@ -43,7 +43,7 @@ export default async function DashboardPage() {
         ['checked_in', today]
       ),
       queryOne<PaidAmountResult>(
-        'SELECT COALESCE(SUM(paid_amount), 0)::numeric as total_paid FROM reservations WHERE status = $1 AND check_in_date = $2',
+        'SELECT COALESCE(SUM(total_price), 0)::numeric as total_paid FROM reservations WHERE status = $1 AND check_in_date = $2',
         ['checked_in', today]
       ),
       query<RecentCheckin>(
@@ -70,7 +70,7 @@ export default async function DashboardPage() {
         [profile.project_id, 'checked_in', today]
       ),
       queryOne<PaidAmountResult>(
-        'SELECT COALESCE(SUM(paid_amount), 0)::numeric as total_paid FROM reservations WHERE project_id = $1 AND status = $2 AND check_in_date = $3',
+        'SELECT COALESCE(SUM(total_price), 0)::numeric as total_paid FROM reservations WHERE project_id = $1 AND status = $2 AND check_in_date = $3',
         [profile.project_id, 'checked_in', today]
       ),
       query<RecentCheckin>(

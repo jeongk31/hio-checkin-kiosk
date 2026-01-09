@@ -19,12 +19,20 @@ export async function GET(request: Request) {
     const profile = await getCurrentProfile();
 
     if (!profile) {
+      console.log('[Amenities API] Unauthorized - no profile');
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const { searchParams } = new URL(request.url);
     const projectId = searchParams.get('projectId');
     const activeOnly = searchParams.get('activeOnly') === 'true';
+
+    console.log('[Amenities API] GET request:', {
+      role: profile.role,
+      profileProjectId: profile.project_id,
+      requestedProjectId: projectId,
+      activeOnly,
+    });
 
     let sql: string;
     let params: (string | null)[];
@@ -48,11 +56,13 @@ export async function GET(request: Request) {
       params = [profile.project_id];
     }
 
+    console.log('[Amenities API] Executing query:', sql, 'with params:', params);
     const data = await query<Amenity>(sql, params);
+    console.log(`[Amenities API] Found ${data.length} amenities`);
 
     return NextResponse.json({ amenities: data });
   } catch (error) {
-    console.error('Error fetching amenities:', error);
+    console.error('[Amenities API] Error:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

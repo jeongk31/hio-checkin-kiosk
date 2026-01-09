@@ -48,14 +48,9 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(new URL('/login', request.url));
   }
 
-  // Authenticated and on login page - redirect to dashboard (unless there's an error)
+  // Authenticated and on login page - redirect to home
   if (isAuthenticated && isAuthPage && !hasErrorParam) {
-    return NextResponse.redirect(new URL('/dashboard', request.url));
-  }
-
-  // Authenticated and on public page - redirect to dashboard
-  if (isAuthenticated && isPublicPage) {
-    return NextResponse.redirect(new URL('/dashboard', request.url));
+    return NextResponse.redirect(new URL('/', request.url));
   }
 
   return NextResponse.next();
