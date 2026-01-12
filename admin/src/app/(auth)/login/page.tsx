@@ -3,12 +3,39 @@
 import { useState, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 
+// Helper to clear all cookies aggressively
+function clearAllCookies() {
+  // Get all cookies
+  const cookies = document.cookie.split(';');
+  
+  // Clear each cookie with all possible path variations
+  cookies.forEach((cookie) => {
+    const name = cookie.split('=')[0].trim();
+    if (name) {
+      // Try multiple paths to ensure cookie is deleted
+      document.cookie = `${name}=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/`;
+      document.cookie = `${name}=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;domain=${window.location.hostname}`;
+      document.cookie = `${name}=;expires=Thu, 01 Jan 1970 00:00:00 GMT`;
+    }
+  });
+  
+  // Specifically target session_token
+  document.cookie = 'session_token=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/';
+  document.cookie = 'session_token=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;domain=' + window.location.hostname;
+}
+
 function LoginForm() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const searchParams = useSearchParams();
+
+  // Clear cookies on mount to prevent any stale session issues
+  useEffect(() => {
+    // Always clear cookies when landing on login page
+    clearAllCookies();
+  }, []);
 
   useEffect(() => {
     // Handle error parameter from URL (e.g., ?error=Access%20denied)
@@ -21,12 +48,8 @@ function LoginForm() {
       
       setError(errorMessage);
       
-      // Clear all cookies to prevent redirect loops
-      document.cookie.split(';').forEach((c) => {
-        document.cookie = c
-          .replace(/^ +/, '')
-          .replace(/=.*/, `=;expires=${new Date().toUTCString()};path=/`);
-      });
+      // Clear all cookies again to be absolutely sure
+      clearAllCookies();
       
       // Clear the error from URL
       const url = new URL(window.location.href);
