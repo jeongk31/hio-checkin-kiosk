@@ -419,6 +419,10 @@ export default function KioskApp({ kiosk, content, paymentResult, userRole }: Ki
   // Amenity state
   const [selectedAmenities, setSelectedAmenities] = useState<SelectedAmenity[]>([]);
   const [amenityTotal, setAmenityTotal] = useState(0);
+  // Admin busy notification state
+  const [adminBusyNotification, setAdminBusyNotification] = useState<string | null>(null);
+  // Call button disabled state (for preventing rapid clicks)
+  const [isCallButtonDisabled, setIsCallButtonDisabled] = useState(false);
 
   // Reset amenity selections (called when returning to home)
   const resetAmenities = () => {
@@ -693,14 +697,17 @@ export default function KioskApp({ kiosk, content, paymentResult, userRole }: Ki
   }, [kiosk]);
 
   const openStaffModal = useCallback(async () => {
-    // Reset call state
-    setStaffCallStatus('calling');
-    setStaffCallDuration(0);
-    setIsStaffModalOpen(true);
+    // Prevent rapid clicking
+    if (isCallButtonDisabled) {
+      console.log('[Kiosk] Call button is disabled, ignoring click');
+      return;
+    }
+    setIsCallButtonDisabled(true);
+    
     // Create video session for staff call (only if kiosk exists)
     if (!kiosk) {
       console.error('[Kiosk] Cannot create video session: kiosk object not available');
-      setIsStaffModalOpen(false);
+      setIsCallButtonDisabled(false);
       return;
     }
     
@@ -710,9 +717,43 @@ export default function KioskApp({ kiosk, content, paymentResult, userRole }: Ki
         kiosk_id: kiosk.id,
         project_id: kiosk.project_id
       });
-      setIsStaffModalOpen(false);
+      setIsCallButtonDisabled(false);
       return;
     }
+    
+    // Check if admin is available before creating a session
+    try {
+      const statusResponse = await fetch(`/api/video-sessions/status?project_id=${kiosk.project_id}&exclude_kiosk_id=${kiosk.id}`, {
+        credentials: 'include',
+      });
+      if (statusResponse.ok) {
+        const statusData = await statusResponse.json();
+        if (!statusData.available) {
+          // Admin is already on a call
+          console.log('[Kiosk] Admin is busy, showing notification');
+          setAdminBusyNotification('현재 다른 통화가 진행 중입니다. 잠시 후 다시 시도해 주세요.');
+          setTimeout(() => setAdminBusyNotification(null), 5000);
+          setIsCallButtonDisabled(false);
+          return;
+        }
+        if (statusData.waitingCalls > 0) {
+          // There are other kiosks waiting
+          console.log('[Kiosk] Other kiosks are waiting:', statusData.waitingCalls);
+          setAdminBusyNotification(`${statusData.waitingCalls}개의 다른 호출이 대기 중입니다. 잠시 후 다시 시도해 주세요.`);
+          setTimeout(() => setAdminBusyNotification(null), 5000);
+          setIsCallButtonDisabled(false);
+          return;
+        }
+      }
+    } catch (error) {
+      console.error('[Kiosk] Failed to check admin availability:', error);
+      // Continue anyway if the check fails
+    }
+    
+    // Reset call state and open modal
+    setStaffCallStatus('calling');
+    setStaffCallDuration(0);
+    setIsStaffModalOpen(true);
     
     const roomName = `voice-${kiosk.id}-${Date.now()}`;
     console.log('[Kiosk] Creating video session:', { kiosk_id: kiosk.id, project_id: kiosk.project_id, roomName });
@@ -726,13 +767,17 @@ export default function KioskApp({ kiosk, content, paymentResult, userRole }: Ki
 
     if (!session) {
       console.error('[Kiosk] Failed to create video session');
+      setStaffCallStatus('failed');
+      setIsCallButtonDisabled(false);
     } else {
       console.log('[Kiosk] Video session created successfully:', session);
       setCurrentSessionId(session.id);
       // Manager will poll for waiting sessions via API
       console.log('[Kiosk] Video session ready for manager to pick up');
+      // Re-enable call button after a short delay (in case call fails quickly)
+      setTimeout(() => setIsCallButtonDisabled(false), 2000);
     }
-  }, [kiosk]);
+  }, [kiosk, isCallButtonDisabled]);
 
   const closeStaffModal = useCallback(async () => {
     // Update session status if we have one
@@ -744,6 +789,11 @@ export default function KioskApp({ kiosk, content, paymentResult, userRole }: Ki
     }
     setIsStaffModalOpen(false);
     setCurrentSessionId(null);
+    // Reset call button disabled state
+    setIsCallButtonDisabled(false);
+    // Reset call status for next call
+    setStaffCallStatus('calling');
+    setStaffCallDuration(0);
   }, [currentSessionId]);
 
   // Common call props for TopButtonRow in all screens
@@ -827,6 +877,29 @@ export default function KioskApp({ kiosk, content, paymentResult, userRole }: Ki
           callDuration={incomingCallDuration}
           onCallDurationChange={setIncomingCallDuration}
         />
+      )}
+      {/* Admin busy notification */}
+      {adminBusyNotification && (
+        <div className="admin-busy-notification" style={{
+          position: 'fixed',
+          top: '20px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          backgroundColor: '#f59e0b',
+          color: '#fff',
+          padding: '16px 32px',
+          borderRadius: '12px',
+          fontSize: '18px',
+          fontWeight: 600,
+          zIndex: 10000,
+          boxShadow: '0 4px 20px rgba(0,0,0,0.2)',
+          animation: 'fadeIn 0.3s ease-out',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <span style={{ fontSize: '24px' }}>📞</span>
+            <span>{adminBusyNotification}</span>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -1054,7 +1127,7 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
               clearTimeout(timeoutRef.current);
               timeoutRef.current = null;
             }
-            // Create and send offer
+            // Create and send offer - check signaling state first
             if (pc.signalingState === 'stable') {
               try {
                 const offer = await pc.createOffer();
@@ -1064,9 +1137,19 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
               } catch (err) {
                 console.error('[Kiosk] Failed to create/send offer:', err);
               }
+            } else {
+              console.warn('[Kiosk] Cannot create offer - wrong signaling state:', pc.signalingState);
             }
           } else if (payload.type === 'call-ended') {
-            console.log('[Kiosk] Call ended by manager');
+            console.log('[Kiosk] Call ended by manager, reason:', 'reason' in payload ? payload.reason : 'unknown');
+            if (timeoutRef.current) {
+              clearTimeout(timeoutRef.current);
+              timeoutRef.current = null;
+            }
+            // Show appropriate message based on reason
+            if ('reason' in payload && payload.reason === 'declined') {
+              setError('관리자가 통화를 거절했습니다.');
+            }
             setCallStatus('ended');
             cleanup();
           }
@@ -1115,10 +1198,70 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
     }
   }, [isOpen]);
 
-  const handleClose = () => {
+  // Poll for admin status when waiting for answer
+  // This detects if admin answers another kiosk's call
+  useEffect(() => {
+    if (!isOpen || !sessionId || callStatus !== 'ringing') return;
+    
+    let isActive = true;
+    
+    const checkAdminStatus = async () => {
+      if (!isActive) return;
+      
+      try {
+        // Check our own session status first
+        const sessionResponse = await fetch(`/api/video-sessions?status=waiting`, {
+          credentials: 'include',
+        });
+        if (sessionResponse.ok) {
+          const data = await sessionResponse.json();
+          const ourSession = data.sessions?.find((s: { id: string }) => s.id === sessionId);
+          
+          // If our session was ended (by admin declining), notify user
+          if (!ourSession) {
+            console.log('[Kiosk] Our session was ended or not found');
+            // Session might have been picked up or cancelled, check for active calls
+            const statusResponse = await fetch(`/api/video-sessions/status`, {
+              credentials: 'include',
+            });
+            if (statusResponse.ok) {
+              const statusData = await statusResponse.json();
+              if (!statusData.available) {
+                // Admin is on a call with someone else
+                setError('관리자가 다른 통화 중입니다. 잠시 후 다시 시도해 주세요.');
+                setCallStatus('failed');
+                return;
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.error('[Kiosk] Error checking admin status:', error);
+      }
+    };
+    
+    // Poll every 3 seconds while ringing
+    const interval = setInterval(checkAdminStatus, 3000);
+    
+    return () => {
+      isActive = false;
+      clearInterval(interval);
+    };
+  }, [isOpen, sessionId, callStatus, setCallStatus]);
+
+  const handleClose = async () => {
+    console.log('[Kiosk StaffCallModal] handleClose called, callStatus:', callStatus);
     // Send end signal if connected
     if (signalingChannelRef.current && (callStatus === 'connected' || callStatus === 'ringing' || callStatus === 'connecting')) {
-      signalingChannelRef.current.send({ type: 'call-ended', reason: 'ended' });
+      console.log('[Kiosk StaffCallModal] Sending call-ended signal to manager');
+      try {
+        await signalingChannelRef.current.send({ type: 'call-ended', reason: 'ended' });
+        console.log('[Kiosk StaffCallModal] Signal sent successfully');
+      } catch (err) {
+        console.error('[Kiosk StaffCallModal] Failed to send signal:', err);
+      }
+    } else {
+      console.log('[Kiosk StaffCallModal] Not sending signal - channel:', !!signalingChannelRef.current, 'status:', callStatus);
     }
     cleanup();
     onClose();
@@ -1310,16 +1453,29 @@ function IncomingCallFromManager({ session, onClose, callStatus, onCallStatusCha
           if (!isActive) return;
 
           if (payload.type === 'offer' && 'sdp' in payload) {
-            console.log('[IncomingCallFromManager] Received SDP offer');
-            await pc.setRemoteDescription({ type: 'offer', sdp: payload.sdp });
-            for (const candidate of pendingCandidatesRef.current) {
-              await pc.addIceCandidate(candidate);
+            console.log('[IncomingCallFromManager] Received SDP offer, current state:', pc.signalingState);
+            // Check if we're in the right state to set remote description
+            if (pc.signalingState !== 'stable' && pc.signalingState !== 'have-local-offer') {
+              console.warn('[IncomingCallFromManager] Ignoring offer - wrong signaling state:', pc.signalingState);
+              return;
             }
-            pendingCandidatesRef.current = [];
-            const answer = await pc.createAnswer();
-            await pc.setLocalDescription(answer);
-            signalingChannel.send({ type: 'answer', sdp: answer.sdp! });
-            setCallStatus('connecting');
+            try {
+              await pc.setRemoteDescription({ type: 'offer', sdp: payload.sdp });
+              console.log('[IncomingCallFromManager] Remote description set, new state:', pc.signalingState);
+              
+              for (const candidate of pendingCandidatesRef.current) {
+                await pc.addIceCandidate(candidate);
+              }
+              pendingCandidatesRef.current = [];
+              
+              // Create and send answer
+              const answer = await pc.createAnswer();
+              await pc.setLocalDescription(answer);
+              signalingChannel.send({ type: 'answer', sdp: answer.sdp! });
+              setCallStatus('connecting');
+            } catch (error) {
+              console.error('[IncomingCallFromManager] Error handling offer:', error);
+            }
           } else if (payload.type === 'ice-candidate' && 'candidate' in payload) {
             if (pc.remoteDescription) {
               await pc.addIceCandidate(payload.candidate);
@@ -1366,21 +1522,30 @@ function IncomingCallFromManager({ session, onClose, callStatus, onCallStatusCha
   // Send call-ended signal and cleanup when status changes to ended or failed
   useEffect(() => {
     if (callStatus === 'ended' || callStatus === 'failed') {
-      // Send call-ended signal
-      if (signalingChannelRef.current) {
-        signalingChannelRef.current.send({ type: 'call-ended', reason: callStatus === 'ended' ? 'ended' : 'error' });
-      }
-      // Update database via fetch API
-      updateVideoSession(session.id, {
-        status: 'ended',
-        ended_at: new Date().toISOString(),
-      });
-      // Cleanup and close after short delay
-      const timer = setTimeout(() => {
-        cleanup();
-        onClose();
-      }, 500);
-      return () => clearTimeout(timer);
+      const handleEnd = async () => {
+        console.log('[IncomingCallFromManager] Ending call, status:', callStatus);
+        // Send call-ended signal and wait for it
+        if (signalingChannelRef.current) {
+          try {
+            await signalingChannelRef.current.send({ type: 'call-ended', reason: callStatus === 'ended' ? 'ended' : 'error' });
+            console.log('[IncomingCallFromManager] Signal sent to manager');
+          } catch (err) {
+            console.error('[IncomingCallFromManager] Failed to send signal:', err);
+          }
+        }
+        // Update database via fetch API
+        await updateVideoSession(session.id, {
+          status: 'ended',
+          ended_at: new Date().toISOString(),
+        });
+        console.log('[IncomingCallFromManager] Database updated');
+        // Cleanup and close after short delay
+        setTimeout(() => {
+          cleanup();
+          onClose();
+        }, 200);
+      };
+      handleEnd();
     }
   }, [callStatus, session.id, cleanup, onClose]);
 

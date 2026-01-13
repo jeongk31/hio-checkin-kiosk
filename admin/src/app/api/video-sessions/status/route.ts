@@ -1,0 +1,80 @@
+import { query } from '@/lib/db';
+import { getCurrentProfile } from '@/lib/auth';
+import { NextResponse } from 'next/server';
+
+interface VideoSession {
+  id: string;
+  kiosk_id: string;
+  project_id: string;
+  status: string;
+  caller_type: string;
+}
+
+/**
+ * GET /api/video-sessions/status - Check if admin is available for calls
+ * Returns: { available: boolean, activeCall: VideoSession | null, waitingCalls: number }
+ */
+export async function GET(request: Request) {
+  try {
+    const profile = await getCurrentProfile();
+
+    if (!profile) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const { searchParams } = new URL(request.url);
+    const projectId = searchParams.get('project_id') || profile.project_id;
+    const excludeKioskId = searchParams.get('exclude_kiosk_id');
+
+    if (!projectId) {
+      return NextResponse.json({ error: 'project_id is required' }, { status: 400 });
+    }
+
+    // Check for active calls (connected status) in this project
+    // Only consider calls from the last 30 minutes to avoid stale sessions
+    // Also exclude sessions that have ended_at timestamp set
+    const activeCallSql = `
+      SELECT id, kiosk_id, project_id, status, caller_type
+      FROM video_sessions
+      WHERE project_id = $1
+        AND status = 'connected'
+        AND started_at > NOW() - INTERVAL '30 minutes'
+        AND ended_at IS NULL
+      LIMIT 1
+    `;
+    const activeCalls = await query<VideoSession>(activeCallSql, [projectId]);
+    const activeCall = activeCalls[0] || null;
+
+    // Count waiting calls from kiosks (exclude caller's own session)
+    // Only consider recent waiting sessions (last 5 minutes)
+    let waitingCallsSql = `
+      SELECT COUNT(*) as count
+      FROM video_sessions
+      WHERE project_id = $1
+        AND status = 'waiting'
+        AND caller_type = 'kiosk'
+        AND started_at > NOW() - INTERVAL '5 minutes'
+    `;
+    const params: unknown[] = [projectId];
+    
+    if (excludeKioskId) {
+      waitingCallsSql += ` AND kiosk_id != $2`;
+      params.push(excludeKioskId);
+    }
+    
+    const waitingResult = await query<{ count: string }>(waitingCallsSql, params);
+    const waitingCalls = parseInt(waitingResult[0]?.count || '0', 10);
+
+    // Admin is available if there's no active call
+    const available = !activeCall;
+
+    return NextResponse.json({
+      available,
+      activeCall,
+      waitingCalls,
+    });
+  } catch (error) {
+    console.error('Error checking call status:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}

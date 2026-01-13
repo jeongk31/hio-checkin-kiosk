@@ -44,11 +44,15 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Session ID and payload are required' }, { status: 400 });
     }
 
+    console.log('[Signaling API] POST - sessionId:', sessionId, 'payload type:', payload?.type);
+
     // Insert message
     await execute(
       `INSERT INTO signaling_messages (session_id, payload) VALUES ($1, $2)`,
       [sessionId, JSON.stringify(payload)]
     );
+
+    console.log('[Signaling API] Message stored successfully');
 
     // Cleanup old messages (older than 5 minutes)
     await execute(

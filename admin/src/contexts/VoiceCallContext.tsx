@@ -50,6 +50,7 @@ export function VoiceCallProvider({ children, profile }: VoiceCallProviderProps)
   // Voice call hook
   const voiceCall = useVoiceCall({
     onStatusChange: (status) => {
+      console.log('[Manager Dashboard Context] onStatusChange called:', status);
       setState((prev) => ({ ...prev, status }));
 
       // Start duration timer when connected
@@ -63,8 +64,24 @@ export function VoiceCallProvider({ children, profile }: VoiceCallProviderProps)
         }, 1000);
       }
 
-      // Stop duration timer when call ends
-      if (status === 'ended' || status === 'failed' || status === 'idle') {
+      // Auto-reset to idle when call ends or fails
+      if (status === 'ended' || status === 'failed') {
+        console.log('[Manager Dashboard Context] Call ended/failed, resetting to idle in 1 second');
+        if (durationIntervalRef.current) {
+          clearInterval(durationIntervalRef.current);
+          durationIntervalRef.current = null;
+        }
+        callStartTimeRef.current = null;
+        
+        // Reset to idle after short delay to allow UI to show end state
+        setTimeout(() => {
+          console.log('[Manager Dashboard Context] Auto-resetting to idle after failed/ended status');
+          resetState();
+        }, 1000);
+      }
+      
+      // Clear timer when idle
+      if (status === 'idle') {
         if (durationIntervalRef.current) {
           clearInterval(durationIntervalRef.current);
           durationIntervalRef.current = null;
@@ -76,8 +93,10 @@ export function VoiceCallProvider({ children, profile }: VoiceCallProviderProps)
       setState((prev) => ({ ...prev, error }));
     },
     onCallEnded: (reason) => {
-      console.log('Call ended:', reason);
+      console.log('[Manager Dashboard Context] onCallEnded callback invoked with reason:', reason);
+      console.log('[Manager Dashboard Context] resetState function exists:', typeof resetState);
       resetState();
+      console.log('[Manager Dashboard Context] resetState called');
     },
     onRemoteStream: (stream) => {
       if (remoteAudioRef.current) {
@@ -89,11 +108,16 @@ export function VoiceCallProvider({ children, profile }: VoiceCallProviderProps)
 
   // Reset state
   const resetState = useCallback(() => {
+    console.log('[Manager Dashboard] resetState called - resetting to idle');
     if (durationIntervalRef.current) {
       clearInterval(durationIntervalRef.current);
       durationIntervalRef.current = null;
     }
     callStartTimeRef.current = null;
+    
+    // Update ref FIRST before setState to prevent race conditions
+    statusRef.current = 'idle';
+    
     setState({
       status: 'idle',
       currentSession: null,
@@ -101,6 +125,8 @@ export function VoiceCallProvider({ children, profile }: VoiceCallProviderProps)
       callDuration: 0,
       error: null,
     });
+    
+    console.log('[Manager Dashboard] State reset to idle, statusRef.current:', statusRef.current);
   }, []);
 
   // Fetch kiosk info via API
@@ -129,11 +155,11 @@ export function VoiceCallProvider({ children, profile }: VoiceCallProviderProps)
 
   // Poll for incoming calls (replaces Supabase Realtime)
   useEffect(() => {
-    console.log('[Manager] Profile:', { id: profile.id, role: profile.role, project_id: profile.project_id });
+    console.log('[Manager Dashboard] Profile:', { id: profile.id, role: profile.role, project_id: profile.project_id });
 
     // Only admin/manager roles can receive calls from kiosks
     if (!VOICE_CALL_ENABLED_ROLES.includes(profile.role)) {
-      console.log('[Manager] Role not in voice call enabled list, skipping voice call subscription');
+      console.log('[Manager Dashboard] Role not in voice call enabled list, skipping voice call subscription');
       return;
     }
 
@@ -150,6 +176,8 @@ export function VoiceCallProvider({ children, profile }: VoiceCallProviderProps)
           const data = await response.json();
           const waitingSessions = data.sessions || [];
           
+          console.log('[Manager Poll] Current status:', statusRef.current, 'Waiting sessions:', waitingSessions.length);
+          
           // Find first waiting session that we haven't already processed
           if (waitingSessions.length > 0 && statusRef.current === 'idle') {
             const session = waitingSessions[0];
@@ -163,6 +191,8 @@ export function VoiceCallProvider({ children, profile }: VoiceCallProviderProps)
               kioskInfo,
               error: null,
             }));
+          } else if (waitingSessions.length > 0) {
+            console.log('[Manager Dashboard Poll] Waiting sessions exist but status is not idle:', statusRef.current);
           }
         }
       } catch (error) {
@@ -266,6 +296,25 @@ export function VoiceCallProvider({ children, profile }: VoiceCallProviderProps)
       }),
     });
 
+    // Decline other waiting sessions from the same project to notify other kiosks
+    try {
+      const projectId = state.currentSession.project_id || profile.project_id;
+      if (projectId) {
+        await fetch('/api/video-sessions/decline-others', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            answeredSessionId: state.currentSession.id,
+            projectId,
+          }),
+        });
+        console.log('[Manager] Declined other waiting sessions');
+      }
+    } catch (error) {
+      console.error('[Manager] Failed to decline other sessions:', error);
+      // Continue anyway - this is not critical
+    }
+
     // Answer the call - this will send 'call-answered' signal
     console.log('[Manager] Calling voiceCall.answerCall...');
     const success = await voiceCall.answerCall(state.currentSession.id);
@@ -273,19 +322,35 @@ export function VoiceCallProvider({ children, profile }: VoiceCallProviderProps)
     if (!success) {
       resetState();
     }
-  }, [state.currentSession, state, profile.id, voiceCall, resetState]);
+  }, [state.currentSession, state, profile.id, profile.project_id, voiceCall, resetState]);
 
   // Decline an incoming call
   const declineCall = useCallback(async () => {
     if (!state.currentSession) return;
 
-    // Update session status via API
+    // Send decline signal via signaling API (since we haven't set up WebRTC channel yet)
+    try {
+      await fetch('/api/signaling', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId: state.currentSession.id,
+          payload: { type: 'call-ended', reason: 'declined' },
+        }),
+      });
+      console.log('[Manager] Sent decline signal to kiosk');
+    } catch (error) {
+      console.error('[Manager] Failed to send decline signal:', error);
+    }
+
+    // Update session status via API - ensure ended_at is set
     await fetch('/api/video-sessions', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         id: state.currentSession.id,
         status: 'ended',
+        ended_at: new Date().toISOString(),
       }),
     });
 
@@ -294,19 +359,25 @@ export function VoiceCallProvider({ children, profile }: VoiceCallProviderProps)
   }, [state.currentSession, voiceCall, resetState]);
 
   // End the call
-  const endCall = useCallback(() => {
+  const endCall = useCallback(async () => {
     if (!state.currentSession) return;
 
-    // Update session status via API
-    fetch('/api/video-sessions', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        id: state.currentSession.id,
-        status: 'ended',
-        endedAt: new Date().toISOString(),
-      }),
-    });
+    console.log('[Manager] Ending call, updating session:', state.currentSession.id);
+    // Update session status via API - ensure ended_at is set
+    try {
+      await fetch('/api/video-sessions', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: state.currentSession.id,
+          status: 'ended',
+          ended_at: new Date().toISOString(),
+        }),
+      });
+      console.log('[Manager] Session updated to ended');
+    } catch (error) {
+      console.error('[Manager] Failed to update session:', error);
+    }
 
     voiceCall.endCall('ended');
     resetState();

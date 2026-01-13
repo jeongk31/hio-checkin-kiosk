@@ -50,8 +50,11 @@ class SignalingChannel {
           if (data.messages && Array.isArray(data.messages)) {
             for (const msg of data.messages) {
               this.lastMessageId = Math.max(this.lastMessageId, msg.id);
+              console.log('[Signaling Poll] Received message type:', msg.payload?.type, 'for session:', this.sessionId);
               if (this.messageHandler) {
                 this.messageHandler(msg.payload);
+              } else {
+                console.warn('[Signaling Poll] No message handler set!');
               }
             }
           }
@@ -228,9 +231,15 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
           }
           onStatusChangeRef.current?.('connecting');
         } else if (msg.type === 'answer' && 'sdp' in msg) {
-          console.log('[Manager] Received answer, setting remote description');
+          console.log('[Manager] Received answer, current state:', pc.signalingState);
+          // Only set remote description if we're in have-local-offer state
+          if (pc.signalingState !== 'have-local-offer') {
+            console.warn('[Manager] Ignoring answer - wrong signaling state:', pc.signalingState);
+            return;
+          }
           try {
             await pc.setRemoteDescription({ type: 'answer', sdp: msg.sdp });
+            console.log('[Manager] Remote description set, new state:', pc.signalingState);
             for (const candidate of pendingCandidatesRef.current) {
               await pc.addIceCandidate(candidate);
             }
@@ -248,9 +257,27 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
             pendingCandidatesRef.current.push(msg.candidate);
           }
         } else if (msg.type === 'call-ended') {
-          console.log('[Manager] Kiosk ended call');
+          console.log('[Manager Dashboard] Kiosk ended call (manager initiated), updating session to ended');
+          console.log('[Manager Dashboard] sessionIdRef.current:', sessionIdRef.current);
+          console.log('[Manager Dashboard] onCallEndedRef.current:', typeof onCallEndedRef.current);
+          // Update database session to ended before cleanup
+          if (sessionIdRef.current) {
+            await fetch('/api/video-sessions', {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                id: sessionIdRef.current,
+                status: 'ended',
+                ended_at: new Date().toISOString(),
+              }),
+            }).catch(err => console.error('[Manager] Failed to update session:', err));
+            console.log('[Manager] Session updated to ended in database');
+          }
+          console.log('[Manager] Calling onCallEndedRef callback...');
           onCallEndedRef.current?.(msg.reason);
+          console.log('[Manager] Calling cleanup...');
           cleanup();
+          console.log('[Manager] Cleanup complete');
         }
       });
 
@@ -258,11 +285,11 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
       await channel.subscribe();
 
       // Create and send offer
-      console.log('[Manager] Creating initial SDP offer...');
+      console.log('[Manager Dashboard] Creating initial SDP offer...');
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
 
-      console.log('[Manager] 📤 Sending initial SDP offer to kiosk');
+      console.log('[Manager Dashboard] 📤 Sending initial SDP offer to kiosk');
       channel.send({ type: 'offer', sdp: offer.sdp! });
 
       return true;
@@ -336,30 +363,48 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
             onErrorRef.current?.('통화 연결에 실패했습니다.');
           }
         } else if (msg.type === 'ice-candidate' && 'candidate' in msg) {
-          console.log('[Manager] Received ICE candidate');
+          console.log('[Manager Dashboard] Received ICE candidate');
           if (pc.remoteDescription) {
             await pc.addIceCandidate(msg.candidate);
           } else {
-            console.log('[Manager] Queuing ICE candidate');
+            console.log('[Manager Dashboard] Queuing ICE candidate');
             pendingCandidatesRef.current.push(msg.candidate);
           }
         } else if (msg.type === 'call-ended') {
-          console.log('[Manager] Kiosk ended call');
+          console.log('[Manager Dashboard] Kiosk ended call (kiosk initiated), updating session to ended');
+          console.log('[Manager Dashboard] sessionIdRef.current:', sessionIdRef.current);
+          console.log('[Manager Dashboard] onCallEndedRef.current:', typeof onCallEndedRef.current);
+          // Update database session to ended before cleanup
+          if (sessionIdRef.current) {
+            await fetch('/api/video-sessions', {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                id: sessionIdRef.current,
+                status: 'ended',
+                ended_at: new Date().toISOString(),
+              }),
+            }).catch(err => console.error('[Manager] Failed to update session:', err));
+            console.log('[Manager] Session updated to ended in database');
+          }
+          console.log('[Manager] Calling onCallEndedRef callback...');
           onCallEndedRef.current?.(msg.reason);
+          console.log('[Manager] Calling cleanup...');
           cleanup();
+          console.log('[Manager] Cleanup complete');
         }
       });
 
       // Subscribe and send call-answered signal
       await channel.subscribe();
 
-      console.log('[Manager] 📤 Sending call-answered signal to kiosk');
+      console.log('[Manager Dashboard] 📤 Sending call-answered signal to kiosk');
       channel.send({ type: 'call-answered' });
 
-      console.log('[Manager] answerCall setup complete, waiting for offer from kiosk...');
+      console.log('[Manager Dashboard] answerCall setup complete, waiting for offer from kiosk...');
       return true;
     } catch (error) {
-      console.error('[Manager] Failed to answer call:', error);
+      console.error('[Manager Dashboard] Failed to answer call:', error);
       onErrorRef.current?.('통화에 응답할 수 없습니다. 다시 시도해주세요.');
       cleanup();
       return false;
