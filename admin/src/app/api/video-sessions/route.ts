@@ -28,6 +28,7 @@ export async function GET(request: Request) {
     const status = searchParams.get('status');
     const caller_type = searchParams.get('caller_type');
     const project_id = searchParams.get('project_id');
+    const kiosk_id = searchParams.get('kiosk_id');
 
     const whereClauses: string[] = [];
     const params: unknown[] = [];
@@ -46,6 +47,11 @@ export async function GET(request: Request) {
     if (project_id) {
       whereClauses.push(`project_id = $${paramIndex++}`);
       params.push(project_id);
+    }
+
+    if (kiosk_id) {
+      whereClauses.push(`kiosk_id = $${paramIndex++}`);
+      params.push(kiosk_id);
     }
 
     // If user is not super_admin, filter by their project_id
