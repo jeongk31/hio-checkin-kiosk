@@ -66,18 +66,15 @@ export function VoiceCallProvider({ children, profile }: VoiceCallProviderProps)
 
       // Auto-reset to idle when call ends or fails
       if (status === 'ended' || status === 'failed') {
-        console.log('[Manager Dashboard Context] Call ended/failed, resetting to idle in 1 second');
+        console.log('[Manager Dashboard Context] Call ended/failed, resetting to idle immediately');
         if (durationIntervalRef.current) {
           clearInterval(durationIntervalRef.current);
           durationIntervalRef.current = null;
         }
         callStartTimeRef.current = null;
         
-        // Reset to idle after short delay to allow UI to show end state
-        setTimeout(() => {
-          console.log('[Manager Dashboard Context] Auto-resetting to idle after failed/ended status');
-          resetState();
-        }, 1000);
+        // Reset to idle immediately for instant response
+        resetState();
       }
       
       // Clear timer when idle
@@ -200,8 +197,8 @@ export function VoiceCallProvider({ children, profile }: VoiceCallProviderProps)
       }
     };
 
-    // Poll every 3 seconds for call detection (reduced from 1.5s to prevent DB exhaustion)
-    const interval = setInterval(pollForIncomingCalls, 3000);
+    // Poll every 1.5 seconds for faster call detection
+    const interval = setInterval(pollForIncomingCalls, 1500);
     pollForIncomingCalls(); // Initial poll
 
     return () => {

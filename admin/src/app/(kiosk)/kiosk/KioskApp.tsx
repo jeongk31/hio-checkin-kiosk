@@ -199,7 +199,7 @@ class SignalingChannel {
       } catch (error) {
         console.error('[Signaling] Poll error:', error);
       }
-    }, 500);
+    }, 250); // Poll every 250ms for faster real-time response
   }
 
   async send(payload: SignalingMessage): Promise<void> {
@@ -1539,11 +1539,9 @@ function IncomingCallFromManager({ session, onClose, callStatus, onCallStatusCha
           ended_at: new Date().toISOString(),
         });
         console.log('[IncomingCallFromManager] Database updated');
-        // Cleanup and close after short delay
-        setTimeout(() => {
-          cleanup();
-          onClose();
-        }, 200);
+        // Cleanup and close immediately for instant response
+        cleanup();
+        onClose();
       };
       handleEnd();
     }

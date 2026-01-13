@@ -62,7 +62,7 @@ class SignalingChannel {
       } catch (error) {
         console.error('[Signaling] Poll error:', error);
       }
-    }, 500); // Poll every 500ms
+    }, 250); // Poll every 250ms for faster real-time response
   }
 
   async send(payload: SignalingMessage): Promise<void> {
