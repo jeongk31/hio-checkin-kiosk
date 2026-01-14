@@ -1593,8 +1593,8 @@ function StartScreen({ goToScreen, t, openStaffModal, callProps, isCallTestMode 
           </div>
           {isCallTestMode ? (
             <div className="welcome-message">
-              <h2>고객 서비스 테스트 모드</h2>
-              <p>상단의 &apos;고객 서비스 요청&apos; 버튼을 사용하여 통화 기능을 테스트하세요</p>
+              <h2>{t('calltest_welcome_title')}</h2>
+              <p>{t('calltest_welcome_subtitle')}</p>
             </div>
           ) : (
             <>
