@@ -93,7 +93,7 @@ export async function authenticateWithPMS(
     if (!data.user.allowed_systems.includes('kiosk')) {
       return { 
         success: false, 
-        error: 'User not authorized to access Kiosk system' 
+        error: '키오스크 접근 권한이 없습니다. PMS 관리자에게 문의하세요.' 
       };
     }
 

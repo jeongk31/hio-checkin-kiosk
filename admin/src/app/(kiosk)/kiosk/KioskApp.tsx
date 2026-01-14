@@ -3901,27 +3901,9 @@ function PaymentProcessScreen({
 
 // Checkout Screen
 function CheckoutScreen({ goToScreen, t, openStaffModal, callProps }: { goToScreen: (screen: ScreenName) => void; t: (key: string) => string; openStaffModal: () => void; callProps: CallProps }) {
-  const [countdown, setCountdown] = useState(10);
-
   const handleComplete = () => {
     goToScreen('start');
   };
-
-  // Auto-redirect to home after 10 seconds
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setCountdown((prev) => {
-        if (prev <= 1) {
-          clearInterval(timer);
-          goToScreen('start');
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, [goToScreen]);
 
   return (
     <div className="screen">
@@ -3938,8 +3920,8 @@ function CheckoutScreen({ goToScreen, t, openStaffModal, callProps }: { goToScre
             <p className="thank-you">{t('checkout_final_thanks')}</p>
           </div>
 
-          {/* Complete button and auto-redirect notice */}
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginTop: '32px', gap: '16px' }}>
+          {/* Complete button */}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginTop: '32px' }}>
             <button
               onClick={handleComplete}
               style={{
@@ -3964,9 +3946,6 @@ function CheckoutScreen({ goToScreen, t, openStaffModal, callProps }: { goToScre
             >
               완료
             </button>
-            <p style={{ color: '#666', fontSize: '14px' }}>
-              {countdown}초 후 자동으로 처음 화면으로 돌아갑니다
-            </p>
           </div>
         </div>
       </div>

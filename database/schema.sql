@@ -99,6 +99,7 @@ CREATE TABLE IF NOT EXISTS room_types (
     base_price INTEGER DEFAULT 0,
     max_guests INTEGER DEFAULT 2,
     images JSONB DEFAULT '[]'::jsonb,
+    image_url TEXT,
     is_active BOOLEAN DEFAULT true,
     display_order INTEGER DEFAULT 0,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
