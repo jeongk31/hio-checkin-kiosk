@@ -10,8 +10,30 @@ import {
   EasyCheckPaymentRequest,
 } from '@/lib/easycheck';
 
+// Global flag to stop all polling when unauthorized
+let isUnauthorized = false;
+let redirectTimeout: NodeJS.Timeout | null = null;
+
+function handleUnauthorized() {
+  if (isUnauthorized) {
+    console.log('[Kiosk] Already handling 401, skipping');
+    return; // Already handling
+  }
+  isUnauthorized = true;
+  console.log('[Kiosk] Session expired - stopping all polling');
+  
+  // Only redirect once and only if not already redirecting
+  if (!redirectTimeout && typeof window !== 'undefined') {
+    redirectTimeout = setTimeout(() => {
+      console.log('[Kiosk] Redirecting to login page');
+      window.location.replace('/login?error=session_expired');
+    }, 100);
+  }
+}
+
 // Helper functions to use fetch API for database operations
 async function updateKiosk(kioskId: string, updates: Record<string, unknown>): Promise<boolean> {
+  if (isUnauthorized) return false;
   try {
     const response = await fetch('/api/kiosks', {
       method: 'PUT',
@@ -19,8 +41,8 @@ async function updateKiosk(kioskId: string, updates: Record<string, unknown>): P
       body: JSON.stringify({ id: kioskId, ...updates }),
       credentials: 'include',
     });
-    if (response.status === 401 && typeof window !== 'undefined') {
-      window.location.href = '/login';
+    if (response.status === 401) {
+      handleUnauthorized();
       return false;
     }
     return response.ok;
@@ -37,6 +59,7 @@ async function createVideoSession(data: {
   status: string;
   caller_type: string;
 }): Promise<{ id: string; room_name: string } | null> {
+  if (isUnauthorized) return null;
   try {
     const response = await fetch('/api/video-sessions', {
       method: 'POST',
@@ -47,10 +70,7 @@ async function createVideoSession(data: {
     
     if (response.status === 401) {
       console.error('[Kiosk] Unauthorized: Session expired or invalid');
-      // Redirect to login if session expired
-      if (typeof window !== 'undefined') {
-        window.location.href = '/login';
-      }
+      handleUnauthorized();
       return null;
     }
     
@@ -70,6 +90,7 @@ async function createVideoSession(data: {
 }
 
 async function updateVideoSession(id: string, updates: Record<string, unknown>): Promise<boolean> {
+  if (isUnauthorized) return false;
   try {
     const response = await fetch('/api/video-sessions', {
       method: 'PUT',
@@ -77,8 +98,8 @@ async function updateVideoSession(id: string, updates: Record<string, unknown>):
       body: JSON.stringify({ id, ...updates }),
       credentials: 'include',
     });
-    if (response.status === 401 && typeof window !== 'undefined') {
-      window.location.href = '/login';
+    if (response.status === 401) {
+      handleUnauthorized();
       return false;
     }
     return response.ok;
@@ -90,12 +111,13 @@ async function updateVideoSession(id: string, updates: Record<string, unknown>):
 
 // Helper to poll for control commands
 async function pollControlCommands(): Promise<{ command: string; payload: Record<string, unknown> }[]> {
+  if (isUnauthorized) return [];
   try {
     const response = await fetch('/api/kiosk-control', {
       credentials: 'include',
     });
-    if (response.status === 401 && typeof window !== 'undefined') {
-      window.location.href = '/login';
+    if (response.status === 401) {
+      handleUnauthorized();
       return [];
     }
     if (response.ok) {
@@ -111,12 +133,13 @@ async function pollControlCommands(): Promise<{ command: string; payload: Record
 
 // Helper to poll for incoming calls from manager
 async function pollIncomingCalls(kioskId: string): Promise<{ id: string; room_name: string } | null> {
+  if (isUnauthorized) return null;
   try {
     const response = await fetch(`/api/video-sessions?status=waiting&caller_type=manager&kiosk_id=${kioskId}`, {
       credentials: 'include',
     });
-    if (response.status === 401 && typeof window !== 'undefined') {
-      window.location.href = '/login';
+    if (response.status === 401) {
+      handleUnauthorized();
       return null;
     }
     if (response.ok) {
@@ -133,6 +156,7 @@ async function pollIncomingCalls(kioskId: string): Promise<{ id: string; room_na
 
 // Helper to upload screen frame
 async function uploadScreenFrame(frameData: string): Promise<boolean> {
+  if (isUnauthorized) return false;
   try {
     const response = await fetch('/api/kiosk-screen', {
       method: 'POST',
@@ -140,8 +164,8 @@ async function uploadScreenFrame(frameData: string): Promise<boolean> {
       body: JSON.stringify({ frameData }),
       credentials: 'include',
     });
-    if (response.status === 401 && typeof window !== 'undefined') {
-      window.location.href = '/login';
+    if (response.status === 401) {
+      handleUnauthorized();
       return false;
     }
     return response.ok;
@@ -613,6 +637,13 @@ export default function KioskApp({ kiosk, content, paymentResult, userRole }: Ki
       return;
     }
 
+    // Reset unauthorized flag and timeout on mount (fresh page load = new session)
+    isUnauthorized = false;
+    if (redirectTimeout) {
+      clearTimeout(redirectTimeout);
+      redirectTimeout = null;
+    }
+
     isMountedRef.current = true;
 
     // Clear any pending offline timeout (handles StrictMode remount)
@@ -911,13 +942,15 @@ function TopButtonRow({
   callStatus,
   callDuration,
   onEndCall,
-  isCallActive
+  isCallActive,
+  hideStaffButton
 }: {
   onStaffCall: () => void;
   callStatus?: 'calling' | 'ringing' | 'connecting' | 'connected' | 'ended' | 'failed';
   callDuration?: number;
   onEndCall?: () => void;
   isCallActive?: boolean;
+  hideStaffButton?: boolean;
 }) {
   const formatDuration = (seconds: number): string => {
     const mins = Math.floor(seconds / 60);
@@ -954,9 +987,11 @@ function TopButtonRow({
       )}
 
       {/* Staff call button - right side */}
-      <button className="staff-call-btn" onClick={onStaffCall}>
-        <span>직원 호출</span>
-      </button>
+      {!hideStaffButton && (
+        <button className="staff-call-btn" onClick={onStaffCall}>
+          <span>직원 호출</span>
+        </button>
+      )}
     </div>
   );
 }
@@ -1251,6 +1286,25 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
 
   const handleClose = async () => {
     console.log('[Kiosk StaffCallModal] handleClose called, callStatus:', callStatus);
+    
+    // Update database session status to cancelled if we're still waiting/calling
+    if (sessionId && (callStatus === 'calling' || callStatus === 'ringing')) {
+      console.log('[Kiosk StaffCallModal] Updating session status to cancelled in database');
+      try {
+        await fetch('/api/video-sessions', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: sessionId,
+            status: 'cancelled'
+          })
+        });
+        console.log('[Kiosk StaffCallModal] Session cancelled in database');
+      } catch (err) {
+        console.error('[Kiosk StaffCallModal] Failed to cancel session in database:', err);
+      }
+    }
+    
     // Send end signal if connected
     if (signalingChannelRef.current && (callStatus === 'connected' || callStatus === 'ringing' || callStatus === 'connecting')) {
       console.log('[Kiosk StaffCallModal] Sending call-ended signal to manager');
@@ -1482,6 +1536,12 @@ function IncomingCallFromManager({ session, onClose, callStatus, onCallStatusCha
             } else {
               pendingCandidatesRef.current.push(payload.candidate);
             }
+          } else if (payload.type === 'call-answered') {
+            // Ignore - this is our own signal echoed back
+            console.log('[IncomingCallFromManager] Ignoring echoed call-answered signal');
+          } else if (payload.type === 'answer') {
+            // Ignore - kiosk doesn't expect answer (it sends answer, not receives it)
+            console.log('[IncomingCallFromManager] Ignoring unexpected answer signal');
           } else if (payload.type === 'call-ended') {
             console.log('[IncomingCallFromManager] Call ended by manager');
             setCallStatus('ended');
@@ -1583,19 +1643,34 @@ function NavArrow({
 
 // Start Screen
 function StartScreen({ goToScreen, t, openStaffModal, callProps, isCallTestMode }: { goToScreen: (screen: ScreenName) => void; t: (key: string) => string; openStaffModal: () => void; callProps: CallProps; isCallTestMode?: boolean }) {
+  // Get call test content
+  const callTestSubtitle = t('calltest_welcome_subtitle');
+  
+  // Only show if not the key name itself (means content exists)
+  const showSubtitle = callTestSubtitle && callTestSubtitle !== 'calltest_welcome_subtitle';
+
   return (
     <div className="screen">
       <div className="screen-wrapper">
-        <TopButtonRow onStaffCall={openStaffModal} callStatus={callProps.callStatus} callDuration={callProps.callDuration} onEndCall={callProps.onEndCall} isCallActive={callProps.isCallActive} />
+        <TopButtonRow onStaffCall={openStaffModal} callStatus={callProps.callStatus} callDuration={callProps.callDuration} onEndCall={callProps.onEndCall} isCallActive={callProps.isCallActive} hideStaffButton={isCallTestMode} />
         <div className="container">
           <div className="logo">
             <Image src="/logo.png" alt="HiO" width={200} height={80} className="logo-image" />
           </div>
           {isCallTestMode ? (
-            <div className="welcome-message">
-              <h2>{t('calltest_welcome_title')}</h2>
-              <p>{t('calltest_welcome_subtitle')}</p>
-            </div>
+            <>
+              <div className="menu-buttons">
+                <button className="primary-btn" onClick={openStaffModal} style={{ display: 'flex', alignItems: 'center', gap: '12px', justifyContent: 'center', width: 'auto', minWidth: '240px', maxWidth: '400px' }}>
+                  <div style={{ width: '12px', height: '12px', backgroundColor: '#ef4444', borderRadius: '50%' }} />
+                  직원 호출
+                </button>
+              </div>
+              {showSubtitle && (
+                <div className="welcome-message" style={{ marginTop: '24px' }}>
+                  <p>{callTestSubtitle}</p>
+                </div>
+              )}
+            </>
           ) : (
             <>
               <div className="welcome-message">

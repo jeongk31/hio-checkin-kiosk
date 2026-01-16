@@ -160,19 +160,22 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
     };
 
     pc.onconnectionstatechange = () => {
-      console.log('[Manager] Connection state:', pc.connectionState);
+      console.log('[Manager] Connection state changed to:', pc.connectionState);
+      console.log('[Manager] Current onStatusChangeRef:', typeof onStatusChangeRef.current);
       switch (pc.connectionState) {
         case 'connected':
-          console.log('[Manager] Call connected!');
+          console.log('[Manager] 🟢 Call connected! Calling onStatusChange(connected)...');
           onStatusChangeRef.current?.('connected');
+          console.log('[Manager] 🟢 onStatusChange(connected) called');
           break;
         case 'disconnected':
         case 'failed':
-          console.log('[Manager] Connection failed or disconnected');
+          console.log('[Manager] 🔴 Connection failed or disconnected');
           onErrorRef.current?.('연결이 끊어졌습니다.');
           onStatusChangeRef.current?.('failed');
           break;
         case 'closed':
+          console.log('[Manager] ⚪ Connection closed');
           onStatusChangeRef.current?.('ended');
           break;
       }
@@ -224,12 +227,8 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
         console.log('[Manager] 📥 Received signaling message:', msg.type);
 
         if (msg.type === 'call-answered') {
-          console.log('[Manager] Kiosk acknowledged call-answered, re-sending offer...');
-          if (pc.localDescription?.sdp) {
-            console.log('[Manager] 📤 RE-SENDING SDP offer to kiosk');
-            channel.send({ type: 'offer', sdp: pc.localDescription.sdp });
-          }
-          onStatusChangeRef.current?.('connecting');
+          console.log('[Manager] Kiosk acknowledged call-answered - waiting for answer...');
+          // Don't re-send offer, kiosk already received it and will send answer
         } else if (msg.type === 'answer' && 'sdp' in msg) {
           console.log('[Manager] Received answer, current state:', pc.signalingState);
           // Only set remote description if we're in have-local-offer state
@@ -244,7 +243,7 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
               await pc.addIceCandidate(candidate);
             }
             pendingCandidatesRef.current = [];
-            onStatusChangeRef.current?.('connecting');
+            // Don't set 'connecting' here - let pc.onconnectionstatechange handle status updates
           } catch (err) {
             console.error('[Manager] Error setting remote description:', err);
           }

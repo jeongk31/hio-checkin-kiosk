@@ -60,7 +60,6 @@ const contentSchema: ContentSection[] = [
     title: '통화 테스트 모드 (Call Test)',
     description: '통화 기능 테스트용 키오스크 화면 텍스트',
     fields: [
-      { key: 'calltest_welcome_title', label: '환영 메시지 제목', defaultValue: '고객 서비스 테스트 모드' },
       { key: 'calltest_welcome_subtitle', label: '환영 메시지 설명', defaultValue: '상단의 \'고객 서비스 요청\' 버튼을 사용하여 통화 기능을 테스트하세요' },
     ],
   },
@@ -491,7 +490,9 @@ function ContentField({ field, currentValue, onSave, saving, saved }: ContentFie
 
   const handleChange = (newValue: string) => {
     setValue(newValue);
-    setIsEdited(newValue !== (currentValue ?? field.defaultValue));
+    // Allow saving empty values - compare against current value (or default if no current value exists)
+    const compareValue = currentValue !== undefined ? currentValue : field.defaultValue;
+    setIsEdited(newValue !== compareValue);
   };
 
   const handleSave = () => {

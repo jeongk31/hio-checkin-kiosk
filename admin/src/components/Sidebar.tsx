@@ -33,6 +33,7 @@ export default function Sidebar({ profile }: SidebarProps) {
     { href: '/dashboard', label: '대시보드', icon: '📊' },
     { href: '/dashboard/kiosks', label: '전체 키오스크', icon: '🖥️' },
     { href: '/dashboard/rooms', label: '당일 객실', icon: '🛏️' },
+    { href: '/dashboard/call-history', label: '통화 기록', icon: '📞' },
     { href: '/dashboard/content', label: '문구 편집', icon: '✏️' },
   ];
 
@@ -40,6 +41,7 @@ export default function Sidebar({ profile }: SidebarProps) {
     { href: '/dashboard', label: '대시보드', icon: '📊' },
     { href: '/dashboard/kiosks', label: '키오스크 관리', icon: '🖥️' },
     { href: '/dashboard/rooms', label: '당일 객실', icon: '🛏️' },
+    { href: '/dashboard/call-history', label: '통화 기록', icon: '📞' },
     { href: '/dashboard/content', label: '문구 편집', icon: '✏️' },
   ];
 

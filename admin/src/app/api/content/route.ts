@@ -100,7 +100,7 @@ export async function PUT(request: Request) {
       return NextResponse.json({ error: 'Cannot modify content for other projects' }, { status: 403 });
     }
 
-    if (!id || !contentValue) {
+    if (!id || contentValue === undefined || contentValue === null) {
       return NextResponse.json({ error: 'ID and content value are required' }, { status: 400 });
     }
 

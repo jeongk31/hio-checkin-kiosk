@@ -50,8 +50,12 @@ export function VoiceCallProvider({ children, profile }: VoiceCallProviderProps)
   // Voice call hook
   const voiceCall = useVoiceCall({
     onStatusChange: (status) => {
-      console.log('[Manager Dashboard Context] onStatusChange called:', status);
-      setState((prev) => ({ ...prev, status }));
+      console.log('[Manager Dashboard Context] 📢 onStatusChange called with status:', status);
+      console.log('[Manager Dashboard Context] Current state.status:', state.status);
+      setState((prev) => {
+        console.log('[Manager Dashboard Context] Updating status from', prev.status, 'to', status);
+        return { ...prev, status };
+      });
 
       // Start duration timer when connected
       if (status === 'connected') {
@@ -143,9 +147,11 @@ export function VoiceCallProvider({ children, profile }: VoiceCallProviderProps)
 
   // Use a ref to track status without causing re-subscriptions
   const statusRef = useRef(state.status);
+  const currentSessionRef = useRef(state.currentSession);
   useEffect(() => {
     statusRef.current = state.status;
-  }, [state.status]);
+    currentSessionRef.current = state.currentSession;
+  }, [state.status, state.currentSession]);
 
   // Roles that can receive calls from kiosks
   const VOICE_CALL_ENABLED_ROLES = ['super_admin', 'project_admin', 'manager'];
@@ -174,6 +180,35 @@ export function VoiceCallProvider({ children, profile }: VoiceCallProviderProps)
           const waitingSessions = data.sessions || [];
           
           console.log('[Manager Poll] Current status:', statusRef.current, 'Waiting sessions:', waitingSessions.length);
+          
+          // If we have an incoming call but it's no longer in the waiting list, it was cancelled
+          if (statusRef.current === 'incoming' && currentSessionRef.current) {
+            const stillWaiting = waitingSessions.some((s: any) => s.id === currentSessionRef.current?.id);
+            if (!stillWaiting) {
+              console.log('[Manager Poll] Current incoming call was cancelled, clearing');
+              setState((prev) => ({
+                ...prev,
+                status: 'idle',
+                currentSession: null,
+                kioskInfo: null,
+                error: null,
+              }));
+              return;
+            }
+          }
+          
+          // If status is incoming but no waiting sessions at all, also clear
+          if (statusRef.current === 'incoming' && waitingSessions.length === 0) {
+            console.log('[Manager Poll] No waiting sessions but status is incoming, clearing');
+            setState((prev) => ({
+              ...prev,
+              status: 'idle',
+              currentSession: null,
+              kioskInfo: null,
+              error: null,
+            }));
+            return;
+          }
           
           // Find first waiting session that we haven't already processed
           if (waitingSessions.length > 0 && statusRef.current === 'idle') {

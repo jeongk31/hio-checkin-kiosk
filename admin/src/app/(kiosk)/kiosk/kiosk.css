@@ -333,6 +333,7 @@
 .menu-buttons {
   display: flex;
   flex-direction: row;
+  justify-content: center;
   gap: 16px;
 }
 

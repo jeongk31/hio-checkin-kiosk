@@ -2,10 +2,37 @@
 
 import { useState, useEffect } from 'react';
 import { useRequiredVoiceCallContext } from '@/contexts/VoiceCallContext';
+import { getRingtoneAudio, isAudioUnlocked } from './VoiceCallWrapper';
 
 export default function IncomingCallNotification() {
   const { status, kioskInfo, answerCall, declineCall } = useRequiredVoiceCallContext();
   const [isAnswering, setIsAnswering] = useState(false);
+
+  // Play ringtone when incoming call arrives
+  useEffect(() => {
+    const audio = getRingtoneAudio();
+    
+    if (status === 'incoming' && audio) {
+      // Try to play audio
+      audio.play().catch(err => {
+        console.error('[Ringtone] Audio play failed:', err.message);
+        
+        // If audio fails, try to show browser notification as fallback
+        if ('Notification' in window && Notification.permission === 'granted') {
+          new Notification('📞 키오스크 호출', {
+            body: kioskInfo?.name ? `${kioskInfo.name}에서 호출 중` : '호출이 왔습니다',
+            icon: '/favicon.ico',
+            requireInteraction: true,
+            tag: 'incoming-call',
+          });
+        }
+      });
+    } else if (audio) {
+      // Stop ringtone when call ends or is answered
+      audio.pause();
+      audio.currentTime = 0;
+    }
+  }, [status, kioskInfo]);
 
   // Reset isAnswering when status changes from incoming
   useEffect(() => {

@@ -15,15 +15,6 @@ async function insertCallTestContent() {
     const { rows: projects } = await client.query('SELECT id FROM projects');
     
     for (const project of projects) {
-      // Insert title
-      await client.query(
-        `INSERT INTO kiosk_content (project_id, content_key, content_value, language)
-         VALUES ($1, $2, $3, $4)
-         ON CONFLICT (project_id, content_key, language) 
-         DO UPDATE SET content_value = EXCLUDED.content_value`,
-        [project.id, 'calltest_welcome_title', '고객 서비스 테스트 모드', 'ko']
-      );
-      
       // Insert subtitle
       await client.query(
         `INSERT INTO kiosk_content (project_id, content_key, content_value, language)

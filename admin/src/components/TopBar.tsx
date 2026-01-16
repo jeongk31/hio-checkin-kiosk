@@ -31,6 +31,7 @@ export default function TopBar({ profile }: TopBarProps) {
     // { href: '/dashboard/accounts', label: '계정' },
     { href: '/dashboard/kiosks', label: '키오스크' },
     { href: '/dashboard/rooms', label: '당일 객실' },
+    { href: '/dashboard/call-history', label: '통화 기록' },
     { href: '/dashboard/content', label: '문구' },
   ];
 
@@ -39,6 +40,7 @@ export default function TopBar({ profile }: TopBarProps) {
     { href: '/dashboard/kiosks', label: '키오스크' },
     { href: '/dashboard/rooms', label: '당일 객실' },
     { href: '/dashboard/content', label: '문구' },
+    
     { href: '/dashboard/accounts', label: '계정' },
   ];
 
