@@ -183,7 +183,7 @@ export function VoiceCallProvider({ children, profile }: VoiceCallProviderProps)
           
           // If we have an incoming call but it's no longer in the waiting list, it was cancelled
           if (statusRef.current === 'incoming' && currentSessionRef.current) {
-            const stillWaiting = waitingSessions.some((s: any) => s.id === currentSessionRef.current?.id);
+            const stillWaiting = waitingSessions.some((s: VideoSession) => s.id === currentSessionRef.current?.id);
             if (!stillWaiting) {
               console.log('[Manager Poll] Current incoming call was cancelled, clearing');
               setState((prev) => ({

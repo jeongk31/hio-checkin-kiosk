@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRequiredVoiceCallContext } from '@/contexts/VoiceCallContext';
-import { getRingtoneAudio, isAudioUnlocked } from './VoiceCallWrapper';
+import { getRingtoneAudio } from './VoiceCallWrapper';
 
 export default function IncomingCallNotification() {
   const { status, kioskInfo, answerCall, declineCall } = useRequiredVoiceCallContext();

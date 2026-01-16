@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { VoiceCallProvider } from '@/contexts/VoiceCallContext';
 import IncomingCallNotification from './IncomingCallNotification';
 import ActiveCallOverlay from './ActiveCallOverlay';
