@@ -86,9 +86,19 @@ interface KioskPayload {
 
 /**
  * Validate Authorization header
- * For now, accept any Bearer token - in production, validate against PMS
+ * Accepts either:
+ * - Bearer token from authenticated user
+ * - X-PMS-Secret header matching PMS_SYNC_SECRET env variable
  */
-function validateAuthToken(authHeader: string | null): boolean {
+function validateAuthToken(authHeader: string | null, pmsSecretHeader: string | null): boolean {
+  // Check if PMS sync secret is provided and matches
+  const pmsSecret = process.env.PMS_SYNC_SECRET;
+  if (pmsSecret && pmsSecretHeader === pmsSecret) {
+    console.log('[PMS Sync] Authenticated via PMS_SYNC_SECRET');
+    return true;
+  }
+  
+  // Otherwise, require Bearer token
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return false;
   }
@@ -151,11 +161,13 @@ export async function POST(request: Request) {
   const processedAt = new Date().toISOString();
 
   try {
-    // Validate Authorization header
+    // Validate Authorization or PMS Secret header
     const authHeader = request.headers.get('Authorization');
-    if (!validateAuthToken(authHeader)) {
+    const pmsSecretHeader = request.headers.get('X-PMS-Secret');
+    if (!validateAuthToken(authHeader, pmsSecretHeader)) {
+      console.error('[PMS Sync] Authentication failed - no valid Bearer token or X-PMS-Secret');
       return NextResponse.json(
-        { error: 'Missing or invalid Authorization header' },
+        { error: 'Missing or invalid Authorization header or X-PMS-Secret' },
         { status: 401 }
       );
     }
