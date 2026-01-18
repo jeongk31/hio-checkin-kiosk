@@ -172,6 +172,12 @@ export function VoiceCallProvider({ children, profile }: VoiceCallProviderProps)
     const pollForIncomingCalls = async () => {
       if (!isActive) return;
       
+      // Don't poll for new calls if we're already in a call or transitioning
+      if (statusRef.current !== 'idle' && statusRef.current !== 'incoming') {
+        // Skip polling during active calls, connecting, or ending states
+        return;
+      }
+      
       try {
         // Poll for waiting video sessions
         const response = await fetch('/api/video-sessions?status=waiting&caller_type=kiosk');
@@ -186,13 +192,7 @@ export function VoiceCallProvider({ children, profile }: VoiceCallProviderProps)
             const stillWaiting = waitingSessions.some((s: VideoSession) => s.id === currentSessionRef.current?.id);
             if (!stillWaiting) {
               console.log('[Manager Poll] Current incoming call was cancelled, clearing');
-              setState((prev) => ({
-                ...prev,
-                status: 'idle',
-                currentSession: null,
-                kioskInfo: null,
-                error: null,
-              }));
+              resetState();
               return;
             }
           }
@@ -200,13 +200,7 @@ export function VoiceCallProvider({ children, profile }: VoiceCallProviderProps)
           // If status is incoming but no waiting sessions at all, also clear
           if (statusRef.current === 'incoming' && waitingSessions.length === 0) {
             console.log('[Manager Poll] No waiting sessions but status is incoming, clearing');
-            setState((prev) => ({
-              ...prev,
-              status: 'idle',
-              currentSession: null,
-              kioskInfo: null,
-              error: null,
-            }));
+            resetState();
             return;
           }
           
@@ -392,12 +386,19 @@ export function VoiceCallProvider({ children, profile }: VoiceCallProviderProps)
 
   // End the call
   const endCall = useCallback(async () => {
-    if (!state.currentSession) return;
+    if (!state.currentSession) {
+      console.log('[Manager] No current session to end');
+      return;
+    }
 
-    console.log('[Manager] Ending call, updating session:', state.currentSession.id);
-    // Update session status via API - ensure ended_at is set
+    console.log('[Manager] Ending call, session:', state.currentSession.id);
+    
+    // First send the signal through WebRTC channel (before cleanup)
+    voiceCall.endCall('ended');
+    
+    // Then update database session status
     try {
-      await fetch('/api/video-sessions', {
+      const response = await fetch('/api/video-sessions', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -406,12 +407,17 @@ export function VoiceCallProvider({ children, profile }: VoiceCallProviderProps)
           ended_at: new Date().toISOString(),
         }),
       });
-      console.log('[Manager] Session updated to ended');
+      
+      if (!response.ok) {
+        console.error('[Manager] Failed to update session, status:', response.status);
+      } else {
+        console.log('[Manager] Session updated to ended in database');
+      }
     } catch (error) {
       console.error('[Manager] Failed to update session:', error);
     }
 
-    voiceCall.endCall('ended');
+    // Finally reset local state
     resetState();
   }, [state.currentSession, voiceCall, resetState]);
 

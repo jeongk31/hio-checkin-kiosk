@@ -107,6 +107,8 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
   const channelRef = useRef<SignalingChannel | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
+  const isNegotiatingRef = useRef<boolean>(false);
+  const makingOfferRef = useRef<boolean>(false);
 
   // Request microphone access
   const requestMicrophone = useCallback(async (): Promise<MediaStream | null> => {
@@ -169,8 +171,11 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
           console.log('[Manager] 🟢 onStatusChange(connected) called');
           break;
         case 'disconnected':
+          console.log('[Manager] 🟡 Connection disconnected, attempting reconnect...');
+          onStatusChangeRef.current?.('connecting');
+          break;
         case 'failed':
-          console.log('[Manager] 🔴 Connection failed or disconnected');
+          console.log('[Manager] 🔴 Connection failed');
           onErrorRef.current?.('연결이 끊어졌습니다.');
           onStatusChangeRef.current?.('failed');
           break;
@@ -183,7 +188,10 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
 
     pc.oniceconnectionstatechange = () => {
       console.log('[Manager] ICE connection state:', pc.iceConnectionState);
-      if (pc.iceConnectionState === 'failed') {
+      if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+        console.log('[Manager] ✅ ICE connection established!');
+        onStatusChangeRef.current?.('connected');
+      } else if (pc.iceConnectionState === 'failed') {
         onErrorRef.current?.('네트워크 연결에 실패했습니다. 다시 시도해주세요.');
         onStatusChangeRef.current?.('failed');
       }
@@ -337,7 +345,25 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
 
         if (msg.type === 'offer' && 'sdp' in msg) {
           try {
+            // Check if we can accept an offer right now
+            const currentState = pc.signalingState;
+            console.log('[Manager] Current signaling state:', currentState);
+            
+            // Ignore offer if we're already negotiating or not in a receivable state
+            if (isNegotiatingRef.current) {
+              console.log('[Manager] Already negotiating, ignoring offer');
+              return;
+            }
+            
+            // Only process offer if in stable state
+            if (currentState !== 'stable') {
+              console.log('[Manager] Cannot process offer in state:', currentState, '- ignoring');
+              return;
+            }
+
             console.log('[Manager] Processing offer from kiosk...');
+            isNegotiatingRef.current = true;
+            
             await pc.setRemoteDescription({ type: 'offer', sdp: msg.sdp });
             console.log('[Manager] Remote description set');
 
@@ -357,8 +383,11 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
             channel.send({ type: 'answer', sdp: answer.sdp! });
             console.log('[Manager] 📤 Answer sent to kiosk');
             onStatusChangeRef.current?.('connecting');
+            
+            isNegotiatingRef.current = false;
           } catch (err) {
             console.error('[Manager] Error processing offer:', err);
+            isNegotiatingRef.current = false;
             onErrorRef.current?.('통화 연결에 실패했습니다.');
           }
         } else if (msg.type === 'ice-candidate' && 'candidate' in msg) {
@@ -413,36 +442,53 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
 
   // End the call
   const endCall = useCallback((reason: 'declined' | 'ended' | 'timeout' | 'error' = 'ended') => {
+    console.log('[Manager] endCall called with reason:', reason);
+    
     // Send end signal
-    channelRef.current?.send({ type: 'call-ended', reason });
+    if (channelRef.current && sessionIdRef.current) {
+      console.log('[Manager] Sending call-ended signal');
+      channelRef.current.send({ type: 'call-ended', reason });
+    }
 
     cleanup();
     onStatusChangeRef.current?.('ended');
+    console.log('[Manager] endCall complete');
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Cleanup all resources
   const cleanup = useCallback(() => {
+    console.log('[Manager] cleanup called');
+    
     // Stop local tracks
-    localStreamRef.current?.getTracks().forEach((track) => track.stop());
+    localStreamRef.current?.getTracks().forEach((track) => {
+      track.stop();
+      console.log('[Manager] Stopped local track:', track.kind);
+    });
     localStreamRef.current = null;
 
     // Close peer connection
-    peerConnectionRef.current?.close();
-    peerConnectionRef.current = null;
+    if (peerConnectionRef.current) {
+      peerConnectionRef.current.close();
+      console.log('[Manager] Closed peer connection');
+      peerConnectionRef.current = null;
+    }
 
     // Close channel
     if (channelRef.current) {
       channelRef.current.close();
+      console.log('[Manager] Closed signaling channel');
       channelRef.current = null;
     }
 
-    // Clear pending candidates
+    // Clear pending candidates and refs
     pendingCandidatesRef.current = [];
-
-    // Clear remote stream
     remoteStreamRef.current = null;
     sessionIdRef.current = null;
+    isNegotiatingRef.current = false;
+    makingOfferRef.current = false;
+    
+    console.log('[Manager] cleanup complete');
   }, []);
 
   // Cleanup on unmount
