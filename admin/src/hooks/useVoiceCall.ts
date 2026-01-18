@@ -171,8 +171,10 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
           console.log('[Manager] 🟢 onStatusChange(connected) called');
           break;
         case 'disconnected':
-          console.log('[Manager] 🟡 Connection disconnected, attempting reconnect...');
-          onStatusChangeRef.current?.('connecting');
+          // Don't treat disconnected as reconnecting - WebRTC connections can briefly
+          // go through disconnected during normal ICE negotiation after being connected.
+          // Only truly failed connections will trigger the 'failed' state.
+          console.log('[Manager] 🟡 Connection disconnected (waiting for failed state if permanent)');
           break;
         case 'failed':
           console.log('[Manager] 🔴 Connection failed');
