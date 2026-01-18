@@ -447,6 +447,10 @@ export default function KioskApp({ kiosk, content, paymentResult, userRole }: Ki
   const [adminBusyNotification, setAdminBusyNotification] = useState<string | null>(null);
   // Call button disabled state (for preventing rapid clicks)
   const [isCallButtonDisabled, setIsCallButtonDisabled] = useState(false);
+  
+  // Signaling channel refs (lifted to parent level so closeStaffModal/closeIncomingCall can access them)
+  const staffCallSignalingChannelRef = useRef<SignalingChannel | null>(null);
+  const incomingCallSignalingChannelRef = useRef<SignalingChannel | null>(null);
 
   // Reset amenity selections (called when returning to home)
   const resetAmenities = () => {
@@ -814,6 +818,19 @@ export default function KioskApp({ kiosk, content, paymentResult, userRole }: Ki
   }, [kiosk, isCallButtonDisabled]);
 
   const closeStaffModal = useCallback(async () => {
+    console.log('[Kiosk] closeStaffModal called, callStatus:', staffCallStatus);
+    
+    // Send call-ended signal FIRST if we're in a connected/connecting state
+    if (staffCallSignalingChannelRef.current && (staffCallStatus === 'connected' || staffCallStatus === 'connecting' || staffCallStatus === 'ringing')) {
+      console.log('[Kiosk] Sending call-ended signal to manager before cleanup');
+      try {
+        await staffCallSignalingChannelRef.current.send({ type: 'call-ended', reason: 'ended' });
+        console.log('[Kiosk] Call-ended signal sent successfully');
+      } catch (err) {
+        console.error('[Kiosk] Failed to send call-ended signal:', err);
+      }
+    }
+    
     // Update session status if we have one
     if (currentSessionId) {
       await updateVideoSession(currentSessionId, {
@@ -828,7 +845,7 @@ export default function KioskApp({ kiosk, content, paymentResult, userRole }: Ki
     // Reset call status for next call
     setStaffCallStatus('calling');
     setStaffCallDuration(0);
-  }, [currentSessionId]);
+  }, [currentSessionId, staffCallStatus]);
 
   // Common call props for TopButtonRow in all screens
   // Handler to close incoming call - sets status to 'ended' which triggers cleanup in IncomingCallFromManager
@@ -895,6 +912,7 @@ export default function KioskApp({ kiosk, content, paymentResult, userRole }: Ki
         onCallStatusChange={setStaffCallStatus}
         callDuration={staffCallDuration}
         onCallDurationChange={setStaffCallDuration}
+        signalingChannelRef={staffCallSignalingChannelRef}
       />
       {showIncomingCall && incomingCallSession && (
         <IncomingCallFromManager
@@ -910,6 +928,7 @@ export default function KioskApp({ kiosk, content, paymentResult, userRole }: Ki
           onCallStatusChange={setIncomingCallStatus}
           callDuration={incomingCallDuration}
           onCallDurationChange={setIncomingCallDuration}
+          signalingChannelRef={incomingCallSignalingChannelRef}
         />
       )}
       {/* Admin busy notification */}
@@ -1015,11 +1034,12 @@ interface StaffCallModalProps {
   onCallStatusChange: (status: CallStatus) => void;
   callDuration: number;
   onCallDurationChange: (duration: number) => void;
+  signalingChannelRef: React.MutableRefObject<SignalingChannel | null>;
 }
 
 // Staff Call Modal with WebRTC
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusChange, callDuration, onCallDurationChange }: StaffCallModalProps) {
+function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusChange, callDuration, onCallDurationChange, signalingChannelRef }: StaffCallModalProps) {
   const setCallStatus = onCallStatusChange;
   const setCallDuration = onCallDurationChange;
   const [error, setError] = useState<string | null>(null);
@@ -1027,7 +1047,7 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
-  const signalingChannelRef = useRef<SignalingChannel | null>(null);
+  // signalingChannelRef is passed as a prop from parent
   const durationIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const durationCounterRef = useRef(0);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -1403,10 +1423,11 @@ interface IncomingCallFromManagerProps {
   onCallStatusChange: (status: CallStatus) => void;
   callDuration: number;
   onCallDurationChange: (duration: number) => void;
+  signalingChannelRef: React.MutableRefObject<SignalingChannel | null>;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-function IncomingCallFromManager({ session, onClose, callStatus, onCallStatusChange, callDuration, onCallDurationChange }: IncomingCallFromManagerProps) {
+function IncomingCallFromManager({ session, onClose, callStatus, onCallStatusChange, callDuration, onCallDurationChange, signalingChannelRef }: IncomingCallFromManagerProps) {
   const setCallStatus = onCallStatusChange;
   const setCallDuration = onCallDurationChange;
   // Error state for logging purposes (errors are handled by parent component)
@@ -1417,7 +1438,7 @@ function IncomingCallFromManager({ session, onClose, callStatus, onCallStatusCha
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
-  const signalingChannelRef = useRef<SignalingChannel | null>(null);
+  // signalingChannelRef is passed as a prop from parent
   const durationIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
 
