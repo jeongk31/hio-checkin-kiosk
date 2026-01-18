@@ -759,9 +759,10 @@ export default function KioskApp({ kiosk, content, paymentResult, userRole }: Ki
       });
       if (statusResponse.ok) {
         const statusData = await statusResponse.json();
+        console.log('[Kiosk] Admin availability check:', statusData);
         if (!statusData.available) {
           // Admin is already on a call
-          console.log('[Kiosk] Admin is busy, showing notification');
+          console.log('[Kiosk] Admin is busy (active call), showing notification. Active call:', statusData.activeCall);
           setAdminBusyNotification('현재 다른 통화가 진행 중입니다. 잠시 후 다시 시도해 주세요.');
           setTimeout(() => setAdminBusyNotification(null), 5000);
           setIsCallButtonDisabled(false);
@@ -775,6 +776,8 @@ export default function KioskApp({ kiosk, content, paymentResult, userRole }: Ki
           setIsCallButtonDisabled(false);
           return;
         }
+      } else {
+        console.error('[Kiosk] Status check failed with status:', statusResponse.status);
       }
     } catch (error) {
       console.error('[Kiosk] Failed to check admin availability:', error);
@@ -1114,6 +1117,9 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
           }
         };
 
+        // Track if call was intentionally ended (not a network failure)
+        let callEndedIntentionally = false;
+
         // Handle connection state
         pc.onconnectionstatechange = () => {
           console.log('[Kiosk] Connection state:', pc.connectionState);
@@ -1130,9 +1136,17 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
               break;
             case 'disconnected':
             case 'failed':
-              console.log('[Kiosk] Connection failed or disconnected');
-              setError('연결이 끊어졌습니다');
-              setCallStatus('failed');
+            case 'closed':
+              console.log('[Kiosk] Connection state:', pc.connectionState, 'callEndedIntentionally:', callEndedIntentionally);
+              // Only show error if call wasn't ended intentionally
+              if (!callEndedIntentionally) {
+                console.log('[Kiosk] Connection lost unexpectedly');
+                setError('연결이 끊어졌습니다');
+                setCallStatus('failed');
+              } else {
+                console.log('[Kiosk] Call ended gracefully');
+                // Don't set error or failed status - it was intentional
+              }
               break;
           }
         };
@@ -1155,6 +1169,22 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
             } else {
               pendingCandidatesRef.current.push(payload.candidate);
             }
+          } else if (payload.type === 'call-ended') {
+            console.log('[Kiosk] Call ended by manager, reason:', 'reason' in payload ? payload.reason : 'unknown');
+            callEndedIntentionally = true; // Mark as intentional before cleanup
+            if (timeoutRef.current) {
+              clearTimeout(timeoutRef.current);
+              timeoutRef.current = null;
+            }
+            // Show appropriate message based on reason
+            if ('reason' in payload && payload.reason === 'declined') {
+              setError('관리자가 통화를 거절했습니다.');
+              setCallStatus('failed');
+            } else {
+              // Normal end - no error message
+              setCallStatus('ended');
+            }
+            cleanup();
           } else if (payload.type === 'call-answered') {
             console.log('[Kiosk] Manager answered the call!');
             setCallStatus('connecting');
@@ -1175,18 +1205,6 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
             } else {
               console.warn('[Kiosk] Cannot create offer - wrong signaling state:', pc.signalingState);
             }
-          } else if (payload.type === 'call-ended') {
-            console.log('[Kiosk] Call ended by manager, reason:', 'reason' in payload ? payload.reason : 'unknown');
-            if (timeoutRef.current) {
-              clearTimeout(timeoutRef.current);
-              timeoutRef.current = null;
-            }
-            // Show appropriate message based on reason
-            if ('reason' in payload && payload.reason === 'declined') {
-              setError('관리자가 통화를 거절했습니다.');
-            }
-            setCallStatus('ended');
-            cleanup();
           }
         });
 
@@ -1481,8 +1499,12 @@ function IncomingCallFromManager({ session, onClose, callStatus, onCallStatusCha
           }
         };
 
+        // Track if call was intentionally ended
+        let callEndedIntentionally = false;
+
         // Handle connection state
         pc.onconnectionstatechange = () => {
+          console.log('[IncomingCallFromManager] Connection state:', pc.connectionState);
           if (!isActive) return;
           switch (pc.connectionState) {
             case 'connected':
@@ -1495,7 +1517,14 @@ function IncomingCallFromManager({ session, onClose, callStatus, onCallStatusCha
               break;
             case 'disconnected':
             case 'failed':
-              setCallStatus('failed');
+            case 'closed':
+              // Only show error if call wasn't ended intentionally
+              if (!callEndedIntentionally) {
+                console.log('[IncomingCallFromManager] Connection lost unexpectedly');
+                setCallStatus('failed');
+              } else {
+                console.log('[IncomingCallFromManager] Call ended gracefully');
+              }
               break;
           }
         };
@@ -1544,6 +1573,7 @@ function IncomingCallFromManager({ session, onClose, callStatus, onCallStatusCha
             console.log('[IncomingCallFromManager] Ignoring unexpected answer signal');
           } else if (payload.type === 'call-ended') {
             console.log('[IncomingCallFromManager] Call ended by manager');
+            callEndedIntentionally = true;
             setCallStatus('ended');
             cleanup();
           }

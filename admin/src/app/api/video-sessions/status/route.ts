@@ -30,15 +30,31 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'project_id is required' }, { status: 400 });
     }
 
+    // First, clean up stale sessions that have been "connected" for more than 10 minutes
+    // These are likely zombie sessions from crashed tabs/browsers
+    const cleanupStaleSql = `
+      UPDATE video_sessions
+      SET status = 'ended', ended_at = NOW()
+      WHERE project_id = $1
+        AND status = 'connected'
+        AND started_at < NOW() - INTERVAL '10 minutes'
+        AND ended_at IS NULL
+      RETURNING id
+    `;
+    const cleanedUp = await query<{ id: string }>(cleanupStaleSql, [projectId]);
+    if (cleanedUp.length > 0) {
+      console.log('[Status Check] Cleaned up stale sessions:', cleanedUp.map(s => s.id));
+    }
+
     // Check for active calls (connected status) in this project
-    // Only consider calls from the last 30 minutes to avoid stale sessions
+    // Only consider calls from the last 10 minutes to avoid stale sessions
     // Also exclude sessions that have ended_at timestamp set
     const activeCallSql = `
       SELECT id, kiosk_id, project_id, status, caller_type
       FROM video_sessions
       WHERE project_id = $1
         AND status = 'connected'
-        AND started_at > NOW() - INTERVAL '30 minutes'
+        AND started_at > NOW() - INTERVAL '10 minutes'
         AND ended_at IS NULL
       LIMIT 1
     `;
@@ -68,11 +84,21 @@ export async function GET(request: Request) {
     // Admin is available if there's no active call
     const available = !activeCall;
 
-    return NextResponse.json({
+    const result = {
       available,
       activeCall,
       waitingCalls,
+    };
+
+    console.log('[Status Check] Returning:', {
+      projectId,
+      excludeKioskId,
+      available,
+      activeCallId: activeCall?.id || null,
+      waitingCalls,
     });
+
+    return NextResponse.json(result);
   } catch (error) {
     console.error('Error checking call status:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

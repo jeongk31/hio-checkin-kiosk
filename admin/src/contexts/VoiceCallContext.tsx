@@ -46,6 +46,7 @@ export function VoiceCallProvider({ children, profile }: VoiceCallProviderProps)
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
   const durationIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const callStartTimeRef = useRef<Date | null>(null);
+  const isEndingCallRef = useRef<boolean>(false);
 
   // Voice call hook
   const voiceCall = useVoiceCall({
@@ -95,9 +96,16 @@ export function VoiceCallProvider({ children, profile }: VoiceCallProviderProps)
     },
     onCallEnded: (reason) => {
       console.log('[Manager Dashboard Context] onCallEnded callback invoked with reason:', reason);
-      console.log('[Manager Dashboard Context] resetState function exists:', typeof resetState);
+      console.log('[Manager Dashboard Context] isEndingCallRef.current:', isEndingCallRef.current);
+      
+      // If we're already ending the call from our side, don't reset again
+      if (isEndingCallRef.current) {
+        console.log('[Manager Dashboard Context] Already ending call, skipping resetState');
+        return;
+      }
+      
+      console.log('[Manager Dashboard Context] Kiosk ended call, calling resetState');
       resetState();
-      console.log('[Manager Dashboard Context] resetState called');
     },
     onRemoteStream: (stream) => {
       if (remoteAudioRef.current) {
@@ -126,6 +134,9 @@ export function VoiceCallProvider({ children, profile }: VoiceCallProviderProps)
       callDuration: 0,
       error: null,
     });
+    
+    // Reset the ending flag
+    isEndingCallRef.current = false;
     
     console.log('[Manager Dashboard] State reset to idle, statusRef.current:', statusRef.current);
   }, []);
@@ -187,21 +198,36 @@ export function VoiceCallProvider({ children, profile }: VoiceCallProviderProps)
           
           console.log('[Manager Poll] Current status:', statusRef.current, 'Waiting sessions:', waitingSessions.length);
           
-          // If we have an incoming call but it's no longer in the waiting list, it was cancelled
+          // If we have an incoming call but it's no longer in the waiting list, check if it was cancelled or answered
           if (statusRef.current === 'incoming' && currentSessionRef.current) {
             const stillWaiting = waitingSessions.some((s: VideoSession) => s.id === currentSessionRef.current?.id);
             if (!stillWaiting) {
-              console.log('[Manager Poll] Current incoming call was cancelled, clearing');
-              resetState();
-              return;
+              // Check if the session still exists in database (could be connected/ended)
+              try {
+                const sessionCheck = await fetch(`/api/video-sessions/${currentSessionRef.current.id}`);
+                if (sessionCheck.ok) {
+                  const sessionData = await sessionCheck.json();
+                  if (sessionData.session && sessionData.session.status === 'ended') {
+                    // Session was cancelled/ended, clear state
+                    console.log('[Manager Poll] Current incoming call was cancelled/ended, clearing');
+                    resetState();
+                    return;
+                  }
+                  // Session exists and is connected/connecting, don't clear
+                  console.log('[Manager Poll] Session no longer waiting but still active:', sessionData.session.status);
+                  return;
+                } else {
+                  // Session deleted, clear state
+                  console.log('[Manager Poll] Session not found, clearing');
+                  resetState();
+                  return;
+                }
+              } catch (err) {
+                console.error('[Manager Poll] Error checking session:', err);
+                // Don't clear on error, keep current state
+                return;
+              }
             }
-          }
-          
-          // If status is incoming but no waiting sessions at all, also clear
-          if (statusRef.current === 'incoming' && waitingSessions.length === 0) {
-            console.log('[Manager Poll] No waiting sessions but status is incoming, clearing');
-            resetState();
-            return;
           }
           
           // Find first waiting session that we haven't already processed
@@ -386,23 +412,40 @@ export function VoiceCallProvider({ children, profile }: VoiceCallProviderProps)
 
   // End the call
   const endCall = useCallback(async () => {
-    if (!state.currentSession) {
-      console.log('[Manager] No current session to end');
+    // Log the call stack to see who's calling this
+    console.log('[Manager] endCall called from:');
+    console.trace();
+    
+    // Set flag to prevent double-reset from onCallEnded callback
+    isEndingCallRef.current = true;
+    
+    // ALWAYS send the call-ended signal first, even if we don't have a session reference
+    // This ensures the kiosk knows the call was ended intentionally
+    console.log('[Manager] Sending call-ended signal to peer...');
+    voiceCall.endCall('ended');
+    
+    // Use ref to get the current session (more reliable than state)
+    const session = currentSessionRef.current || state.currentSession;
+    
+    if (!session) {
+      console.log('[Manager] No current session to update in database');
+      console.log('[Manager] state.currentSession:', state.currentSession);
+      console.log('[Manager] currentSessionRef.current:', currentSessionRef.current);
+      console.log('[Manager] Signal sent, now cleaning up...');
+      voiceCall.cleanup();
+      resetState();
       return;
     }
 
-    console.log('[Manager] Ending call, session:', state.currentSession.id);
+    console.log('[Manager] Ending call, session:', session.id);
     
-    // First send the signal through WebRTC channel (before cleanup)
-    voiceCall.endCall('ended');
-    
-    // Then update database session status
+    // Update database session status
     try {
       const response = await fetch('/api/video-sessions', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          id: state.currentSession.id,
+          id: session.id,
           status: 'ended',
           ended_at: new Date().toISOString(),
         }),
