@@ -416,12 +416,6 @@ export function VoiceCallProvider({ children, profile }: VoiceCallProviderProps)
     console.log('[Manager] endCall called from:');
     console.trace();
     
-    // Prevent calling endCall during connecting phase (before actually connected)
-    if (statusRef.current === 'connecting' || statusRef.current === 'incoming' || statusRef.current === 'idle') {
-      console.log('[Manager] Ignoring endCall - not in active call state:', statusRef.current);
-      return;
-    }
-    
     // Set flag to prevent double-reset from onCallEnded callback
     isEndingCallRef.current = true;
     
@@ -468,7 +462,7 @@ export function VoiceCallProvider({ children, profile }: VoiceCallProviderProps)
 
     // Finally reset local state
     resetState();
-  }, [voiceCall, resetState]);
+  }, [state.currentSession, voiceCall, resetState]);
 
   // Store cleanup function in ref to avoid dependency issues
   const voiceCallCleanupRef = useRef(voiceCall.cleanup);
