@@ -86,3 +86,33 @@ export interface CheckinSession {
   started_at: string;
   completed_at: string | null;
 }
+
+// Payment Types
+export type PaymentType = 'credit' | 'debit' | 'cash_receipt' | 'simple_pay';
+export type PaymentStatus = 'pending' | 'approved' | 'cancelled' | 'failed';
+
+export interface PaymentTransaction {
+  id: string;
+  reservation_id: string | null;
+  project_id: string | null;
+  transaction_id: string;
+  amount: number;
+  tax: number;
+  payment_type: PaymentType;
+  status: PaymentStatus;
+  approval_no: string | null;
+  auth_date: string | null;
+  auth_time: string | null;
+  card_no: string | null;
+  card_name: string | null;
+  installment_months: number;
+  error_code: string | null;
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
+  cancelled_at: string | null;
+  // Joined fields
+  reservation_number?: string;
+  room_number?: string;
+  guest_name?: string;
+}
