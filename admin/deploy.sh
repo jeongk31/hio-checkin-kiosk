@@ -21,7 +21,9 @@ docker compose -f docker-compose.prod.yml down
 
 # Pull latest code
 echo "📥 Pulling latest code..."
-git pull origin main
+git fetch origin
+git reset --hard origin/main
+echo "   Current commit: $(git log -1 --oneline)"
 
 # Create uploads directory with proper structure
 echo "📁 Setting up uploads directory..."
@@ -55,9 +57,10 @@ if [ -f "nginx-kiosk.conf" ]; then
     echo "   ✅ Nginx configured to serve uploads directly"
 fi
 
-# Rebuild and restart container
-echo "🏗️  Building and starting container..."
-docker compose -f docker-compose.prod.yml up -d --build
+# Rebuild and restart container WITHOUT CACHE
+echo "🏗️  Building and starting container (no cache)..."
+docker compose -f docker-compose.prod.yml build --no-cache
+docker compose -f docker-compose.prod.yml up -d
 
 # Wait for container to be healthy
 echo "⏳ Waiting for container to be ready..."
