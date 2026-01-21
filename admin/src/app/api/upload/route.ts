@@ -15,8 +15,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Only admins can upload
-    if (!['super_admin', 'admin'].includes(profile.role)) {
+    // Allow uploads for admins and project managers
+    const allowedRoles = ['super_admin', 'admin', 'project_admin', 'team_leader', 'manager'];
+    if (!allowedRoles.includes(profile.role)) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
