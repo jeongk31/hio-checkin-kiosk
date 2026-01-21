@@ -11,14 +11,15 @@ const PMS_AUTH_URL = process.env.PMS_AUTH_URL || 'http://localhost:8000';
 const PMS_TO_KIOSK_ROLE: Record<string, string> = {
   "Super Admin": "super_admin",
   "super_admin": "super_admin",
-  "Master": "super_admin",
-  "master": "super_admin",
+  "Master": "super_admin",  // Legacy support
+  "master": "super_admin",  // Legacy support
   "Team Leader": "project_admin",
   "team_leader": "project_admin",
   "Manager": "project_admin",
   "manager": "project_admin",
   "CLIENT": "project_admin",
   "client": "project_admin",
+  "Client": "project_admin",
   "Project": "project_admin",
   "project": "project_admin",
   "Kiosk": "kiosk",
