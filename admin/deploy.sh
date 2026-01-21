@@ -24,10 +24,13 @@ docker compose -f docker-compose.prod.yml down
 echo "📁 Creating uploads directory..."
 mkdir -p ./uploads/room-images
 
-# Set proper permissions and ownership (1001:1001 = nextjs:nodejs in container)
+# Set proper permissions and ownership
+# Owner: 1001:1001 (nextjs user in container) - can write
+# Others: readable (so Nginx www-data can read)
 echo "🔐 Setting permissions..."
 sudo chown -R 1001:1001 ./uploads
 sudo chmod -R 755 ./uploads
+sudo find ./uploads -type f -exec chmod 644 {} \;
 
 # Pull latest changes
 echo "📥 Pulling latest code..."
