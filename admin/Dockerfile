@@ -44,13 +44,14 @@ RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
 
 # Copy necessary files from builder
-COPY --from=builder /app/public ./public
-COPY --from=builder /app/.next/standalone ./
-COPY --from=builder /app/.next/static ./.next/static
+# Note: Next.js standalone requires public and static folders to be copied manually
+COPY --from=builder --chown=nextjs:nodejs /app/public ./public
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
-# Create uploads directory with proper permissions
-RUN mkdir -p /app/public/uploads && \
-    chown -R nextjs:nodejs /app
+# Create uploads directory structure (will be overridden by volume mount)
+# The volume mount will preserve write permissions via docker-compose
+RUN mkdir -p /app/public/uploads/room-images
 
 USER nextjs
 
@@ -59,4 +60,5 @@ EXPOSE 3000
 ENV PORT 3000
 ENV HOSTNAME "0.0.0.0"
 
+# Next.js standalone server automatically serves public folder
 CMD ["node", "server.js"]
