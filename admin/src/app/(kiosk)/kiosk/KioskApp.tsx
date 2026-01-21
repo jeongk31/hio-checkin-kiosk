@@ -11,6 +11,7 @@ import {
 } from '@/lib/easycheck';
 import { PaymentButton } from '@/components/payment';
 import type { PaymentResult as VtrPaymentResult } from '@/lib/payment';
+import { KeyboardInput } from './VirtualKeyboard';
 
 // Global flag to stop all polling when unauthorized
 let isUnauthorized = false;
@@ -1664,6 +1665,250 @@ function IncomingCallFromManager({ session, onClose, callStatus, onCallStatusCha
   return <audio ref={remoteAudioRef} autoPlay playsInline style={{ display: 'none' }} />;
 }
 
+// OCR Input Field Component with Virtual Keyboard
+function OcrInputField({
+  label,
+  value,
+  onChange,
+  placeholder = '',
+  maxLength,
+  numericOnly = false,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  maxLength?: number;
+  numericOnly?: boolean;
+}) {
+  const [showKeyboard, setShowKeyboard] = useState(false);
+
+  return (
+    <>
+      <div>
+        <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, color: '#64748b', marginBottom: '4px' }}>
+          {label}
+        </label>
+        <input
+          type="text"
+          value={value}
+          onClick={() => setShowKeyboard(true)}
+          readOnly
+          placeholder={placeholder}
+          style={{
+            width: '100%',
+            padding: '10px 14px',
+            fontSize: '16px',
+            border: '1px solid #e2e8f0',
+            borderRadius: '8px',
+            background: 'white',
+            cursor: 'pointer',
+          }}
+        />
+      </div>
+      {showKeyboard && (
+        <div style={{
+          position: 'fixed',
+          bottom: 0,
+          left: 0,
+          right: 0,
+          background: 'white',
+          boxShadow: '0 -4px 20px rgba(0,0,0,0.15)',
+          zIndex: 9999,
+          padding: '16px',
+          borderTopLeftRadius: '20px',
+          borderTopRightRadius: '20px',
+        }}>
+          {/* Header */}
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: '12px',
+            paddingBottom: '12px',
+            borderBottom: '1px solid #e5e7eb',
+          }}>
+            <span style={{ fontSize: '14px', color: '#6b7280', fontWeight: 500 }}>{label}</span>
+            <button
+              onClick={() => setShowKeyboard(false)}
+              style={{
+                background: 'none',
+                border: 'none',
+                fontSize: '24px',
+                color: '#9ca3af',
+                cursor: 'pointer',
+                padding: '4px 8px',
+              }}
+            >
+              ✕
+            </button>
+          </div>
+
+          {/* Input preview */}
+          <div style={{
+            background: '#f3f4f6',
+            borderRadius: '12px',
+            padding: '12px 16px',
+            marginBottom: '12px',
+            minHeight: '48px',
+            display: 'flex',
+            alignItems: 'center',
+          }}>
+            <input
+              type="text"
+              value={value}
+              onChange={(e) => {
+                let val = e.target.value;
+                if (numericOnly) val = val.replace(/[^0-9]/g, '');
+                if (maxLength) val = val.slice(0, maxLength);
+                onChange(val);
+              }}
+              placeholder={placeholder}
+              autoFocus
+              style={{
+                width: '100%',
+                background: 'transparent',
+                border: 'none',
+                fontSize: '20px',
+                fontWeight: 500,
+                outline: 'none',
+                color: '#1f2937',
+              }}
+            />
+            {value && (
+              <button
+                onClick={() => onChange('')}
+                style={{
+                  background: '#e5e7eb',
+                  border: 'none',
+                  borderRadius: '50%',
+                  width: '24px',
+                  height: '24px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  fontSize: '12px',
+                  color: '#6b7280',
+                  flexShrink: 0,
+                }}
+              >
+                ✕
+              </button>
+            )}
+          </div>
+
+          {/* Keyboard */}
+          {numericOnly ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'center' }}>
+              {[['1', '2', '3'], ['4', '5', '6'], ['7', '8', '9'], ['⌫', '0', '완료']].map((row, i) => (
+                <div key={i} style={{ display: 'flex', gap: '8px' }}>
+                  {row.map((key) => (
+                    <button
+                      key={key}
+                      onClick={() => {
+                        if (key === '완료') {
+                          setShowKeyboard(false);
+                        } else if (key === '⌫') {
+                          onChange(value.slice(0, -1));
+                        } else if (!maxLength || value.length < maxLength) {
+                          onChange(value + key);
+                        }
+                      }}
+                      style={{
+                        width: '70px',
+                        height: '50px',
+                        fontSize: key === '완료' ? '14px' : '20px',
+                        fontWeight: 500,
+                        background: key === '완료' ? '#3b82f6' : key === '⌫' ? '#fecaca' : '#f3f4f6',
+                        color: key === '완료' ? 'white' : '#1f2937',
+                        border: 'none',
+                        borderRadius: '8px',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {key}
+                    </button>
+                  ))}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'center' }}>
+              {[
+                ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'],
+                ['ㅂ', 'ㅈ', 'ㄷ', 'ㄱ', 'ㅅ', 'ㅛ', 'ㅕ', 'ㅑ', 'ㅐ', 'ㅔ'],
+                ['ㅁ', 'ㄴ', 'ㅇ', 'ㄹ', 'ㅎ', 'ㅗ', 'ㅓ', 'ㅏ', 'ㅣ'],
+                ['ㅋ', 'ㅌ', 'ㅊ', 'ㅍ', 'ㅠ', 'ㅜ', 'ㅡ', '⌫'],
+              ].map((row, i) => (
+                <div key={i} style={{ display: 'flex', gap: '4px' }}>
+                  {row.map((key) => (
+                    <button
+                      key={key}
+                      onClick={() => {
+                        if (key === '⌫') {
+                          onChange(value.slice(0, -1));
+                        } else {
+                          onChange(value + key);
+                        }
+                      }}
+                      style={{
+                        width: '36px',
+                        height: '44px',
+                        fontSize: '16px',
+                        fontWeight: 500,
+                        background: key === '⌫' ? '#fecaca' : '#f3f4f6',
+                        color: '#1f2937',
+                        border: 'none',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {key}
+                    </button>
+                  ))}
+                </div>
+              ))}
+              <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+                <button
+                  onClick={() => onChange(value + ' ')}
+                  style={{
+                    width: '200px',
+                    height: '44px',
+                    fontSize: '14px',
+                    background: '#e5e7eb',
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  공백
+                </button>
+                <button
+                  onClick={() => setShowKeyboard(false)}
+                  style={{
+                    width: '100px',
+                    height: '44px',
+                    fontSize: '14px',
+                    fontWeight: 500,
+                    background: '#3b82f6',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  완료
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </>
+  );
+}
+
 // Navigation Arrow Component
 function NavArrow({
   direction,
@@ -1832,19 +2077,14 @@ function CheckinReservationScreen({
           <div className="form-container">
             <div className="form-group">
               <label>예약번호</label>
-              <input
-                type="text"
-                className="input-field"
-                placeholder="예약번호를 입력하세요"
+              <KeyboardInput
                 value={reservationNumber}
-                onChange={(e) => handleChange(e.target.value)}
+                onChange={handleChange}
+                placeholder="예약번호를 입력하세요"
+                label="예약번호"
                 disabled={isValidating}
+                error={error || undefined}
               />
-              {error && (
-                <p style={{ color: '#dc2626', marginTop: '8px', fontSize: '14px' }}>
-                  {error}
-                </p>
-              )}
             </div>
           </div>
           <button
@@ -1939,12 +2179,11 @@ function ConsentScreen({
             </div>
             <div className="form-group">
               <label>서명 (이름을 입력해 주세요)</label>
-              <input
-                type="text"
-                className="input-field"
-                placeholder="홍길동"
+              <KeyboardInput
                 value={signature}
-                onChange={(e) => handleSignatureChange(e.target.value)}
+                onChange={handleSignatureChange}
+                placeholder="홍길동"
+                label="서명 (이름)"
               />
             </div>
           </div>
@@ -2572,108 +2811,48 @@ function IDVerificationScreen({
 
               {/* Form Fields */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, color: '#64748b', marginBottom: '4px' }}>
-                    이름
-                  </label>
-                  <input
-                    type="text"
-                    value={editedOcrData.name}
-                    onChange={(e) => setEditedOcrData({ ...editedOcrData, name: e.target.value })}
-                    style={{
-                      width: '100%',
-                      padding: '10px 14px',
-                      fontSize: '16px',
-                      border: '1px solid #e2e8f0',
-                      borderRadius: '8px',
-                      background: 'white',
-                    }}
-                  />
-                </div>
+                <OcrInputField
+                  label="이름"
+                  value={editedOcrData.name}
+                  onChange={(val) => setEditedOcrData({ ...editedOcrData, name: val })}
+                  placeholder="홍길동"
+                />
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, color: '#64748b', marginBottom: '4px' }}>
-                      생년월일
-                    </label>
-                    <input
-                      type="text"
-                      value={editedOcrData.juminNo1}
-                      onChange={(e) => setEditedOcrData({ ...editedOcrData, juminNo1: e.target.value.replace(/[^0-9]/g, '').slice(0, 6) })}
-                      placeholder="YYMMDD"
-                      maxLength={6}
-                      style={{
-                        width: '100%',
-                        padding: '10px 14px',
-                        fontSize: '16px',
-                        border: '1px solid #e2e8f0',
-                        borderRadius: '8px',
-                        background: 'white',
-                      }}
-                    />
-                  </div>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, color: '#64748b', marginBottom: '4px' }}>
-                      주민번호 뒷자리
-                    </label>
-                    <input
-                      type="text"
-                      value={editedOcrData.juminNo2}
-                      onChange={(e) => setEditedOcrData({ ...editedOcrData, juminNo2: e.target.value.replace(/[^0-9]/g, '').slice(0, 7) })}
-                      placeholder="7자리"
-                      maxLength={7}
-                      style={{
-                        width: '100%',
-                        padding: '10px 14px',
-                        fontSize: '16px',
-                        border: '1px solid #e2e8f0',
-                        borderRadius: '8px',
-                        background: 'white',
-                      }}
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, color: '#64748b', marginBottom: '4px' }}>
-                    발급일자
-                  </label>
-                  <input
-                    type="text"
-                    value={editedOcrData.issueDate}
-                    onChange={(e) => setEditedOcrData({ ...editedOcrData, issueDate: e.target.value.replace(/[^0-9]/g, '').slice(0, 8) })}
-                    placeholder="YYYYMMDD"
-                    maxLength={8}
-                    style={{
-                      width: '100%',
-                      padding: '10px 14px',
-                      fontSize: '16px',
-                      border: '1px solid #e2e8f0',
-                      borderRadius: '8px',
-                      background: 'white',
-                    }}
+                  <OcrInputField
+                    label="생년월일"
+                    value={editedOcrData.juminNo1}
+                    onChange={(val) => setEditedOcrData({ ...editedOcrData, juminNo1: val.replace(/[^0-9]/g, '').slice(0, 6) })}
+                    placeholder="YYMMDD"
+                    maxLength={6}
+                    numericOnly
+                  />
+                  <OcrInputField
+                    label="주민번호 뒷자리"
+                    value={editedOcrData.juminNo2}
+                    onChange={(val) => setEditedOcrData({ ...editedOcrData, juminNo2: val.replace(/[^0-9]/g, '').slice(0, 7) })}
+                    placeholder="7자리"
+                    maxLength={7}
+                    numericOnly
                   />
                 </div>
 
+                <OcrInputField
+                  label="발급일자"
+                  value={editedOcrData.issueDate}
+                  onChange={(val) => setEditedOcrData({ ...editedOcrData, issueDate: val.replace(/[^0-9]/g, '').slice(0, 8) })}
+                  placeholder="YYYYMMDD"
+                  maxLength={8}
+                  numericOnly
+                />
+
                 {editedOcrData.idType === '2' && editedOcrData.driverNo && (
-                  <div>
-                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, color: '#64748b', marginBottom: '4px' }}>
-                      운전면허번호
-                    </label>
-                    <input
-                      type="text"
-                      value={editedOcrData.driverNo}
-                      onChange={(e) => setEditedOcrData({ ...editedOcrData, driverNo: e.target.value })}
-                      style={{
-                        width: '100%',
-                        padding: '10px 14px',
-                        fontSize: '16px',
-                        border: '1px solid #e2e8f0',
-                        borderRadius: '8px',
-                        background: 'white',
-                      }}
-                    />
-                  </div>
+                  <OcrInputField
+                    label="운전면허번호"
+                    value={editedOcrData.driverNo}
+                    onChange={(val) => setEditedOcrData({ ...editedOcrData, driverNo: val })}
+                    placeholder="면허번호"
+                  />
                 )}
               </div>
             </div>
