@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import ProjectSelector from '@/components/ProjectSelector';
+import { useUploadProgress } from '@/hooks/useUploadProgress';
 
 interface Project {
   id: string;
@@ -142,7 +143,9 @@ export default function RoomManager({
     description: '',
     imageUrl: '',
   });
-  const [uploadingImage, setUploadingImage] = useState(false);
+
+  // Upload progress hook for image uploads
+  const { isUploading: uploadingImage, progress: uploadProgress, upload: uploadImage, error: uploadError } = useUploadProgress();
 
   // Amenity state
   const [amenities, setAmenities] = useState<Amenity[]>([]);
@@ -718,42 +721,14 @@ export default function RoomManager({
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Validate file type
-    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
-      alert('JPG, PNG, WEBP 이미지만 업로드 가능합니다.');
-      return;
-    }
-
-    // Validate file size (5MB)
-    if (file.size > 5 * 1024 * 1024) {
-      alert('이미지 크기는 5MB 이하여야 합니다.');
-      return;
-    }
-
-    setUploadingImage(true);
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('folder', `room-images/${selectedProjectId}`);
-
-      const response = await fetch('/api/upload', {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Upload failed');
-      }
-
-      const { url: publicUrl } = await response.json();
-
-      setRoomTypeForm({ ...roomTypeForm, imageUrl: publicUrl });
-    } catch (error) {
-      console.error('Error uploading image:', error);
-      alert('이미지 업로드에 실패했습니다.');
-    } finally {
-      setUploadingImage(false);
+    // Use the upload hook with progress tracking (no size limit)
+    const folder = `room-images/${selectedProjectId}`;
+    const url = await uploadImage(file, folder);
+    
+    if (url) {
+      setRoomTypeForm({ ...roomTypeForm, imageUrl: url });
+    } else if (uploadError) {
+      alert(uploadError);
     }
   };
 
@@ -1413,16 +1388,31 @@ export default function RoomManager({
                     />
                     <label
                       htmlFor="room-type-image"
-                      className="cursor-pointer text-blue-600 hover:text-blue-700"
+                      className={`cursor-pointer ${uploadingImage ? '' : 'text-blue-600 hover:text-blue-700'}`}
                     >
                       {uploadingImage ? (
-                        <span className="text-gray-500">업로드 중...</span>
+                        <div className="py-2">
+                          <div className="flex items-center justify-center gap-2 mb-2">
+                            <svg className="animate-spin h-5 w-5 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            <span className="text-gray-700 font-medium">업로드 중... {uploadProgress}%</span>
+                          </div>
+                          <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
+                            <div 
+                              className="bg-blue-600 h-3 rounded-full transition-all duration-300 ease-out"
+                              style={{ width: `${uploadProgress}%` }}
+                            ></div>
+                          </div>
+                          <p className="text-xs text-gray-500 mt-1">대용량 파일도 업로드 가능합니다</p>
+                        </div>
                       ) : (
                         <>
                           <span className="block text-2xl mb-1">📷</span>
                           <span>클릭하여 이미지 업로드</span>
                           <span className="block text-xs text-gray-500 mt-1">
-                            JPG, PNG, WEBP (최대 5MB)
+                            JPG, PNG, WEBP (용량 제한 없음)
                           </span>
                         </>
                       )}

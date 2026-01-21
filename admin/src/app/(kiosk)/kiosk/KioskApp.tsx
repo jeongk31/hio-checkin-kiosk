@@ -2995,27 +2995,7 @@ function HotelInfoScreen({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, selectedRoomTypeId]);
 
-  // Auto-redirect countdown
-  const [countdown, setCountdown] = useState(10);
-
-  useEffect(() => {
-    // Only start countdown when room is assigned successfully
-    if (!loading && assignedRoom && !error) {
-      const timer = setInterval(() => {
-        setCountdown((prev) => {
-          if (prev <= 1) {
-            clearInterval(timer);
-            handleComplete();
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-
-      return () => clearInterval(timer);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, assignedRoom, error]);
+  // No auto-redirect - user must manually click to complete
 
   const handleComplete = () => {
     // Reset amenity selections
@@ -3158,11 +3138,8 @@ function HotelInfoScreen({
                 minWidth: '200px',
               }}
             >
-              완료 ({countdown}초)
+              완료
             </button>
-            <p style={{ marginTop: '12px', fontSize: '14px', color: '#6b7280' }}>
-              {countdown}초 후 자동으로 처음 화면으로 돌아갑니다
-            </p>
           </div>
         </div>
       </div>
@@ -3214,6 +3191,9 @@ function RoomSelectionScreen({
         const typesData = await typesRes.json();
         const roomsData = await roomsRes.json();
 
+        console.log('[Kiosk] Room types data:', typesData);
+        console.log('[Kiosk] Available rooms data:', roomsData);
+
         setRoomTypes(typesData.roomTypes || []);
 
         // Count available rooms by type (rooms with status='available')
@@ -3224,6 +3204,7 @@ function RoomSelectionScreen({
           }
         });
         setAvailableCounts(counts);
+        console.log('[Kiosk] Available counts:', counts);
       } catch (error) {
         console.error('Error fetching room data:', error);
       } finally {
@@ -3236,6 +3217,12 @@ function RoomSelectionScreen({
 
   // Filter room types that have available rooms
   const availableRoomTypes = roomTypes.filter(rt => (availableCounts[rt.id] || 0) > 0);
+  
+  useEffect(() => {
+    console.log('[Kiosk] Total room types:', roomTypes.length);
+    console.log('[Kiosk] Available room types:', availableRoomTypes.length);
+    console.log('[Kiosk] Available room types:', availableRoomTypes);
+  }, [roomTypes, availableRoomTypes]);
 
   // Check scroll state
   const updateScrollState = useCallback(() => {
@@ -3381,9 +3368,29 @@ function RoomSelectionScreen({
                       className={`room-grid-card ${selected === roomType.id ? 'selected' : ''}`}
                       onClick={() => handleSelectRoom(roomType.id)}
                     >
-                      {roomType.image_url ? (
+                      {roomType.image_url && roomType.image_url.trim() !== '' ? (
                         <div className="room-grid-image">
-                          <img src={roomType.image_url} alt={roomType.name} />
+                          <img 
+                            src={roomType.image_url} 
+                            alt={roomType.name}
+                            onError={(e) => {
+                              console.error('Image load error for', roomType.name, ':', roomType.image_url);
+                              // Hide broken image and show placeholder instead
+                              e.currentTarget.style.display = 'none';
+                              const parent = e.currentTarget.parentElement;
+                              const placeholder = parent?.querySelector('.placeholder');
+                              if (placeholder && placeholder instanceof HTMLElement) {
+                                placeholder.style.display = 'flex';
+                              }
+                            }}
+                          />
+                          <div className="room-grid-image placeholder" style={{ display: 'none' }}>
+                            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                              <rect x="3" y="3" width="18" height="18" rx="2" />
+                              <circle cx="8.5" cy="8.5" r="1.5" />
+                              <path d="M21 15l-5-5L5 21" />
+                            </svg>
+                          </div>
                         </div>
                       ) : (
                         <div className="room-grid-image placeholder">

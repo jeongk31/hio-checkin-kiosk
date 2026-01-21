@@ -5,7 +5,7 @@ import path from 'path';
 
 // Upload directory configuration
 const UPLOAD_DIR = path.join(process.cwd(), 'public', 'uploads');
-const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
+// No file size limit - allow large images
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 
 export async function POST(request: NextRequest) {
@@ -36,13 +36,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Validate file size
-    if (file.size > MAX_FILE_SIZE) {
-      return NextResponse.json(
-        { error: 'File too large. Maximum size is 5MB.' },
-        { status: 400 }
-      );
-    }
+    // No file size limit - allow large images for kiosk display
 
     // Create upload directory if it doesn't exist
     const targetDir = path.join(UPLOAD_DIR, folder);
