@@ -36,6 +36,9 @@ services:
       - FACE_CLIENT_SECRET=${FACE_CLIENT_SECRET}
     env_file:
       - .env
+    volumes:
+      # Persist uploaded images
+      - ./uploads:/app/public/uploads
     networks:
       - app-network
     healthcheck:

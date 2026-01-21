@@ -33,6 +33,9 @@ services:
       - FACE_CLIENT_SECRET=${FACE_CLIENT_SECRET}
     env_file:
       - .env
+    volumes:
+      # Persist uploaded images across container restarts
+      - ./uploads:/app/public/uploads
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/"]
       interval: 30s
