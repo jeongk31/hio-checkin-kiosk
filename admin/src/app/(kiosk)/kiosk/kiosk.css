@@ -12,22 +12,44 @@
   --primary-light: #e8f2ff;
   --primary: #3182f6;
   --danger: #f04452;
+  
+  /* Responsive container width */
+  --kiosk-content-width: min(1600px, calc(100vw - 80px));
 }
 
-/* Kiosk App Container - Optimized for 2000x1200 tablet */
+/* Kiosk App Container - Responsive for multiple display sizes:
+   - 10.61" tablet: 2000x1200
+   - 19" display: ~1440x900 or 1280x1024
+   - 21.5" display: 1920x1080
+*/
 .kiosk-app {
+  min-height: 100vh;
   height: 100vh;
   max-height: 100vh;
   overflow: hidden;
   background: var(--gray-50);
   padding: 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
 }
 
-/* Profile Info (Top Left) */
+/* Center wrapper - ensures content is horizontally and vertically centered */
+.kiosk-center-wrapper {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+/* Profile Info (Top Left - Responsive positioning) */
 .profile-info {
   position: fixed;
   top: 32px;
-  left: calc(50% - 780px);
+  left: 40px;
   display: flex;
   align-items: center;
   gap: 16px;
@@ -36,6 +58,13 @@
   border-radius: 14px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
   z-index: 1000;
+}
+
+/* For larger screens, position profile relative to content */
+@media (min-width: 1700px) {
+  .profile-info {
+    left: calc(50% - 780px);
+  }
 }
 
 .profile-name {
@@ -71,10 +100,11 @@
   cursor: not-allowed;
 }
 
-/* 화면 컨테이너 */
+/* 화면 컨테이너 - Centered and responsive */
 .screen {
   padding: 12px 32px;
   animation: fadeIn 0.3s ease;
+  width: 100%;
   height: 100vh;
   max-height: 100vh;
   overflow: hidden;
@@ -82,16 +112,19 @@
   align-items: flex-start;
   justify-content: center;
   padding-top: 20px;
+  box-sizing: border-box;
 }
 
-/* 화면 내부 래퍼 (staff call + container) */
+/* 화면 내부 래퍼 (staff call + container) - Responsive width */
 .screen-wrapper {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: 8px;
-  width: 1600px;
+  width: var(--kiosk-content-width);
+  max-width: 1600px;
   max-height: calc(100vh - 60px);
+  margin: 0 auto;
 }
 
 /* Top Button Row - call indicator (left) + staff button (right) */
@@ -191,7 +224,8 @@
 }
 
 .container {
-  width: 1600px;
+  width: var(--kiosk-content-width);
+  max-width: 1600px;
   background: white;
   border-radius: 28px;
   padding: 20px 80px 20px;
@@ -199,6 +233,20 @@
   position: relative;
   max-height: calc(100vh - 100px);
   overflow: visible;
+  box-sizing: border-box;
+}
+
+/* Adjust padding for smaller screens */
+@media (max-width: 1400px) {
+  .container {
+    padding: 20px 40px 20px;
+  }
+}
+
+@media (max-width: 1100px) {
+  .container {
+    padding: 16px 24px 16px;
+  }
 }
 
 /* Arrow Navigation */
@@ -233,6 +281,32 @@
 
 .nav-arrow.right {
   right: -80px;
+}
+
+/* Adjust arrow positions for smaller screens */
+@media (max-width: 1600px) {
+  .nav-arrow.left {
+    left: -60px;
+  }
+  
+  .nav-arrow.right {
+    right: -60px;
+  }
+}
+
+@media (max-width: 1200px) {
+  .nav-arrow.left {
+    left: -50px;
+  }
+  
+  .nav-arrow.right {
+    right: -50px;
+  }
+  
+  .nav-arrow svg {
+    width: 48px;
+    height: 48px;
+  }
 }
 
 .nav-arrow svg {
@@ -1586,14 +1660,21 @@
   margin: 12px 0;
 }
 
-/* 반응형 - 2000x1200 tablet optimized */
-@media (min-width: 1800px) {
-  .screen-wrapper {
-    width: 1700px;
-  }
+/* ================================
+   RESPONSIVE MEDIA QUERIES
+   Optimized for 3 display sizes:
+   - 10.61" tablet: 2000x1200
+   - 19" display: 1440x900 or 1280x1024
+   - 21.5" display: 1920x1080
+   ================================ */
 
+/* Extra large screens (2000px+, 10.61" tablet at 2000x1200) */
+@media (min-width: 1800px) {
+  :root {
+    --kiosk-content-width: 1700px;
+  }
+  
   .container {
-    width: 1700px;
     padding: 24px 100px;
   }
 
@@ -1606,44 +1687,54 @@
   }
 }
 
-@media (max-width: 1700px) {
-  .screen-wrapper {
-    width: 1400px;
+/* Large screens (1920px, 21.5" display at 1920x1080) */
+@media (min-width: 1700px) and (max-width: 1799px) {
+  :root {
+    --kiosk-content-width: 1500px;
   }
-
+  
   .container {
-    width: 1400px;
-    padding: 20px 70px;
+    padding: 20px 80px;
   }
 }
 
-@media (max-width: 1500px) {
-  .screen-wrapper {
-    width: 1200px;
+/* Medium-large screens (1440px, 19" display) */
+@media (min-width: 1400px) and (max-width: 1699px) {
+  :root {
+    --kiosk-content-width: 1280px;
   }
-
+  
   .container {
-    width: 1200px;
     padding: 20px 60px;
   }
+  
+  .profile-info {
+    left: 32px;
+  }
 }
 
-@media (max-width: 1300px) {
-  .screen-wrapper {
-    width: 1000px;
+/* Medium screens (1280px, 19" display at lower res) */
+@media (min-width: 1200px) and (max-width: 1399px) {
+  :root {
+    --kiosk-content-width: 1100px;
   }
-
+  
   .container {
-    width: 1000px;
-    padding: 20px 50px;
+    padding: 18px 50px;
   }
-
+  
+  .profile-info {
+    left: 24px;
+    padding: 10px 16px;
+    gap: 12px;
+  }
+  
   .nav-arrow.left {
-    left: -70px;
+    left: -60px;
   }
 
   .nav-arrow.right {
-    right: -70px;
+    right: -60px;
   }
 
   .nav-arrow svg {
@@ -1652,28 +1743,125 @@
   }
 }
 
-@media (max-width: 1100px) {
-  .screen-wrapper {
-    width: 100%;
-    max-width: 800px;
+/* Smaller screens (below 1200px) */
+@media (max-width: 1199px) {
+  :root {
+    --kiosk-content-width: calc(100vw - 60px);
   }
-
+  
+  .screen {
+    padding: 12px 20px;
+  }
+  
   .container {
-    width: 100%;
-    padding: 20px 40px;
+    padding: 16px 32px;
     border-radius: 20px;
   }
-
+  
+  .profile-info {
+    left: 16px;
+    top: 16px;
+    padding: 8px 12px;
+    gap: 10px;
+    border-radius: 10px;
+  }
+  
+  .profile-name {
+    font-size: 14px;
+    max-width: 140px;
+  }
+  
+  .logout-btn {
+    padding: 8px 12px;
+    font-size: 13px;
+  }
+  
   .nav-arrow.left {
-    left: -50px;
+    left: -40px;
   }
 
   .nav-arrow.right {
-    right: -50px;
+    right: -40px;
   }
 
   .nav-arrow svg {
     width: 40px;
     height: 40px;
+  }
+  
+  .nav-arrow span {
+    font-size: 14px;
+  }
+}
+
+/* Very small screens or portrait orientation */
+@media (max-width: 1024px) {
+  :root {
+    --kiosk-content-width: calc(100vw - 40px);
+  }
+  
+  .kiosk-app {
+    padding: 12px;
+  }
+  
+  .screen {
+    padding: 8px 12px;
+    padding-top: 12px;
+  }
+  
+  .container {
+    padding: 12px 20px;
+    border-radius: 16px;
+  }
+  
+  .staff-call-btn {
+    padding: 10px 14px;
+    font-size: 14px;
+    border-radius: 10px;
+  }
+  
+  /* Hide navigation arrows on very small screens, use buttons instead */
+  .nav-arrow {
+    display: none;
+  }
+}
+
+/* Height-based adjustments for landscape vs portrait */
+@media (max-height: 900px) {
+  .kiosk-app {
+    padding: 16px;
+  }
+  
+  .screen {
+    padding-top: 12px;
+  }
+  
+  .screen-wrapper {
+    max-height: calc(100vh - 40px);
+    gap: 4px;
+  }
+  
+  .container {
+    max-height: calc(100vh - 80px);
+  }
+  
+  .logo-image {
+    height: 50px;
+  }
+}
+
+@media (max-height: 768px) {
+  .logo-image {
+    height: 40px;
+  }
+  
+  .screen-wrapper {
+    max-height: calc(100vh - 32px);
+  }
+  
+  .container {
+    max-height: calc(100vh - 60px);
+    padding-top: 12px;
+    padding-bottom: 12px;
   }
 }

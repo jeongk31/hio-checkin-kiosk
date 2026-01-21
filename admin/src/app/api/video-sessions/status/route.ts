@@ -2,6 +2,8 @@ import { query } from '@/lib/db';
 import { getCurrentProfile } from '@/lib/auth';
 import { NextResponse } from 'next/server';
 
+export const dynamic = 'force-dynamic';
+
 interface VideoSession {
   id: string;
   kiosk_id: string;

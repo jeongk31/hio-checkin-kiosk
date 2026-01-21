@@ -7,7 +7,9 @@ export default function KioskLayout({
 }) {
   return (
     <div className="kiosk-app">
-      {children}
+      <div className="kiosk-center-wrapper">
+        {children}
+      </div>
     </div>
   );
 }

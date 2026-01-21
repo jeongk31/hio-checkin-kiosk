@@ -2,6 +2,8 @@ import { getCurrentProfile } from '@/lib/auth';
 import { query } from '@/lib/db';
 import { NextResponse } from 'next/server';
 
+export const dynamic = 'force-dynamic';
+
 interface Project {
   id: string;
   name: string;

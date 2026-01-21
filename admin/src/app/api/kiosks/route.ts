@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentProfile } from '@/lib/auth';
 import { query } from '@/lib/db';
 
+export const dynamic = 'force-dynamic';
+
 interface KioskRow {
   id: string;
   name: string;
