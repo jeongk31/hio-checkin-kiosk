@@ -318,6 +318,35 @@ const defaultContent: Record<string, string> = {
   // Walk-in
   walkin_title: '현장예약',
   walkin_room_description: '원하시는 객실을 선택해 주신 후 다음을 눌러주세요',
+  // Button Texts
+  btn_next: '다음',
+  btn_prev: '이전',
+  btn_complete: '완료',
+  btn_confirm: '확인',
+  btn_cancel: '취소',
+  btn_close: '닫기',
+  btn_retry: '다시 시도',
+  btn_retake: '다시 촬영',
+  btn_start_verification: '신분증 인증 시작',
+  btn_checkin: '예약 확인',
+  btn_walkin: '현장예약',
+  btn_checkout: '체크아웃',
+  btn_staff_call: '고객 서비스 요청',
+  btn_agree_terms: '위 약관에 동의합니다 (필수)',
+  btn_validating: '확인 중...',
+  btn_processing: '처리 중...',
+  btn_card_payment: '카드 결제',
+  btn_tablet_payment: '태블릿 결제',
+  btn_cash_payment: '현금 결제',
+  btn_free_stay: '무료 숙박',
+  // Input Labels & Placeholders
+  label_reservation_number: '예약번호',
+  placeholder_reservation_number: '예약번호를 입력하세요',
+  label_signature: '서명 (이름을 입력해 주세요)',
+  placeholder_signature: '홍길동',
+  label_guest_count: '인원',
+  label_room_type: '객실 타입',
+  label_room_price: '가격',
 };
 
 // Helper to get content with fallback
@@ -916,6 +945,7 @@ export default function KioskApp({ kiosk, content, paymentResult, userRole }: Ki
         callDuration={staffCallDuration}
         onCallDurationChange={setStaffCallDuration}
         signalingChannelRef={staffCallSignalingChannelRef}
+        t={t}
       />
       {showIncomingCall && incomingCallSession && (
         <IncomingCallFromManager
@@ -1038,11 +1068,12 @@ interface StaffCallModalProps {
   callDuration: number;
   onCallDurationChange: (duration: number) => void;
   signalingChannelRef: React.MutableRefObject<SignalingChannel | null>;
+  t: (key: string) => string;
 }
 
 // Staff Call Modal with WebRTC
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusChange, callDuration, onCallDurationChange, signalingChannelRef }: StaffCallModalProps) {
+function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusChange, callDuration, onCallDurationChange, signalingChannelRef, t }: StaffCallModalProps) {
   const setCallStatus = onCallStatusChange;
   const setCallDuration = onCallDurationChange;
   const [error, setError] = useState<string | null>(null);
@@ -1409,7 +1440,7 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
         </div>
         <div className="modal-footer" style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
           <button className="danger-btn" onClick={handleClose}>
-            {(callStatus === 'ended' || callStatus === 'failed') ? '닫기' : '취소'}
+            {(callStatus === 'ended' || callStatus === 'failed') ? t('btn_close') : t('btn_cancel')}
           </button>
         </div>
       </div>
@@ -1960,7 +1991,7 @@ function StartScreen({ goToScreen, t, openStaffModal, callProps, isCallTestMode 
               <div className="menu-buttons">
                 <button className="primary-btn" onClick={openStaffModal} style={{ display: 'flex', alignItems: 'center', gap: '12px', justifyContent: 'center', width: 'auto', minWidth: '240px', maxWidth: '400px' }}>
                   <div style={{ width: '12px', height: '12px', backgroundColor: '#ef4444', borderRadius: '50%' }} />
-                  직원 호출
+                  {t('btn_staff_call')}
                 </button>
               </div>
               {showSubtitle && (
@@ -1980,13 +2011,13 @@ function StartScreen({ goToScreen, t, openStaffModal, callProps, isCallTestMode 
               </div>
               <div className="menu-buttons">
                 <button className="primary-btn large" onClick={() => goToScreen('checkin-reservation')}>
-                  체크인
+                  {t('btn_checkin')}
                 </button>
                 <button className="primary-btn large" onClick={() => goToScreen('room-selection')}>
-                  예약없이 방문
+                  {t('btn_walkin')}
                 </button>
                 <button className="primary-btn large" onClick={() => goToScreen('checkout')}>
-                  체크아웃
+                  {t('btn_checkout')}
                 </button>
               </div>
             </>
@@ -2066,7 +2097,7 @@ function CheckinReservationScreen({
       <div className="screen-wrapper">
         <TopButtonRow onStaffCall={openStaffModal} callStatus={callProps.callStatus} callDuration={callProps.callDuration} onEndCall={callProps.onEndCall} isCallActive={callProps.isCallActive} />
         <div className="container">
-          <NavArrow direction="left" label="이전" onClick={() => goToScreen('start')} disabled={isValidating} />
+          <NavArrow direction="left" label={t('btn_prev')} onClick={() => goToScreen('start')} disabled={isValidating} />
           <div className="logo">
             <Image src="/logo.png" alt="HiO" width={200} height={80} className="logo-image" />
           </div>
@@ -2076,12 +2107,12 @@ function CheckinReservationScreen({
           </p>
           <div className="form-container">
             <div className="form-group">
-              <label>예약번호</label>
+              <label>{t('label_reservation_number')}</label>
               <KeyboardInput
                 value={reservationNumber}
                 onChange={handleChange}
-                placeholder="예약번호를 입력하세요"
-                label="예약번호"
+                placeholder={t('placeholder_reservation_number')}
+                label={t('label_reservation_number')}
                 disabled={isValidating}
                 error={error || undefined}
               />
@@ -2092,7 +2123,7 @@ function CheckinReservationScreen({
             onClick={handleNext}
             disabled={!reservationNumber.trim() || isValidating}
           >
-            {isValidating ? '확인 중...' : '다음'}
+            {isValidating ? t('btn_validating') : t('btn_next')}
           </button>
         </div>
       </div>
@@ -2174,16 +2205,16 @@ function ConsentScreen({
                   checked={agreed}
                   onChange={(e) => handleAgreedChange(e.target.checked)}
                 />
-                위 약관에 동의합니다 (필수)
+                {t('btn_agree_terms')}
               </label>
             </div>
             <div className="form-group">
-              <label>서명 (이름을 입력해 주세요)</label>
+              <label>{t('label_signature')}</label>
               <KeyboardInput
                 value={signature}
                 onChange={handleSignatureChange}
-                placeholder="홍길동"
-                label="서명 (이름)"
+                placeholder={t('placeholder_signature')}
+                label={t('label_signature')}
               />
             </div>
           </div>
@@ -2192,7 +2223,7 @@ function ConsentScreen({
             onClick={handleNext}
             disabled={!agreed || !signature.trim()}
           >
-            다음
+            {t('btn_next')}
           </button>
         </div>
       </div>
