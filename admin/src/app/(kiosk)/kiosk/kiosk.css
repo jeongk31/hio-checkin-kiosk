@@ -100,9 +100,9 @@
   cursor: not-allowed;
 }
 
-/* 화면 컨테이너 - Centered and responsive */
+/* 화면 컨테이너 - Centered and responsive with arrow spacing */
 .screen {
-  padding: 12px 32px;
+  padding: 12px 120px;
   animation: fadeIn 0.3s ease;
   width: 100%;
   height: 100vh;
@@ -125,6 +125,7 @@
   max-width: 1600px;
   max-height: calc(100vh - 60px);
   margin: 0 auto;
+  position: relative;
 }
 
 /* Top Button Row - call indicator (left) + staff button (right) */
@@ -249,7 +250,7 @@
   }
 }
 
-/* Arrow Navigation */
+/* Arrow Navigation - Positioned relative to container with guaranteed visibility */
 .nav-arrow {
   position: absolute;
   top: 50%;
@@ -261,7 +262,7 @@
   flex-direction: column;
   align-items: center;
   gap: 8px;
-  padding: 16px;
+  padding: 12px;
   transition: all 0.2s ease;
   z-index: 10;
 }
@@ -275,38 +276,33 @@
   cursor: not-allowed;
 }
 
+/* Default positioning - always visible with consistent spacing */
 .nav-arrow.left {
-  left: -80px;
+  left: -100px;
 }
 
 .nav-arrow.right {
-  right: -80px;
+  right: -100px;
 }
 
-/* Adjust arrow positions for smaller screens */
-@media (max-width: 1600px) {
-  .nav-arrow.left {
-    left: -60px;
-  }
-  
-  .nav-arrow.right {
-    right: -60px;
-  }
+.nav-arrow svg {
+  width: 64px;
+  height: 64px;
+  color: var(--gray-400);
 }
 
-@media (max-width: 1200px) {
-  .nav-arrow.left {
-    left: -50px;
-  }
-  
-  .nav-arrow.right {
-    right: -50px;
-  }
-  
-  .nav-arrow svg {
-    width: 48px;
-    height: 48px;
-  }
+.nav-arrow:hover svg {
+  color: var(--primary);
+}
+
+.nav-arrow span {
+  font-size: 16px;
+  color: var(--gray-400);
+  font-weight: 500;
+}
+
+.nav-arrow:hover span {
+  color: var(--primary);
 }
 
 .nav-arrow svg {
@@ -1674,6 +1670,10 @@
     --kiosk-content-width: 1700px;
   }
   
+  .screen {
+    padding: 12px 120px;
+  }
+  
   .container {
     padding: 24px 100px;
   }
@@ -1693,8 +1693,20 @@
     --kiosk-content-width: 1500px;
   }
   
+  .screen {
+    padding: 12px 120px;
+  }
+  
   .container {
     padding: 20px 80px;
+  }
+  
+  .nav-arrow.left {
+    left: -100px;
+  }
+
+  .nav-arrow.right {
+    right: -100px;
   }
 }
 
@@ -1704,6 +1716,10 @@
     --kiosk-content-width: 1280px;
   }
   
+  .screen {
+    padding: 12px 100px;
+  }
+  
   .container {
     padding: 20px 60px;
   }
@@ -1711,12 +1727,24 @@
   .profile-info {
     left: 32px;
   }
+  
+  .nav-arrow.left {
+    left: -90px;
+  }
+
+  .nav-arrow.right {
+    right: -90px;
+  }
 }
 
 /* Medium screens (1280px, 19" display at lower res) */
 @media (min-width: 1200px) and (max-width: 1399px) {
   :root {
     --kiosk-content-width: 1100px;
+  }
+  
+  .screen {
+    padding: 12px 80px;
   }
   
   .container {
@@ -1730,27 +1758,27 @@
   }
   
   .nav-arrow.left {
-    left: -60px;
+    left: -70px;
   }
 
   .nav-arrow.right {
-    right: -60px;
+    right: -70px;
   }
 
   .nav-arrow svg {
-    width: 48px;
-    height: 48px;
+    width: 52px;
+    height: 52px;
   }
 }
 
 /* Smaller screens (below 1200px) */
 @media (max-width: 1199px) {
   :root {
-    --kiosk-content-width: calc(100vw - 60px);
+    --kiosk-content-width: calc(100vw - 140px);
   }
   
   .screen {
-    padding: 12px 20px;
+    padding: 12px 70px;
   }
   
   .container {
@@ -1777,16 +1805,16 @@
   }
   
   .nav-arrow.left {
-    left: -40px;
+    left: -60px;
   }
 
   .nav-arrow.right {
-    right: -40px;
+    right: -60px;
   }
 
   .nav-arrow svg {
-    width: 40px;
-    height: 40px;
+    width: 44px;
+    height: 44px;
   }
   
   .nav-arrow span {
@@ -1797,7 +1825,7 @@
 /* Very small screens or portrait orientation */
 @media (max-width: 1024px) {
   :root {
-    --kiosk-content-width: calc(100vw - 40px);
+    --kiosk-content-width: calc(100vw - 120px);
   }
   
   .kiosk-app {
@@ -1805,7 +1833,7 @@
   }
   
   .screen {
-    padding: 8px 12px;
+    padding: 8px 60px;
     padding-top: 12px;
   }
   
@@ -1820,9 +1848,21 @@
     border-radius: 10px;
   }
   
-  /* Hide navigation arrows on very small screens, use buttons instead */
-  .nav-arrow {
-    display: none;
+  .nav-arrow.left {
+    left: -50px;
+  }
+
+  .nav-arrow.right {
+    right: -50px;
+  }
+
+  .nav-arrow svg {
+    width: 36px;
+    height: 36px;
+  }
+  
+  .nav-arrow span {
+    font-size: 12px;
   }
 }
 
