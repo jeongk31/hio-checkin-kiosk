@@ -151,9 +151,11 @@ export async function POST(request: Request) {
       keyBoxPassword,
       floor,
       notes,
+      status,
     } = await request.json();
 
     const targetProjectId = profile.role === 'super_admin' ? projectId : profile.project_id;
+    const roomStatus = status || 'available'; // Use provided status or default to available
 
     if (!targetProjectId || targetProjectId === 'all' || !roomNumber) {
       return NextResponse.json({ error: 'Specific Project ID and room number are required' }, { status: 400 });
@@ -165,7 +167,7 @@ export async function POST(request: Request) {
     }
 
     if (accessType === 'card' && (!keyBoxNumber || !keyBoxPassword)) {
-      return NextResponse.json({ error: '키 박스 번호와 비밀번호를 입력해주세요' }, { status: 400 });
+      return NextResponse.json({ error: '키 박스 번호와 비밀번호를 입력해주세요' }, { status: 403 });
     }
 
     // Project admins can only create rooms for their own project
@@ -176,7 +178,7 @@ export async function POST(request: Request) {
     try {
       const rooms = await query<RoomRow>(
         `INSERT INTO rooms (project_id, room_type_id, room_number, access_type, room_password, key_box_number, key_box_password, floor, notes, status, is_active)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'available', true)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, true)
          RETURNING *`,
         [
           targetProjectId,
@@ -188,6 +190,7 @@ export async function POST(request: Request) {
           accessType === 'card' ? keyBoxPassword : null,
           floor || null,
           notes || null,
+          roomStatus,
         ]
       );
 
