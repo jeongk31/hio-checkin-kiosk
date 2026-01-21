@@ -1,11 +1,14 @@
 import { getCurrentProfile } from '@/lib/auth';
 import { queryOne, query, execute } from '@/lib/db';
 import { redirect } from 'next/navigation';
+import { headers } from 'next/headers';
 import KioskApp from './KioskApp';
 import { Kiosk } from '@/types/database';
 
-// Force dynamic rendering to prevent hydration issues
+// Force dynamic rendering to prevent hydration issues and caching
 export const dynamic = 'force-dynamic';
+export const revalidate = 0; // Never cache this page
+export const fetchCache = 'force-no-store';
 
 interface KioskPageProps {
   searchParams: Promise<{
@@ -24,6 +27,9 @@ interface KioskContentRow {
 
 export default async function KioskPage({ searchParams }: KioskPageProps) {
   const params = await searchParams;
+  
+  // Force fresh data on every request
+  await headers();
   
   // Get profile - this will be null if not logged in
   const profile = await getCurrentProfile();
