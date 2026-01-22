@@ -7,14 +7,14 @@ const pool = new Pool({
   database: process.env.POSTGRES_DATABASE || 'kiosk',
   user: process.env.POSTGRES_USER || 'orange',
   password: process.env.POSTGRES_PASSWORD || '00oo00oo',
-  // Reduce max connections to leave room for other processes
-  max: 10,
+  // Increase max connections for high-traffic kiosk polling
+  max: 20,
   // Minimum connections to keep in the pool
-  min: 2,
-  // Time before idle connections are closed
-  idleTimeoutMillis: 30000,
+  min: 5,
+  // Close idle connections faster to free up slots
+  idleTimeoutMillis: 10000,
   // Time to wait for a connection before failing
-  connectionTimeoutMillis: 5000,
+  connectionTimeoutMillis: 3000,
   // Allow connections to be reused
   allowExitOnIdle: false,
 });

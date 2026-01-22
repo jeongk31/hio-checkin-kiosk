@@ -90,6 +90,15 @@ export async function PATCH(
       [JSON.stringify(newSettings), projectId]
     );
 
+    // If payment_agent_url is being updated, also update all kiosks for this project
+    if (updates.payment_agent_url !== undefined) {
+      await execute(
+        'UPDATE kiosks SET payment_agent_url = $1 WHERE project_id = $2',
+        [updates.payment_agent_url || null, projectId]
+      );
+      console.log(`[Settings] Updated payment_agent_url for all kiosks in project ${projectId} to: ${updates.payment_agent_url}`);
+    }
+
     return NextResponse.json({
       success: true,
       settings: newSettings,

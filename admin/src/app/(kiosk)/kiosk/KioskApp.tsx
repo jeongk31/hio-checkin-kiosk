@@ -4,13 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { Kiosk } from '@/types/database';
-import {
-  launchPayment,
-  generateTransactionNo,
-  EasyCheckPaymentRequest,
-} from '@/lib/easycheck';
-import { PaymentButton } from '@/components/payment';
-import type { PaymentResult as VtrPaymentResult } from '@/lib/payment';
+import { processPayment } from '@/lib/payment/payment-agent';
 import { KeyboardInput } from './VirtualKeyboard';
 
 // Global flag to stop all polling when unauthorized
@@ -442,6 +436,15 @@ interface InputData {
   agreed?: boolean;
   reservation?: ReservationData | null;
   assignedRoom?: AssignedRoom | null;
+  paymentData?: {
+    transaction_id?: string;
+    amount: number;
+    approval_no?: string;
+    auth_date?: string;
+    auth_time?: string;
+    card_no?: string;
+    card_name?: string;
+  };
 }
 
 // Call props for TopButtonRow
@@ -923,7 +926,7 @@ export default function KioskApp({ kiosk, content, paymentResult, userRole }: Ki
       case 'payment-confirm':
         return <PaymentConfirmScreen goToScreen={goToScreen} selectedRoom={selectedRoom} t={t} openStaffModal={openStaffModal} callProps={callProps} amenityTotal={amenityTotal} />;
       case 'payment-process':
-        return <PaymentProcessScreen goToScreen={goToScreen} selectedRoom={selectedRoom} t={t} openStaffModal={openStaffModal} kioskId={kiosk?.id} paymentState={paymentState} paymentError={paymentError} setPaymentState={setPaymentState} setPaymentError={setPaymentError} callProps={callProps} amenityTotal={amenityTotal} inputData={inputData} />;
+        return <PaymentProcessScreen goToScreen={goToScreen} selectedRoom={selectedRoom} t={t} openStaffModal={openStaffModal} paymentState={paymentState} paymentError={paymentError} setPaymentState={setPaymentState} setPaymentError={setPaymentError} callProps={callProps} amenityTotal={amenityTotal} inputData={inputData} syncInputData={syncInputData} kiosk={kiosk} />;
       case 'walkin-info':
         return <HotelInfoScreen goToScreen={goToScreen} flowType="walkin" t={t} projectId={kiosk?.project_id} selectedRoomTypeId={selectedRoom?.id} syncInputData={syncInputData} inputData={inputData} openStaffModal={openStaffModal} callProps={callProps} amenityTotal={amenityTotal} selectedAmenities={selectedAmenities} selectedRoom={selectedRoom} resetAmenities={resetAmenities} />;
       case 'checkout':
@@ -3142,6 +3145,9 @@ function HotelInfoScreen({
       try {
         // Get room price only (amenityTotal is added separately in the API)
         const roomPrice = selectedRoom?.price || inputData?.reservation?.roomType?.price || 0;
+        
+        // Get payment amount if payment was made
+        const paidAmount = inputData?.paymentData?.amount || 0;
 
         const response = await fetch('/api/rooms/assign', {
           method: 'POST',
@@ -3157,6 +3163,7 @@ function HotelInfoScreen({
             // Pass price info (totalPrice = room price, amenityTotal added in API)
             totalPrice: roomPrice,
             amenityTotal: amenityTotal || 0,
+            paidAmount: paidAmount, // Add actual paid amount from payment
           }),
           credentials: 'include',
         });
@@ -3989,17 +3996,17 @@ function PaymentConfirmScreen({
   callProps: CallProps;
   amenityTotal?: number;
 }) {
-  const [isProcessing, setIsProcessing] = useState(false);
   const roomPrice = selectedRoom?.price || 65000;
   const totalPrice = roomPrice + amenityTotal;
 
   const handlePayment = () => {
-    setIsProcessing(true);
-    // Simulate payment processing (skip EasyCheck for now)
-    setTimeout(() => {
-      setIsProcessing(false);
-      goToScreen('walkin-info');
-    }, 1500);
+    console.log('[PaymentConfirm] 결제 버튼 클릭됨');
+    console.log('[PaymentConfirm] selectedRoom:', selectedRoom);
+    console.log('[PaymentConfirm] amenityTotal:', amenityTotal);
+    console.log('[PaymentConfirm] totalPrice:', totalPrice);
+    
+    // Navigate to payment processing screen
+    goToScreen('payment-process');
   };
 
   return (
@@ -4045,7 +4052,7 @@ function PaymentConfirmScreen({
           <button
             className="payment-button"
             onClick={handlePayment}
-            disabled={isProcessing}
+            disabled={false}
             style={{
               width: '100%',
               maxWidth: '320px',
@@ -4053,10 +4060,10 @@ function PaymentConfirmScreen({
               fontSize: '18px',
               fontWeight: 600,
               color: 'white',
-              backgroundColor: isProcessing ? '#9ca3af' : '#2563eb',
+              backgroundColor: '#2563eb',
               border: 'none',
               borderRadius: '12px',
-              cursor: isProcessing ? 'not-allowed' : 'pointer',
+              cursor: 'pointer',
               margin: '24px auto 0',
               display: 'flex',
               alignItems: 'center',
@@ -4064,14 +4071,7 @@ function PaymentConfirmScreen({
               gap: '8px',
             }}
           >
-            {isProcessing ? (
-              <>
-                <div style={{ width: '20px', height: '20px', border: '2px solid #fff', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
-                결제 처리 중...
-              </>
-            ) : (
-              '결제'
-            )}
+            결제
           </button>
           <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
         </div>
@@ -4086,7 +4086,6 @@ function PaymentProcessScreen({
   selectedRoom,
   t,
   openStaffModal,
-  kioskId,
   paymentState,
   paymentError,
   setPaymentState,
@@ -4094,12 +4093,13 @@ function PaymentProcessScreen({
   callProps,
   amenityTotal,
   inputData,
+  syncInputData,
+  kiosk,
 }: {
   goToScreen: (screen: ScreenName) => void;
   selectedRoom: Room | null;
   t: (key: string) => string;
   openStaffModal: () => void;
-  kioskId?: string;
   paymentState: 'idle' | 'processing' | 'success' | 'failed';
   paymentError: string | null;
   setPaymentState: (state: 'idle' | 'processing' | 'success' | 'failed') => void;
@@ -4107,82 +4107,118 @@ function PaymentProcessScreen({
   callProps: CallProps;
   amenityTotal?: number;
   inputData: InputData;
+  syncInputData?: (data: Partial<InputData>) => void;
+  kiosk: Kiosk | null;
 }) {
-  const handlePayment = () => {
+  const [paymentInProgress, setPaymentInProgress] = useState(false);
+  const hasStartedPayment = useRef(false);
+
+  // Auto-start payment when component mounts (only if idle state)
+  useEffect(() => {
+    if (paymentState === 'idle' && !hasStartedPayment.current) {
+      handlePayment();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paymentState]);
+
+  const handlePayment = async () => {
+    if (paymentInProgress || hasStartedPayment.current) return;
+    
+    hasStartedPayment.current = true;
     const roomPrice = selectedRoom?.price || 65000;
     const amount = roomPrice + (amenityTotal || 0);
 
-    // Option 1: Use EasyCheck (legacy - for tablets)
-    // Build payment request
-    const paymentRequest: EasyCheckPaymentRequest = {
-      transactionNo: generateTransactionNo(),
-      transactionType: 'CARD',
-      totalAmount: amount,
-      orderNum: `ROOM-${selectedRoom?.name || 'WALK-IN'}-${Date.now()}`,
-      callbackUrl: `${window.location.origin}/api/payment/callback${kioskId ? `?kiosk=${kioskId}` : ''}`,
-    };
-
+    console.log('[PaymentProcess] Starting VTR payment:', { amount, roomPrice, amenityTotal });
+    
+    setPaymentInProgress(true);
     setPaymentState('processing');
     setPaymentError(null);
 
-    // Launch EasyCheck app
-    // This will redirect the browser to the EasyCheck app
-    // When payment completes, EasyCheck will redirect back to our callback URL
-    launchPayment(paymentRequest);
-  };
-
-  // Handler for VtrRestServer payment success
-  const handleVtrPaymentSuccess = async (result: VtrPaymentResult) => {
-    console.log('✅ Payment Success:', result);
-    setPaymentState('success');
-    setPaymentError(null);
-    
-    // Save to database
     try {
-      const reservationId = inputData.reservation?.id || null;
-      const response = await fetch('/api/payment', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          reservation_id: reservationId,
-          transaction_id: result.transaction_id,
-          amount: result.amount,
-          payment_type: 'credit',
-          status: 'approved',
-          approval_no: result.approval_no,
-          auth_date: result.auth_date,
-          auth_time: result.auth_time,
-          card_no: result.card_no,
-          card_name: result.card_name,
-        }),
-      });
-      const data = await response.json();
-      console.log('💾 Payment saved to database:', data);
-    } catch (error) {
-      console.error('❌ Database save failed:', error);
-    }
-    
-    // Auto-advance to next screen after 2 seconds
-    setTimeout(() => {
-      setPaymentState('idle');
-      if (inputData.reservation) {
-        goToScreen('checkin-info');
-      } else {
-        goToScreen('walkin-info');
-      }
-    }, 2000);
-  };
+      // Use VtrRestServer for payment
+      const reservationNumber = inputData.reservation?.reservationNumber || `TEMP-${Date.now()}`;
+      const guestName = inputData.signature || inputData.reservation?.guestName || undefined;
+      const result = await processPayment(
+        amount,
+        reservationNumber,
+        undefined, // room number not available at this point
+        guestName,
+        undefined, // installmentMonths (default: lump sum)
+        undefined, // onStatusChange callback
+        kiosk?.payment_agent_url || undefined // Use kiosk's payment agent URL
+      );
 
-  // Handler for VtrRestServer payment error
-  const handleVtrPaymentError = (result: VtrPaymentResult) => {
-    console.error('❌ Payment Failed:', result);
-    setPaymentState('failed');
-    setPaymentError(result.message || '결제 중 오류가 발생했습니다');
+      console.log('[PaymentProcess] Payment result:', result);
+
+      if (result.success) {
+        // Payment succeeded
+        setPaymentState('success');
+        
+        // Store payment data in inputData
+        if (syncInputData) {
+          syncInputData({
+            paymentData: {
+              transaction_id: result.transaction_id,
+              amount: result.amount,
+              approval_no: result.approval_no,
+              auth_date: result.auth_date,
+              auth_time: result.auth_time,
+              card_no: result.card_no,
+              card_name: result.card_name,
+            },
+          });
+        }
+        
+        // Save to database
+        try {
+          const reservationId = inputData.reservation?.id || null;
+          const response = await fetch('/api/payment', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              reservation_id: reservationId,
+              transaction_id: result.transaction_id,
+              amount: result.amount,
+              payment_type: 'credit',
+              status: 'approved',
+              approval_no: result.approval_no,
+              auth_date: result.auth_date,
+              auth_time: result.auth_time,
+              card_no: result.card_no,
+              card_name: result.card_name,
+            }),
+          });
+          const data = await response.json();
+          console.log('💾 Payment saved to database:', data);
+        } catch (error) {
+          console.error('❌ Database save failed:', error);
+          // Continue anyway - payment was successful
+        }
+
+        // Auto-advance to room assignment after 2 seconds
+        setTimeout(() => {
+          setPaymentInProgress(false);
+          goToScreen('walkin-info');
+        }, 2000);
+      } else {
+        // Payment failed
+        setPaymentState('failed');
+        setPaymentError(result.message || '결제 중 오류가 발생했습니다');
+        setPaymentInProgress(false);
+      }
+    } catch (error) {
+      console.error('[PaymentProcess] Payment error:', error);
+      setPaymentState('failed');
+      setPaymentError(error instanceof Error ? error.message : '결제 중 오류가 발생했습니다');
+      setPaymentInProgress(false);
+    }
   };
 
   const handleRetry = () => {
+    hasStartedPayment.current = false;
     setPaymentState('idle');
     setPaymentError(null);
+    setPaymentInProgress(false);
   };
 
   // Show success state
@@ -4264,13 +4300,7 @@ function PaymentProcessScreen({
     );
   }
 
-  // Default: idle state - show payment button
-  const roomPrice = selectedRoom?.price || 65000;
-  const totalAmount = roomPrice + (amenityTotal || 0);
-  const reservationId = inputData.reservation?.id || 'WALK-IN';
-  const roomNumber = selectedRoom?.name || 'TBD';
-  const guestName = inputData.reservation?.guestName || '고객님';
-  
+  // Default: idle/processing state
   return (
     <div className="screen">
       <div className="screen-wrapper">
@@ -4280,60 +4310,11 @@ function PaymentProcessScreen({
           <div className="logo">
             <Image src="/logo.png" alt="HiO" width={200} height={80} className="logo-image" />
           </div>
-          <h2 className="screen-title">결제</h2>
+          <h2 className="screen-title">결제 처리 중</h2>
           <p className="screen-description">카드를 단말기에 삽입해 주세요</p>
-          <div className="payment-process-container">
-            <div className="payment-amount">
-              <span className="amount-label">총 결제 금액</span>
-              <span className="amount-value">
-                {totalAmount.toLocaleString('ko-KR')}원
-              </span>
-            </div>
-            {amenityTotal && amenityTotal > 0 && (
-              <div style={{ fontSize: '14px', color: '#666', marginTop: '8px', textAlign: 'center' }}>
-                객실료: {roomPrice.toLocaleString('ko-KR')}원 + 어메니티: {(amenityTotal).toLocaleString('ko-KR')}원
-              </div>
-            )}
-            
-            {/* VtrRestServer Payment Button */}
-            <div style={{ marginTop: '32px', display: 'flex', justifyContent: 'center' }}>
-              <PaymentButton
-                amount={totalAmount}
-                reservationId={reservationId}
-                roomNumber={roomNumber}
-                guestName={guestName}
-                onPaymentSuccess={handleVtrPaymentSuccess}
-                onPaymentError={handleVtrPaymentError}
-              >
-                💳 카드 결제
-              </PaymentButton>
-            </div>
-            
-            {/* Fallback: EasyCheck for tablets */}
-            <div style={{ marginTop: '16px', textAlign: 'center' }}>
-              <button
-                onClick={handlePayment}
-                style={{
-                  padding: '12px 24px',
-                  fontSize: '14px',
-                  backgroundColor: '#e5e7eb',
-                  border: 'none',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                }}
-              >
-                📱 태블릿 결제 (이지체크)
-              </button>
-            </div>
-            
-            <div className="payment-instructions" style={{ marginTop: '24px' }}>
-              <p style={{ fontSize: '13px', color: '#666' }}>
-                카드 단말기가 있는 경우: 카드 결제 버튼을 눌러주세요
-              </p>
-              <p style={{ fontSize: '13px', color: '#666', marginTop: '4px' }}>
-                태블릿 결제: 태블릿 결제 버튼을 눌러 이지체크 앱을 실행하세요
-              </p>
-            </div>
+          <div style={{ textAlign: 'center', padding: '40px' }}>
+            <div style={{ width: '40px', height: '40px', border: '3px solid #e5e7eb', borderTopColor: '#3b82f6', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto' }} />
+            <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
           </div>
         </div>
       </div>

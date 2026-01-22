@@ -26,6 +26,7 @@ interface KioskRow {
   current_session_id: string | null;
   last_seen: string | null;
   settings: Record<string, unknown>;
+  payment_agent_url: string | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;

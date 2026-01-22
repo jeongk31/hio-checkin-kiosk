@@ -178,6 +178,7 @@ CREATE TABLE IF NOT EXISTS reservations (
     source VARCHAR(100),
     notes TEXT,
     total_price INTEGER,
+    amenity_total INTEGER DEFAULT 0,
     paid_amount INTEGER DEFAULT 0,
     payment_status VARCHAR(50) DEFAULT 'unpaid',
     data JSONB DEFAULT '{}'::jsonb,
@@ -202,6 +203,7 @@ CREATE TABLE IF NOT EXISTS kiosks (
     current_session_id UUID,
     last_seen TIMESTAMP WITH TIME ZONE,
     settings JSONB DEFAULT '{}'::jsonb,
+    payment_agent_url VARCHAR(255),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );

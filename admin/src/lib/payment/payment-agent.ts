@@ -19,8 +19,8 @@ import {
   getErrorMessage,
 } from './payment-types';
 
-// Configuration
-const PAYMENT_AGENT_URL = process.env.NEXT_PUBLIC_PAYMENT_AGENT_URL || 'https://localhost:8085';
+// Default configuration - can be overridden per request
+const DEFAULT_PAYMENT_AGENT_URL = process.env.NEXT_PUBLIC_PAYMENT_AGENT_URL || 'http://localhost:8085';
 const DEFAULT_TIMEOUT = 60000; // 60 seconds for card reading
 
 /**
@@ -30,13 +30,14 @@ const DEFAULT_TIMEOUT = 60000; // 60 seconds for card reading
 async function agentRequest<T extends PaymentAgentResponse>(
   endpoint: string,
   data?: unknown,
-  timeout: number = DEFAULT_TIMEOUT
+  timeout: number = DEFAULT_TIMEOUT,
+  paymentAgentUrl: string = DEFAULT_PAYMENT_AGENT_URL
 ): Promise<T> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeout);
   
   try {
-    const response = await fetch(`${PAYMENT_AGENT_URL}/${endpoint}`, {
+    const response = await fetch(`${paymentAgentUrl}/${endpoint}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'text/plain', // Important: NOT application/json
@@ -76,10 +77,15 @@ async function agentRequest<T extends PaymentAgentResponse>(
 /**
  * Check if payment agent is running
  */
-export async function checkAgentStatus(): Promise<boolean> {
+export async function checkAgentStatus(paymentAgentUrl?: string): Promise<boolean> {
   try {
     // VTR_APP_Check does an integrity check
-    const response = await agentRequest<PaymentAgentResponse>('VTR_APP_Check', undefined, 5000);
+    const response = await agentRequest<PaymentAgentResponse>(
+      'VTR_APP_Check', 
+      undefined, 
+      5000,
+      paymentAgentUrl
+    );
     return response.Result === '0000';
   } catch {
     return false;
@@ -90,7 +96,7 @@ export async function checkAgentStatus(): Promise<boolean> {
  * Get credit card token (read card from terminal)
  * This will display "Insert Card" on the terminal
  */
-export async function getCreditToken(amount: number): Promise<TokenResponse> {
+export async function getCreditToken(amount: number, paymentAgentUrl?: string): Promise<TokenResponse> {
   const request: TokenRequest = {
     Term_div: 'P',
     Term_id: '',
@@ -100,7 +106,12 @@ export async function getCreditToken(amount: number): Promise<TokenResponse> {
     Amount: amount.toString(),
   };
   
-  const response = await agentRequest<TokenResponse>('VTR_APP_GetCreditToken', request, 90000);
+  const response = await agentRequest<TokenResponse>(
+    'VTR_APP_GetCreditToken', 
+    request, 
+    90000,
+    paymentAgentUrl
+  );
   
   if (response.Result !== '0000') {
     throw new PaymentError(response.Result, response.Message || getErrorMessage(response.Result));
@@ -118,7 +129,8 @@ export async function approveCreditCard(
   emvData: string = '',
   transactionId: string,
   installmentMonths: InstallmentMonth = InstallmentMonth.LUMP_SUM,
-  remarks?: string[]
+  remarks?: string[],
+  paymentAgentUrl?: string
 ): Promise<ApprovalResponse> {
   const tax = Math.round(amount / 11); // 10% VAT
   
@@ -155,7 +167,12 @@ export async function approveCreditCard(
     resbuffer: { bufferdata: '' },
   };
   
-  const response = await agentRequest<ApprovalResponse>('ApprovalServerSec', request);
+  const response = await agentRequest<ApprovalResponse>(
+    'ApprovalServerSec', 
+    request,
+    DEFAULT_TIMEOUT,
+    paymentAgentUrl
+  );
   
   if (response.Result !== '0000') {
     throw new PaymentError(response.Result, response.Message || getErrorMessage(response.Result));
@@ -172,7 +189,8 @@ export async function cancelCreditCard(
   originalApprovalNo: string,
   originalAuthDate: string,
   transactionId: string,
-  cancelReason: CancelReason = CancelReason.CUSTOMER_REQUEST
+  cancelReason: CancelReason = CancelReason.CUSTOMER_REQUEST,
+  paymentAgentUrl?: string
 ): Promise<ApprovalResponse> {
   const tax = Math.round(amount / 11);
   
@@ -201,7 +219,12 @@ export async function cancelCreditCard(
     resbuffer: { bufferdata: '' },
   };
   
-  const response = await agentRequest<ApprovalResponse>('ApprovalServerSec', request);
+  const response = await agentRequest<ApprovalResponse>(
+    'ApprovalServerSec', 
+    request,
+    DEFAULT_TIMEOUT,
+    paymentAgentUrl
+  );
   
   if (response.Result !== '0000') {
     throw new PaymentError(response.Result, response.Message || getErrorMessage(response.Result));
@@ -213,8 +236,13 @@ export async function cancelCreditCard(
 /**
  * Print receipt for last transaction
  */
-export async function printReceipt(): Promise<void> {
-  const response = await agentRequest<PaymentAgentResponse>('VTR_APP_Print', undefined, 10000);
+export async function printReceipt(paymentAgentUrl?: string): Promise<void> {
+  const response = await agentRequest<PaymentAgentResponse>(
+    'VTR_APP_Print', 
+    undefined, 
+    10000,
+    paymentAgentUrl
+  );
   
   if (response.Result !== '0000') {
     console.warn('Receipt print failed:', response.Message);
@@ -224,10 +252,10 @@ export async function printReceipt(): Promise<void> {
 /**
  * Print custom text receipt
  */
-export async function printCustomReceipt(text: string): Promise<void> {
+export async function printCustomReceipt(text: string, paymentAgentUrl?: string): Promise<void> {
   const response = await agentRequest<PaymentAgentResponse>('VTR_APP_Print_Text', {
     print_text: text,
-  }, 10000);
+  }, 10000, paymentAgentUrl);
   
   if (response.Result !== '0000') {
     console.warn('Custom receipt print failed:', response.Message);
@@ -253,14 +281,15 @@ export async function processPayment(
   roomNumber?: string,
   guestName?: string,
   installmentMonths: InstallmentMonth = InstallmentMonth.LUMP_SUM,
-  onStatusChange?: (status: string) => void
+  onStatusChange?: (status: string) => void,
+  paymentAgentUrl?: string
 ): Promise<PaymentResult> {
   const transactionId = generateTransactionId(reservationId);
   
   try {
     // Step 1: Read card
     onStatusChange?.('reading_card');
-    const tokenResponse = await getCreditToken(amount);
+    const tokenResponse = await getCreditToken(amount, paymentAgentUrl);
     
     // Step 2: Process approval
     onStatusChange?.('processing');
@@ -276,13 +305,14 @@ export async function processPayment(
       tokenResponse.Emv_data || '',
       transactionId,
       installmentMonths,
-      remarks
+      remarks,
+      paymentAgentUrl
     );
     
     // Step 3: Print receipt
     onStatusChange?.('printing');
     try {
-      await printReceipt();
+      await printReceipt(paymentAgentUrl);
     } catch (e) {
       console.warn('Receipt print failed, continuing:', e);
     }
@@ -331,7 +361,8 @@ export async function cancelPayment(
   originalApprovalNo: string,
   originalAuthDate: string,
   reservationId: string,
-  cancelReason: CancelReason = CancelReason.CUSTOMER_REQUEST
+  cancelReason: CancelReason = CancelReason.CUSTOMER_REQUEST,
+  paymentAgentUrl?: string
 ): Promise<PaymentResult> {
   const transactionId = generateTransactionId(reservationId);
   
@@ -341,7 +372,8 @@ export async function cancelPayment(
       originalApprovalNo,
       originalAuthDate,
       transactionId,
-      cancelReason
+      cancelReason,
+      paymentAgentUrl
     );
     
     return {

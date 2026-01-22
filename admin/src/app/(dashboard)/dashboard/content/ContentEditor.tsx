@@ -10,6 +10,7 @@ interface SimpleProject {
 
 interface ProjectSettings {
   daily_reset_time?: string; // Format: "HH:mm"
+  payment_agent_url?: string; // Payment Agent URL for kiosk
   type?: string;
   province?: string;
   location?: string;
@@ -399,9 +400,10 @@ export default function ContentEditor({
           <div className="bg-white rounded-lg shadow overflow-hidden mb-8">
             <div className="px-6 py-4 bg-gray-50 border-b">
               <h3 className="text-lg font-semibold text-gray-900">프로젝트 설정</h3>
-              <p className="text-sm text-gray-500 mt-1">당일 객실 데이터 자동 초기화 설정</p>
+              <p className="text-sm text-gray-500 mt-1">당일 객실 데이터 자동 초기화 설정 및 결제 에이전트 URL</p>
             </div>
-            <div className="px-6 py-4">
+            <div className="px-6 py-4 space-y-6">
+              {/* Daily Reset Time */}
               <div className="flex items-center justify-between">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -441,10 +443,48 @@ export default function ContentEditor({
                 </div>
               </div>
               {projectSettings.daily_reset_time && (
-                <p className="text-sm text-blue-600 mt-3">
+                <p className="text-sm text-blue-600">
                   현재 설정: 매일 {projectSettings.daily_reset_time} (한국 시간)에 당일 객실 데이터가 초기화됩니다
                 </p>
               )}
+
+              {/* Payment Agent URL */}
+              <div className="pt-4 border-t">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    결제 에이전트 URL
+                  </label>
+                  <p className="text-xs text-gray-500 mb-3">
+                    키오스크 결제 시 사용할 Payment Agent URL (예: http://localhost:8085)
+                  </p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="text"
+                    value={projectSettings.payment_agent_url || ''}
+                    onChange={(e) => {
+                      setProjectSettings(prev => ({
+                        ...prev,
+                        payment_agent_url: e.target.value,
+                      }));
+                    }}
+                    placeholder="http://localhost:8085"
+                    className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <button
+                    onClick={() => saveProjectSettings({ payment_agent_url: projectSettings.payment_agent_url })}
+                    disabled={savingSettings}
+                    className="px-4 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    {savingSettings ? '저장 중...' : '저장'}
+                  </button>
+                </div>
+                {projectSettings.payment_agent_url && (
+                  <p className="text-sm text-blue-600 mt-2">
+                    현재 설정: {projectSettings.payment_agent_url}
+                  </p>
+                )}
+              </div>
             </div>
           </div>
 

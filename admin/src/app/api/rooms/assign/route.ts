@@ -59,7 +59,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { projectId, roomTypeId, guestName, guestCount, checkOutDate, reservationId, reservationNumber: existingReservationNumber, totalPrice, amenityTotal } = await request.json();
+    const { projectId, roomTypeId, guestName, guestCount, checkOutDate, reservationId, reservationNumber: existingReservationNumber, totalPrice, amenityTotal, paidAmount } = await request.json();
 
     const targetProjectId = profile.project_id || projectId;
 
@@ -175,6 +175,9 @@ export async function POST(request: Request) {
 
       // Get room type price if totalPrice not provided
       const finalTotalPrice = totalPrice ?? (roomType?.base_price || 0);
+      
+      // Use the actual paid amount if provided, otherwise assume unpaid
+      const finalPaidAmount = paidAmount ?? 0;
 
       const newReservation = await queryOne<Reservation>(
         `INSERT INTO reservations (project_id, room_type_id, reservation_number, guest_name, guest_count, check_in_date, check_out_date, room_number, source, status, total_price, amenity_total, paid_amount)
@@ -193,7 +196,7 @@ export async function POST(request: Request) {
           'checked_in',
           finalTotalPrice,
           amenityTotal || 0,
-          finalTotalPrice + (amenityTotal || 0), // paid_amount = total + amenities
+          finalPaidAmount, // Use actual paid amount from payment
         ]
       );
 
