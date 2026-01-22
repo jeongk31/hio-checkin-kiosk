@@ -1,6 +1,6 @@
-import { queryOne } from '@/lib/db';
+import { queryOne, query } from '@/lib/db';
 import { getCurrentUserId } from '@/lib/db/auth';
-import { Profile } from '@/types/database';
+import { Profile, Project } from '@/types/database';
 
 interface ProfileRow {
   id: string;
@@ -75,6 +75,27 @@ export async function getCurrentProfile(): Promise<Profile | null> {
       created_at: row.project_created_at || row.created_at,
       updated_at: row.project_updated_at || row.updated_at,
     };
+  }
+
+  // Fetch all projects for team leaders (multi-project support)
+  if (row.role === 'project_admin') {
+    const projectRows = await query<Project>(
+      `SELECT p.* 
+       FROM projects p
+       INNER JOIN user_projects up ON p.id = up.project_id
+       WHERE up.profile_id = $1
+       ORDER BY p.name`,
+      [row.id]
+    );
+    
+    if (projectRows && projectRows.length > 0) {
+      profile.projects = projectRows;
+      
+      // If no legacy project_id, set it to first project for backward compatibility
+      if (!profile.project_id && projectRows[0]) {
+        profile.project = projectRows[0];
+      }
+    }
   }
 
   return profile;

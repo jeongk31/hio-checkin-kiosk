@@ -35,8 +35,8 @@ export default async function KioskPage({ searchParams }: KioskPageProps) {
     redirect('/login');
   }
 
-  // Only kiosk and call_test users can access this page
-  if (profile.role !== 'kiosk' && profile.role !== 'call_test') {
+  // Only kiosk and call_only users can access this page
+  if (profile.role !== 'kiosk' && profile.role !== 'call_only') {
     redirect('/dashboard');
   }
 

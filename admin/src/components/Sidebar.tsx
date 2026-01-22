@@ -20,12 +20,12 @@ export default function Sidebar({ profile }: SidebarProps) {
 
   const isSuperAdmin = profile.role === 'super_admin';
   const isProjectAdmin = profile.role === 'project_admin';
-  const isCallTest = profile.role === 'call_test';
+  const isCallOnly = profile.role === 'call_only';
 
   const getRoleDisplayName = () => {
     if (isSuperAdmin) return 'Super Admin';
     if (isProjectAdmin) return 'Project Admin';
-    if (isCallTest) return 'Call Test';
+    if (isCallOnly) return 'Call Only';
     return 'Kiosk';
   };
 
@@ -60,6 +60,22 @@ export default function Sidebar({ profile }: SidebarProps) {
         <div className="px-4 py-3 bg-gray-800">
           <p className="text-xs text-gray-400">프로젝트</p>
           <p className="text-sm font-medium">{profile.project.name}</p>
+          
+          {/* Show additional projects for team leaders */}
+          {profile.projects && profile.projects.length > 1 && (
+            <details className="mt-2">
+              <summary className="text-xs text-blue-400 cursor-pointer hover:text-blue-300">
+                +{profile.projects.length - 1}개 더 보기
+              </summary>
+              <ul className="mt-2 space-y-1 text-xs text-gray-300">
+                {profile.projects.slice(1).map((proj) => (
+                  <li key={proj.id} className="pl-2 py-1">
+                    • {proj.name}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
         </div>
       )}
 

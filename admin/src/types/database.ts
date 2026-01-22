@@ -1,4 +1,4 @@
-export type UserRole = 'super_admin' | 'project_admin' | 'kiosk' | 'call_test';
+export type UserRole = 'super_admin' | 'project_admin' | 'kiosk' | 'call_only';
 export type KioskStatus = 'online' | 'offline' | 'busy' | 'error';
 export type VoiceCallCallerType = 'kiosk' | 'manager';
 
@@ -19,11 +19,12 @@ export interface Profile {
   email: string;
   full_name: string | null;
   role: UserRole;
-  project_id: string | null;
+  project_id: string | null; // Legacy single project - use projects array for team leaders
   is_active: boolean;
   created_at: string;
   updated_at: string;
   project?: Project;
+  projects?: Project[]; // Multi-project support for team leaders
 }
 
 export interface Kiosk {

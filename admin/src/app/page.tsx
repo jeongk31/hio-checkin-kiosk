@@ -20,7 +20,7 @@ export default async function Home() {
 
   if (profile) {
     // Redirect based on role
-    if (profile.role === 'kiosk' || profile.role === 'call_test') {
+    if (profile.role === 'kiosk' || profile.role === 'call_only') {
       redirect('/kiosk');
     } else {
       redirect('/dashboard');

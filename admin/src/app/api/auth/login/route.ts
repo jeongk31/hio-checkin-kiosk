@@ -166,8 +166,8 @@ async function syncSingleUser(pmsUser: PMSUser): Promise<void> {
     [userId, pmsUser.email, pmsUser.username || null, kioskRole, pmsUser.is_active, pmsUser.project_id]
   );
 
-  // Auto-create or update kiosk device for kiosk and call_test users
-  if ((kioskRole === 'kiosk' || kioskRole === 'call_test') && pmsUser.project_id) {
+  // Auto-create or update kiosk device for kiosk and call_only users
+  if ((kioskRole === 'kiosk' || kioskRole === 'call_only') && pmsUser.project_id) {
     const profile = await queryOne<{ id: string }>('SELECT id FROM profiles WHERE user_id = $1', [userId]);
     if (profile) {
       const existingKiosk = await queryOne<{ id: string; project_id: string }>(
@@ -334,7 +334,7 @@ export async function POST(request: Request) {
                 path: '/',
               });
 
-              const redirectUrl = (localProfile.role === 'kiosk' || localProfile.role === 'call_test') ? '/kiosk' : '/dashboard';
+              const redirectUrl = (localProfile.role === 'kiosk' || localProfile.role === 'call_only') ? '/kiosk' : '/dashboard';
               console.log('[Auth] Local authentication successful for:', identifier);
               return NextResponse.json({ success: true, redirectUrl });
             }

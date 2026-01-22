@@ -458,7 +458,7 @@ export default function KioskApp({ kiosk, content, paymentResult, userRole }: Ki
   const router = useRouter();
   const [currentScreen, setCurrentScreen] = useState<ScreenName>('start');
   
-  // Check if user is in call test mode (only sees call button)
+  // Check if user is in call only mode (only sees call button)
   const isCallTestMode = userRole === 'call_test';
   const [isStaffModalOpen, setIsStaffModalOpen] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
