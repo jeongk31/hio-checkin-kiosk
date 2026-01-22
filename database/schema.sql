@@ -10,7 +10,7 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 -- ENUM Types
 -- ============================================
 DO $$ BEGIN
-    CREATE TYPE user_role AS ENUM ('super_admin', 'project_admin', 'kiosk', 'call_test');
+    CREATE TYPE user_role AS ENUM ('super_admin', 'project_admin', 'kiosk', 'call_only');
 EXCEPTION
     WHEN duplicate_object THEN null;
 END $$;

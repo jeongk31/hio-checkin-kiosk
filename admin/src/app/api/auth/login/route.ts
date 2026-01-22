@@ -521,9 +521,9 @@ export async function POST(request: Request) {
     });
 
     // Redirect based on role:
-    // - kiosk and call_test users go to /kiosk (the kiosk interface for guests)
+    // - kiosk and call_only users go to /kiosk (the kiosk interface for guests)
     // - admin/manager users go to /dashboard
-    const redirectUrl = (kioskRole === 'kiosk' || kioskRole === 'call_test') ? '/kiosk' : '/dashboard';
+    const redirectUrl = (kioskRole === 'kiosk' || kioskRole === 'call_only') ? '/kiosk' : '/dashboard';
 
     return NextResponse.json({ success: true, redirectUrl });
   } catch (error) {

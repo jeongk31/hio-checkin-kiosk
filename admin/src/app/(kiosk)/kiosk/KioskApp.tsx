@@ -459,7 +459,7 @@ export default function KioskApp({ kiosk, content, paymentResult, userRole }: Ki
   const [currentScreen, setCurrentScreen] = useState<ScreenName>('start');
   
   // Check if user is in call only mode (only sees call button)
-  const isCallTestMode = userRole === 'call_test';
+  const isCallTestMode = userRole === 'call_only';
   const [isStaffModalOpen, setIsStaffModalOpen] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   // Staff call state (lifted from StaffCallModal for TopButtonRow access)
