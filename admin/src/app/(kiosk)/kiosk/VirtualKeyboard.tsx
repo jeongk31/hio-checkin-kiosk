@@ -4,6 +4,157 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Keyboard from 'react-simple-keyboard';
 import 'react-simple-keyboard/build/css/index.css';
 
+// Korean IME - Hangul composition
+const CHOSUNG = ['ㄱ', 'ㄲ', 'ㄴ', 'ㄷ', 'ㄸ', 'ㄹ', 'ㅁ', 'ㅂ', 'ㅃ', 'ㅅ', 'ㅆ', 'ㅇ', 'ㅈ', 'ㅉ', 'ㅊ', 'ㅋ', 'ㅌ', 'ㅍ', 'ㅎ'];
+const JUNGSUNG = ['ㅏ', 'ㅐ', 'ㅑ', 'ㅒ', 'ㅓ', 'ㅔ', 'ㅕ', 'ㅖ', 'ㅗ', 'ㅘ', 'ㅙ', 'ㅚ', 'ㅛ', 'ㅜ', 'ㅝ', 'ㅞ', 'ㅟ', 'ㅠ', 'ㅡ', 'ㅢ', 'ㅣ'];
+const JONGSUNG = ['', 'ㄱ', 'ㄲ', 'ㄳ', 'ㄴ', 'ㄵ', 'ㄶ', 'ㄷ', 'ㄹ', 'ㄺ', 'ㄻ', 'ㄼ', 'ㄽ', 'ㄾ', 'ㄿ', 'ㅀ', 'ㅁ', 'ㅂ', 'ㅄ', 'ㅅ', 'ㅆ', 'ㅇ', 'ㅈ', 'ㅊ', 'ㅋ', 'ㅌ', 'ㅍ', 'ㅎ'];
+
+// Double consonant and vowel combinations
+const JONGSUNG_COMBINATIONS: { [key: string]: string } = {
+  'ㄱㅅ': 'ㄳ', 'ㄴㅈ': 'ㄵ', 'ㄴㅎ': 'ㄶ', 'ㄹㄱ': 'ㄺ', 'ㄹㅁ': 'ㄻ',
+  'ㄹㅂ': 'ㄼ', 'ㄹㅅ': 'ㄽ', 'ㄹㅌ': 'ㄾ', 'ㄹㅍ': 'ㄿ', 'ㄹㅎ': 'ㅀ', 'ㅂㅅ': 'ㅄ',
+};
+
+const JUNGSUNG_COMBINATIONS: { [key: string]: string } = {
+  'ㅗㅏ': 'ㅘ', 'ㅗㅐ': 'ㅙ', 'ㅗㅣ': 'ㅚ', 'ㅜㅓ': 'ㅝ', 'ㅜㅔ': 'ㅞ', 'ㅜㅣ': 'ㅟ', 'ㅡㅣ': 'ㅢ',
+};
+
+function isChosung(char: string): boolean {
+  return CHOSUNG.includes(char);
+}
+
+function isJungsung(char: string): boolean {
+  return JUNGSUNG.includes(char);
+}
+
+function isJongsung(char: string): boolean {
+  return JONGSUNG.includes(char) && char !== '';
+}
+
+function isHangul(char: string): boolean {
+  const code = char.charCodeAt(0);
+  return code >= 0xAC00 && code <= 0xD7A3;
+}
+
+function composeHangul(cho: string, jung: string, jong: string = ''): string {
+  const choIndex = CHOSUNG.indexOf(cho);
+  const jungIndex = JUNGSUNG.indexOf(jung);
+  const jongIndex = JONGSUNG.indexOf(jong);
+  
+  if (choIndex === -1 || jungIndex === -1 || jongIndex === -1) {
+    return cho + jung + jong;
+  }
+  
+  const code = 0xAC00 + (choIndex * 21 * 28) + (jungIndex * 28) + jongIndex;
+  return String.fromCharCode(code);
+}
+
+function decomposeHangul(char: string): { cho: string; jung: string; jong: string } | null {
+  if (!isHangul(char)) return null;
+  
+  const code = char.charCodeAt(0) - 0xAC00;
+  const choIndex = Math.floor(code / (21 * 28));
+  const jungIndex = Math.floor((code % (21 * 28)) / 28);
+  const jongIndex = code % 28;
+  
+  return {
+    cho: CHOSUNG[choIndex],
+    jung: JUNGSUNG[jungIndex],
+    jong: JONGSUNG[jongIndex],
+  };
+}
+
+function composeKorean(currentText: string, newChar: string): string {
+  if (!currentText) {
+    return newChar;
+  }
+
+  const lastChar = currentText[currentText.length - 1];
+  const prefix = currentText.slice(0, -1);
+
+  // If last character is a complete Hangul syllable
+  if (isHangul(lastChar)) {
+    const decomposed = decomposeHangul(lastChar);
+    if (!decomposed) return currentText + newChar;
+
+    // Try to add Jongsung
+    if (isChosung(newChar) || isJongsung(newChar)) {
+      if (decomposed.jong === '') {
+        // Add as Jongsung
+        const newSyllable = composeHangul(decomposed.cho, decomposed.jung, newChar);
+        return prefix + newSyllable;
+      } else {
+        // Check if we can combine with existing Jongsung
+        const combined = JONGSUNG_COMBINATIONS[decomposed.jong + newChar];
+        if (combined && JONGSUNG.includes(combined)) {
+          const newSyllable = composeHangul(decomposed.cho, decomposed.jung, combined);
+          return prefix + newSyllable;
+        }
+        // Start new syllable
+        return currentText + newChar;
+      }
+    }
+    
+    // Try to add Jungsung (if no Jongsung exists)
+    if (isJungsung(newChar)) {
+      if (decomposed.jong === '') {
+        // Try to combine with existing Jungsung
+        const combined = JUNGSUNG_COMBINATIONS[decomposed.jung + newChar];
+        if (combined && JUNGSUNG.includes(combined)) {
+          const newSyllable = composeHangul(decomposed.cho, combined, '');
+          return prefix + newSyllable;
+        }
+      } else {
+        // Jongsung becomes Chosung of new syllable
+        const prevSyllable = composeHangul(decomposed.cho, decomposed.jung, '');
+        const newSyllable = composeHangul(decomposed.jong, newChar, '');
+        return prefix + prevSyllable + newSyllable;
+      }
+    }
+  }
+  
+  // If last character is Jamo
+  if (isChosung(lastChar) && isJungsung(newChar)) {
+    // Combine Chosung + Jungsung
+    return prefix + composeHangul(lastChar, newChar, '');
+  }
+  
+  if (isJungsung(lastChar)) {
+    if (isChosung(newChar) || isJongsung(newChar)) {
+      // Try to form a syllable if there's a Chosung before
+      if (currentText.length >= 2) {
+        const secondLastChar = currentText[currentText.length - 2];
+        if (isChosung(secondLastChar)) {
+          const beforePrefix = currentText.slice(0, -2);
+          const newSyllable = composeHangul(secondLastChar, lastChar, newChar);
+          return beforePrefix + newSyllable;
+        }
+      }
+      return currentText + newChar;
+    }
+    
+    if (isJungsung(newChar)) {
+      // Try to combine Jungsung
+      const combined = JUNGSUNG_COMBINATIONS[lastChar + newChar];
+      if (combined) {
+        // Check if there's a Chosung before
+        if (currentText.length >= 2) {
+          const secondLastChar = currentText[currentText.length - 2];
+          if (isChosung(secondLastChar)) {
+            const beforePrefix = currentText.slice(0, -2);
+            const newSyllable = composeHangul(secondLastChar, combined, '');
+            return beforePrefix + newSyllable;
+          }
+        }
+        return prefix + combined;
+      }
+    }
+  }
+
+  // Default: append the character
+  return currentText + newChar;
+}
+
 interface VirtualKeyboardProps {
   value: string;
   onChange: (value: string) => void;
@@ -121,6 +272,39 @@ export default function VirtualKeyboard({
     }
 
     if (button === '{bksp}') {
+      // Handle backspace with Korean decomposition
+      if (inputValue.length === 0) return;
+      
+      const lastChar = inputValue[inputValue.length - 1];
+      
+      if (isKorean && isHangul(lastChar)) {
+        const decomposed = decomposeHangul(lastChar);
+        if (!decomposed) {
+          const newValue = inputValue.slice(0, -1);
+          setInputValue(newValue);
+          onChange(newValue);
+          return;
+        }
+
+        // If has Jongsung, remove it
+        if (decomposed.jong) {
+          const newSyllable = composeHangul(decomposed.cho, decomposed.jung, '');
+          const newValue = inputValue.slice(0, -1) + newSyllable;
+          setInputValue(newValue);
+          onChange(newValue);
+          return;
+        }
+
+        // If only has Chosung + Jungsung, decompose to just Chosung
+        if (decomposed.jung) {
+          const newValue = inputValue.slice(0, -1) + decomposed.cho;
+          setInputValue(newValue);
+          onChange(newValue);
+          return;
+        }
+      }
+
+      // Default backspace
       const newValue = inputValue.slice(0, -1);
       setInputValue(newValue);
       onChange(newValue);
@@ -142,7 +326,15 @@ export default function VirtualKeyboard({
       if (numericOnly && !/^\d$/.test(button)) {
         return;
       }
-      const newValue = inputValue + button;
+      
+      // Use Korean composition if in Korean mode
+      let newValue;
+      if (isKorean && (isChosung(button) || isJungsung(button) || isJongsung(button))) {
+        newValue = composeKorean(inputValue, button);
+      } else {
+        newValue = inputValue + button;
+      }
+      
       setInputValue(newValue);
       onChange(newValue);
     }
