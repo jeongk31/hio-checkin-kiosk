@@ -55,6 +55,15 @@ async function agentRequest<T extends PaymentAgentResponse>(
     }
     
     const result = await response.json() as T;
+    
+    // Check for -888 error (VTR terminal not responding)
+    // Result can be either uppercase Result or lowercase result field
+    const resultObj = result as Record<string, unknown>;
+    const resultCode = resultObj.result || resultObj.Result;
+    if (resultCode === -888 || resultCode === '-888') {
+      throw new PaymentError('-888', '결제 단말기가 응답하지 않습니다. VTR 단말기와 VtrRestServer를 확인해 주세요.');
+    }
+    
     return result;
   } catch (error) {
     clearTimeout(timeoutId);

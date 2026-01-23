@@ -211,6 +211,7 @@ export class PaymentError extends Error {
  */
 export const ERROR_MESSAGES: Record<string, string> = {
   '0000': '정상',
+  '-888': '결제 단말기가 응답하지 않습니다. VTR 단말기와 VtrRestServer를 확인해 주세요.',
   '9001': '카드를 읽어주세요',
   '9002': '카드 읽기 오류',
   '9003': '거래 시간 초과',

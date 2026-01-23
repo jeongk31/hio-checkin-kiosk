@@ -4202,14 +4202,32 @@ function PaymentProcessScreen({
         }, 2000);
       } else {
         // Payment failed
+        console.error('[PaymentProcess] Payment failed:', {
+          error_code: result.error_code,
+          message: result.message,
+          raw_result: result,
+        });
         setPaymentState('failed');
-        setPaymentError(result.message || '결제 중 오류가 발생했습니다');
+        
+        // Better error message handling
+        let errorMessage = result.message || '결제 중 오류가 발생했습니다';
+        if (result.error_code) {
+          errorMessage = `${errorMessage} (오류코드: ${result.error_code})`;
+        }
+        
+        setPaymentError(errorMessage);
         setPaymentInProgress(false);
       }
     } catch (error) {
-      console.error('[PaymentProcess] Payment error:', error);
+      console.error('[PaymentProcess] Payment exception:', error);
       setPaymentState('failed');
-      setPaymentError(error instanceof Error ? error.message : '결제 중 오류가 발생했습니다');
+      
+      let errorMessage = '결제 중 오류가 발생했습니다';
+      if (error instanceof Error) {
+        errorMessage = error.message;
+      }
+      
+      setPaymentError(errorMessage);
       setPaymentInProgress(false);
     }
   };
