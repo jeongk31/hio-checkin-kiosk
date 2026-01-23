@@ -6,6 +6,10 @@ import { NextResponse } from 'next/server';
 const ALLOWED_ORIGINS = [
   'http://localhost:5173',
   'http://localhost:8000',
+  'http://localhost:8050',
+  'http://localhost:8045',
+  'https://localhost:8050',
+  'https://localhost:8045',
   'https://pms.hio.ai.kr',
   'https://cctv.hio.ai.kr',
   'https://kiosk.hio.ai.kr',
