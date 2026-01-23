@@ -20,6 +20,8 @@ import {
 } from './payment-types';
 
 // Default configuration - can be overridden per request
+// Note: VtrRestServer typically runs with HTTPS (see RestApi.ini: Https=1)
+// But browsers may block self-signed certs, so we support both http and https
 const DEFAULT_PAYMENT_AGENT_URL = process.env.NEXT_PUBLIC_PAYMENT_AGENT_URL || 'http://localhost:8085';
 const DEFAULT_TIMEOUT = 60000; // 60 seconds for card reading
 
