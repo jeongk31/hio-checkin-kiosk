@@ -184,6 +184,18 @@ export async function approveCreditCard(
   
   console.log('[approveCreditCard] Input params:', { amount, trackData, emvData, transactionId, installmentMonths });
   
+  // Build subbuffer with only non-empty remarks
+  const subbuffer: Record<string, string> = {};
+  if (remarks && remarks.length > 0) {
+    const nonEmptyRemarks = remarks.filter(r => r && r.trim());
+    if (nonEmptyRemarks.length > 0) {
+      subbuffer.Remark_Count = nonEmptyRemarks.length.toString();
+      nonEmptyRemarks.forEach((remark, index) => {
+        subbuffer[`Remark_${String(index + 1).padStart(2, '0')}`] = remark;
+      });
+    }
+  }
+  
   const request: ApprovalRequest = {
     sbuffer: {
       Msg_type: PaymentMessageType.CREDIT_APPROVAL,
@@ -203,16 +215,8 @@ export async function approveCreditCard(
       Esign_div: '0',
     },
     perbuffer: { bufferdata: '' },
-    emvbuffer: { bufferdata: emvData },
-    subbuffer: remarks ? {
-      Remark_Count: Math.min(remarks.length, 12).toString(),
-      Remark_01: remarks[0] || '',
-      Remark_02: remarks[1] || '',
-      Remark_03: remarks[2] || '',
-      Remark_04: remarks[3] || '',
-      Remark_05: remarks[4] || '',
-      Remark_06: remarks[5] || '',
-    } : {},
+    emvbuffer: { bufferdata: emvData || '' },
+    subbuffer: Object.keys(subbuffer).length > 0 ? subbuffer : undefined,
     signbuffer: { bufferdata: '' },
     resbuffer: { bufferdata: '' },
   };

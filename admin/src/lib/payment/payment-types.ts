@@ -112,7 +112,7 @@ export interface ApprovalRequest {
   sbuffer: ApprovalSBuffer;
   perbuffer?: { bufferdata: string };
   emvbuffer?: { bufferdata: string };
-  subbuffer?: ApprovalSubBuffer;
+  subbuffer?: ApprovalSubBuffer | Record<string, string>;
   signbuffer?: { bufferdata: string };
   resbuffer?: { bufferdata: string };
 }
