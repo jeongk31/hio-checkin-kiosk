@@ -184,17 +184,23 @@ export async function approveCreditCard(
   
   console.log('[approveCreditCard] Input params:', { amount, trackData, emvData, transactionId, installmentMonths });
   
-  // Build subbuffer with only non-empty remarks
-  const subbuffer: Record<string, string> = {};
-  if (remarks && remarks.length > 0) {
-    const nonEmptyRemarks = remarks.filter(r => r && r.trim());
-    if (nonEmptyRemarks.length > 0) {
-      subbuffer.Remark_Count = nonEmptyRemarks.length.toString();
-      nonEmptyRemarks.forEach((remark, index) => {
-        subbuffer[`Remark_${String(index + 1).padStart(2, '0')}`] = remark;
-      });
-    }
-  }
+  // Build subbuffer with ALL 12 Remark fields (VTR API requires complete structure)
+  const remarkCount = remarks ? remarks.filter(r => r && r.trim()).length : 0;
+  const subbuffer = {
+    Remark_Count: remarkCount > 0 ? remarkCount.toString() : '',
+    Remark_01: remarks?.[0] || '',
+    Remark_02: remarks?.[1] || '',
+    Remark_03: remarks?.[2] || '',
+    Remark_04: remarks?.[3] || '',
+    Remark_05: remarks?.[4] || '',
+    Remark_06: remarks?.[5] || '',
+    Remark_07: remarks?.[6] || '',
+    Remark_08: remarks?.[7] || '',
+    Remark_09: remarks?.[8] || '',
+    Remark_10: remarks?.[9] || '',
+    Remark_11: remarks?.[10] || '',
+    Remark_12: remarks?.[11] || '',
+  };
   
   const request: ApprovalRequest = {
     sbuffer: {
@@ -216,7 +222,7 @@ export async function approveCreditCard(
     },
     perbuffer: { bufferdata: '' },
     emvbuffer: { bufferdata: emvData || '' },
-    subbuffer: Object.keys(subbuffer).length > 0 ? subbuffer : undefined,
+    subbuffer: subbuffer,
     signbuffer: { bufferdata: '' },
     resbuffer: { bufferdata: '' },
   };
