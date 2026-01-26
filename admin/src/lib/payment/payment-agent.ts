@@ -97,7 +97,7 @@ export async function checkAgentStatus(paymentAgentUrl?: string): Promise<boolea
       5000,
       paymentAgentUrl
     );
-    return response.Result === '0000';
+    return response.result === 0 || response.Result === '0000';
   } catch {
     return false;
   }
@@ -124,8 +124,30 @@ export async function getCreditToken(amount: number, paymentAgentUrl?: string): 
     paymentAgentUrl
   );
   
-  if (response.Result !== '0000') {
-    throw new PaymentError(response.Result, response.Message || getErrorMessage(response.Result));
+  // Check success - handle both API formats
+  const isSuccess = response.result === 0 || response.Result === '0000';
+  if (!isSuccess) {
+    const errorCode = response.result?.toString() || response.Result || 'UNKNOWN';
+    const errorMsg = response.message || response.Message || getErrorMessage(errorCode);
+    throw new PaymentError(errorCode, errorMsg);
+  }
+  
+  // Extract data from nested structure if present
+  if (response.data) {
+    return {
+      ...response,
+      Track_data: response.data.Vt_data as string || response.Track_data,
+      Vt_data: response.data.Vt_data as string,
+      Vt_length: response.data.Vt_length as string,
+      Resp_div: response.data.Resp_div as string,
+      Keyin: response.data.Keyin as string,
+      Fallback_div: response.data.Fallback_div as string,
+      Msg1: response.data.Msg1 as string,
+      Msg2: response.data.Msg2 as string,
+      Emv_data: response.data.Emv_data as string || response.Emv_data,
+      Card_no: response.data.Card_no as string || response.Card_no,
+      Card_name: response.data.Card_name as string || response.Card_name,
+    };
   }
   
   return response;
@@ -185,8 +207,28 @@ export async function approveCreditCard(
     paymentAgentUrl
   );
   
-  if (response.Result !== '0000') {
-    throw new PaymentError(response.Result, response.Message || getErrorMessage(response.Result));
+  // Check success - handle both API formats
+  const isSuccess = response.result === 0 || response.Result === '0000';
+  if (!isSuccess) {
+    const errorCode = response.result?.toString() || response.Result || 'UNKNOWN';
+    const errorMsg = response.message || response.Message || getErrorMessage(errorCode);
+    throw new PaymentError(errorCode, errorMsg);
+  }
+  
+  // Extract data from nested structure if present
+  if (response.data) {
+    return {
+      ...response,
+      Approval_no: response.data.Approval_no as string || response.Approval_no,
+      Auth_date: response.data.Auth_date as string || response.Auth_date,
+      Auth_time: response.data.Auth_time as string || response.Auth_time,
+      Card_no: response.data.Card_no as string || response.Card_no,
+      Card_name: response.data.Card_name as string || response.Card_name,
+      Acquirer_name: response.data.Acquirer_name as string || response.Acquirer_name,
+      Merchant_no: response.data.Merchant_no as string || response.Merchant_no,
+      Halbu: response.data.Halbu as string || response.Halbu,
+      Amount: response.data.Amount as string || response.Amount,
+    };
   }
   
   return response;
@@ -237,8 +279,24 @@ export async function cancelCreditCard(
     paymentAgentUrl
   );
   
-  if (response.Result !== '0000') {
-    throw new PaymentError(response.Result, response.Message || getErrorMessage(response.Result));
+  // Check success - handle both API formats
+  const isSuccess = response.result === 0 || response.Result === '0000';
+  if (!isSuccess) {
+    const errorCode = response.result?.toString() || response.Result || 'UNKNOWN';
+    const errorMsg = response.message || response.Message || getErrorMessage(errorCode);
+    throw new PaymentError(errorCode, errorMsg);
+  }
+  
+  // Extract data from nested structure if present
+  if (response.data) {
+    return {
+      ...response,
+      Approval_no: response.data.Approval_no as string || response.Approval_no,
+      Auth_date: response.data.Auth_date as string || response.Auth_date,
+      Auth_time: response.data.Auth_time as string || response.Auth_time,
+      Card_no: response.data.Card_no as string || response.Card_no,
+      Card_name: response.data.Card_name as string || response.Card_name,
+    };
   }
   
   return response;
@@ -255,8 +313,10 @@ export async function printReceipt(paymentAgentUrl?: string): Promise<void> {
     paymentAgentUrl
   );
   
-  if (response.Result !== '0000') {
-    console.warn('Receipt print failed:', response.Message);
+  const isSuccess = response.result === 0 || response.Result === '0000';
+  if (!isSuccess) {
+    const errorMsg = response.message || response.Message;
+    console.warn('Receipt print failed:', errorMsg);
   }
 }
 
@@ -268,8 +328,10 @@ export async function printCustomReceipt(text: string, paymentAgentUrl?: string)
     print_text: text,
   }, 10000, paymentAgentUrl);
   
-  if (response.Result !== '0000') {
-    console.warn('Custom receipt print failed:', response.Message);
+  const isSuccess = response.result === 0 || response.Result === '0000';
+  if (!isSuccess) {
+    const errorMsg = response.message || response.Message;
+    console.warn('Custom receipt print failed:', errorMsg);
   }
 }
 

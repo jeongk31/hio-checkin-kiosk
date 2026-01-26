@@ -1,11 +1,23 @@
 // Payment Agent Types for Hanuriit VtrRestServer
 
 /**
- * Base response from payment agent
+ * Actual VTR API response structure (nested)
+ */
+export interface VTRApiResponse {
+  result: number;  // 0 = success, -888 = terminal not responding
+  message: string;
+  data: Record<string, unknown>;
+}
+
+/**
+ * Base response from payment agent (legacy format)
  */
 export interface PaymentAgentResponse {
-  Result: string;  // "0000" = success
-  Message: string;
+  Result?: string;  // "0000" = success (legacy)
+  result?: number;  // 0 = success (actual API)
+  Message?: string; // legacy
+  message?: string; // actual API
+  data?: Record<string, unknown>; // actual API - nested data
 }
 
 /**
@@ -16,6 +28,14 @@ export interface TokenResponse extends PaymentAgentResponse {
   Card_no?: string;
   Emv_data?: string;
   Card_name?: string;
+  // Actual API nested data fields
+  Vt_data?: string;
+  Vt_length?: string;
+  Resp_div?: string;
+  Keyin?: string;
+  Fallback_div?: string;
+  Msg1?: string;
+  Msg2?: string;
 }
 
 /**
@@ -210,6 +230,7 @@ export class PaymentError extends Error {
  * Error code descriptions (Korean)
  */
 export const ERROR_MESSAGES: Record<string, string> = {
+  '0': '정상',
   '0000': '정상',
   '-888': '결제 단말기가 응답하지 않습니다. VTR 단말기와 VtrRestServer를 확인해 주세요.',
   '9001': '카드를 읽어주세요',
