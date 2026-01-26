@@ -59,7 +59,7 @@ fi
 
 # Rebuild and restart container WITHOUT CACHE
 echo "🏗️  Building and starting container (no cache)..."
-docker compose -f docker-compose.prod.yml build --no-cache
+docker compose -f docker-compose.prod.yml build
 docker compose -f docker-compose.prod.yml up -d
 
 # Wait for container to be healthy
