@@ -132,25 +132,33 @@ export async function getCreditToken(amount: number, paymentAgentUrl?: string): 
     throw new PaymentError(errorCode, errorMsg);
   }
   
-  // Extract data from nested structure if present
-  if (response.data) {
+  // Extract data from nested structure if present (actual API format)
+  if (response.data && typeof response.data === 'object') {
+    const data = response.data as Record<string, unknown>;
     return {
-      ...response,
-      Track_data: response.data.Vt_data as string || response.Track_data,
-      Vt_data: response.data.Vt_data as string,
-      Vt_length: response.data.Vt_length as string,
-      Resp_div: response.data.Resp_div as string,
-      Keyin: response.data.Keyin as string,
-      Fallback_div: response.data.Fallback_div as string,
-      Msg1: response.data.Msg1 as string,
-      Msg2: response.data.Msg2 as string,
-      Emv_data: response.data.Emv_data as string || response.Emv_data,
-      Card_no: response.data.Card_no as string || response.Card_no,
-      Card_name: response.data.Card_name as string || response.Card_name,
+      Result: response.Result || '0000',
+      result: response.result ?? 0,
+      Message: response.Message || response.message || '성공',
+      message: response.message || response.Message || '성공',
+      Track_data: (data.Vt_data as string) || response.Track_data,
+      Vt_data: data.Vt_data as string,
+      Vt_length: data.Vt_length as string,
+      Resp_div: data.Resp_div as string,
+      Keyin: data.Keyin as string,
+      Fallback_div: data.Fallback_div as string,
+      Msg1: data.Msg1 as string,
+      Msg2: data.Msg2 as string,
+      Emv_data: (data.Emv_data as string) || response.Emv_data,
+      Card_no: (data.Card_no as string) || response.Card_no,
+      Card_name: (data.Card_name as string) || response.Card_name,
     };
   }
   
-  return response;
+  // Legacy flat structure - return as-is but ensure Track_data exists
+  return {
+    ...response,
+    Track_data: response.Track_data || response.Vt_data,
+  };
 }
 
 /**
@@ -215,22 +223,27 @@ export async function approveCreditCard(
     throw new PaymentError(errorCode, errorMsg);
   }
   
-  // Extract data from nested structure if present
-  if (response.data) {
+  // Extract data from nested structure if present (actual API format)
+  if (response.data && typeof response.data === 'object') {
+    const data = response.data as Record<string, unknown>;
     return {
-      ...response,
-      Approval_no: response.data.Approval_no as string || response.Approval_no,
-      Auth_date: response.data.Auth_date as string || response.Auth_date,
-      Auth_time: response.data.Auth_time as string || response.Auth_time,
-      Card_no: response.data.Card_no as string || response.Card_no,
-      Card_name: response.data.Card_name as string || response.Card_name,
-      Acquirer_name: response.data.Acquirer_name as string || response.Acquirer_name,
-      Merchant_no: response.data.Merchant_no as string || response.Merchant_no,
-      Halbu: response.data.Halbu as string || response.Halbu,
-      Amount: response.data.Amount as string || response.Amount,
+      Result: response.Result || '0000',
+      result: response.result ?? 0,
+      Message: response.Message || response.message || '성공',
+      message: response.message || response.Message || '성공',
+      Approval_no: (data.Approval_no as string) || response.Approval_no,
+      Auth_date: (data.Auth_date as string) || response.Auth_date,
+      Auth_time: (data.Auth_time as string) || response.Auth_time,
+      Card_no: (data.Card_no as string) || response.Card_no,
+      Card_name: (data.Card_name as string) || response.Card_name,
+      Acquirer_name: (data.Acquirer_name as string) || response.Acquirer_name,
+      Merchant_no: (data.Merchant_no as string) || response.Merchant_no,
+      Halbu: (data.Halbu as string) || response.Halbu,
+      Amount: (data.Amount as string) || response.Amount,
     };
   }
   
+  // Legacy flat structure - return as-is
   return response;
 }
 
@@ -287,18 +300,23 @@ export async function cancelCreditCard(
     throw new PaymentError(errorCode, errorMsg);
   }
   
-  // Extract data from nested structure if present
-  if (response.data) {
+  // Extract data from nested structure if present (actual API format)
+  if (response.data && typeof response.data === 'object') {
+    const data = response.data as Record<string, unknown>;
     return {
-      ...response,
-      Approval_no: response.data.Approval_no as string || response.Approval_no,
-      Auth_date: response.data.Auth_date as string || response.Auth_date,
-      Auth_time: response.data.Auth_time as string || response.Auth_time,
-      Card_no: response.data.Card_no as string || response.Card_no,
-      Card_name: response.data.Card_name as string || response.Card_name,
+      Result: response.Result || '0000',
+      result: response.result ?? 0,
+      Message: response.Message || response.message || '성공',
+      message: response.message || response.Message || '성공',
+      Approval_no: (data.Approval_no as string) || response.Approval_no,
+      Auth_date: (data.Auth_date as string) || response.Auth_date,
+      Auth_time: (data.Auth_time as string) || response.Auth_time,
+      Card_no: (data.Card_no as string) || response.Card_no,
+      Card_name: (data.Card_name as string) || response.Card_name,
     };
   }
   
+  // Legacy flat structure - return as-is
   return response;
 }
 
