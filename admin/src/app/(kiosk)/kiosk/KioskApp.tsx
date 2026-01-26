@@ -475,6 +475,8 @@ export default function KioskApp({ kiosk, content, paymentResult, userRole }: Ki
   const [inputData, setInputData] = useState<InputData>({});
   const [paymentState, setPaymentState] = useState<'idle' | 'processing' | 'success' | 'failed'>('idle');
   const [paymentError, setPaymentError] = useState<string | null>(null);
+  // Payment session key to force PaymentProcessScreen remount on each new payment attempt
+  const [paymentSessionKey, setPaymentSessionKey] = useState<number>(0);
   // Amenity state
   const [selectedAmenities, setSelectedAmenities] = useState<SelectedAmenity[]>([]);
   const [amenityTotal, setAmenityTotal] = useState(0);
@@ -753,6 +755,19 @@ export default function KioskApp({ kiosk, content, paymentResult, userRole }: Ki
     if (screenName === 'start') {
       setSelectedRoom(null);
       setInputData({});
+      // Reset payment state when returning to start
+      setPaymentState('idle');
+      setPaymentError(null);
+      // Reset amenities
+      setSelectedAmenities([]);
+      setAmenityTotal(0);
+    }
+    // Reset payment state when entering payment-confirm (before payment-process)
+    // Increment session key to force PaymentProcessScreen remount
+    if (screenName === 'payment-confirm') {
+      setPaymentState('idle');
+      setPaymentError(null);
+      setPaymentSessionKey(prev => prev + 1);
     }
     // Sync current screen to database
     if (kiosk) {
@@ -926,7 +941,8 @@ export default function KioskApp({ kiosk, content, paymentResult, userRole }: Ki
       case 'payment-confirm':
         return <PaymentConfirmScreen goToScreen={goToScreen} selectedRoom={selectedRoom} t={t} openStaffModal={openStaffModal} callProps={callProps} amenityTotal={amenityTotal} />;
       case 'payment-process':
-        return <PaymentProcessScreen goToScreen={goToScreen} selectedRoom={selectedRoom} t={t} openStaffModal={openStaffModal} paymentState={paymentState} paymentError={paymentError} setPaymentState={setPaymentState} setPaymentError={setPaymentError} callProps={callProps} amenityTotal={amenityTotal} inputData={inputData} syncInputData={syncInputData} kiosk={kiosk} />;
+        // Use key prop to force remount on each new payment attempt, resetting hasStartedPayment ref
+        return <PaymentProcessScreen key={`payment-${paymentSessionKey}`} goToScreen={goToScreen} selectedRoom={selectedRoom} t={t} openStaffModal={openStaffModal} paymentState={paymentState} paymentError={paymentError} setPaymentState={setPaymentState} setPaymentError={setPaymentError} callProps={callProps} amenityTotal={amenityTotal} inputData={inputData} syncInputData={syncInputData} kiosk={kiosk} />;
       case 'walkin-info':
         return <HotelInfoScreen goToScreen={goToScreen} flowType="walkin" t={t} projectId={kiosk?.project_id} selectedRoomTypeId={selectedRoom?.id} syncInputData={syncInputData} inputData={inputData} openStaffModal={openStaffModal} callProps={callProps} amenityTotal={amenityTotal} selectedAmenities={selectedAmenities} selectedRoom={selectedRoom} resetAmenities={resetAmenities} />;
       case 'checkout':
