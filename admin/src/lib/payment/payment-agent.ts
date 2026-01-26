@@ -124,6 +124,8 @@ export async function getCreditToken(amount: number, paymentAgentUrl?: string): 
     paymentAgentUrl
   );
   
+  console.log('[getCreditToken] Raw response:', JSON.stringify(response, null, 2));
+  
   // Check success - handle both API formats
   const isSuccess = response.result === 0 || response.Result === '0000';
   if (!isSuccess) {
@@ -135,7 +137,7 @@ export async function getCreditToken(amount: number, paymentAgentUrl?: string): 
   // Extract data from nested structure if present (actual API format)
   if (response.data && typeof response.data === 'object') {
     const data = response.data as Record<string, unknown>;
-    return {
+    const result = {
       Result: response.Result || '0000',
       result: response.result ?? 0,
       Message: response.Message || response.message || '성공',
@@ -152,13 +154,18 @@ export async function getCreditToken(amount: number, paymentAgentUrl?: string): 
       Card_no: (data.Card_no as string) || response.Card_no,
       Card_name: (data.Card_name as string) || response.Card_name,
     };
+    console.log('[getCreditToken] Extracted result:', JSON.stringify(result, null, 2));
+    console.log('[getCreditToken] Track_data:', result.Track_data);
+    return result;
   }
   
   // Legacy flat structure - return as-is but ensure Track_data exists
-  return {
+  const legacyResult = {
     ...response,
     Track_data: response.Track_data || response.Vt_data,
   };
+  console.log('[getCreditToken] Legacy result Track_data:', legacyResult.Track_data);
+  return legacyResult;
 }
 
 /**
@@ -174,6 +181,8 @@ export async function approveCreditCard(
   paymentAgentUrl?: string
 ): Promise<ApprovalResponse> {
   const tax = Math.round(amount / 11); // 10% VAT
+  
+  console.log('[approveCreditCard] Input params:', { amount, trackData, emvData, transactionId, installmentMonths });
   
   const request: ApprovalRequest = {
     sbuffer: {
@@ -208,12 +217,16 @@ export async function approveCreditCard(
     resbuffer: { bufferdata: '' },
   };
   
+  console.log('[approveCreditCard] Request body:', JSON.stringify(request, null, 2));
+  
   const response = await agentRequest<ApprovalResponse>(
     'ApprovalServerSec', 
     request,
     DEFAULT_TIMEOUT,
     paymentAgentUrl
   );
+  
+  console.log('[approveCreditCard] Response:', JSON.stringify(response, null, 2));
   
   // Check success - handle both API formats
   const isSuccess = response.result === 0 || response.Result === '0000';
