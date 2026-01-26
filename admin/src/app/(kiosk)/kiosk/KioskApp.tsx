@@ -479,6 +479,8 @@ export default function KioskApp({ kiosk, content, paymentResult, userRole }: Ki
   const [paymentSessionKey, setPaymentSessionKey] = useState<number>(0);
   // Previous screen tracking for back navigation
   const [previousScreen, setPreviousScreen] = useState<ScreenName | null>(null);
+  // Track if amenity screen was actually shown (not auto-skipped)
+  const [amenityScreenShown, setAmenityScreenShown] = useState(false);
   // Amenity state
   const [selectedAmenities, setSelectedAmenities] = useState<SelectedAmenity[]>([]);
   const [amenityTotal, setAmenityTotal] = useState(0);
@@ -757,6 +759,7 @@ export default function KioskApp({ kiosk, content, paymentResult, userRole }: Ki
   }, []);
 
   const goToScreen = useCallback((screenName: ScreenName) => {
+    console.log(`[Navigation] ${currentScreen} → ${screenName}`);
     // Track previous screen before navigating
     setPreviousScreen(currentScreen);
     setCurrentScreen(screenName);
@@ -769,6 +772,7 @@ export default function KioskApp({ kiosk, content, paymentResult, userRole }: Ki
       // Reset amenities
       setSelectedAmenities([]);
       setAmenityTotal(0);
+      setAmenityScreenShown(false);
     }
     // Reset payment state when entering payment-confirm (before payment-process)
     // Increment session key to force PaymentProcessScreen remount
@@ -935,7 +939,7 @@ export default function KioskApp({ kiosk, content, paymentResult, userRole }: Ki
       case 'checkin-id-verification':
         return <IDVerificationScreen goToScreen={goToScreen} flowType="checkin" syncInputData={syncInputData} t={t} projectId={kiosk?.project_id} reservationId={inputData.reservation?.id} openStaffModal={openStaffModal} signatureName={inputData.signature} callProps={callProps} />;
       case 'checkin-amenity-selection':
-        return <AmenitySelectionScreen goToScreen={goToScreen} flowType="checkin" t={t} projectId={kiosk?.project_id} openStaffModal={openStaffModal} callProps={callProps} selectedAmenities={selectedAmenities} setSelectedAmenities={setSelectedAmenities} amenityTotal={amenityTotal} setAmenityTotal={setAmenityTotal} reservationId={inputData.reservation?.id} />;
+        return <AmenitySelectionScreen goToScreen={goToScreen} flowType="checkin" t={t} projectId={kiosk?.project_id} openStaffModal={openStaffModal} callProps={callProps} selectedAmenities={selectedAmenities} setSelectedAmenities={setSelectedAmenities} amenityTotal={amenityTotal} setAmenityTotal={setAmenityTotal} reservationId={inputData.reservation?.id} setAmenityScreenShown={setAmenityScreenShown} />;
       case 'checkin-info':
         return <HotelInfoScreen goToScreen={goToScreen} flowType="checkin" t={t} projectId={kiosk?.project_id} syncInputData={syncInputData} inputData={inputData} openStaffModal={openStaffModal} callProps={callProps} amenityTotal={amenityTotal} selectedAmenities={selectedAmenities} resetAmenities={resetAmenities} />;
       case 'room-selection':
@@ -945,9 +949,9 @@ export default function KioskApp({ kiosk, content, paymentResult, userRole }: Ki
       case 'walkin-id-verification':
         return <IDVerificationScreen goToScreen={goToScreen} flowType="walkin" syncInputData={syncInputData} t={t} projectId={kiosk?.project_id} openStaffModal={openStaffModal} signatureName={inputData.signature} callProps={callProps} />;
       case 'walkin-amenity-selection':
-        return <AmenitySelectionScreen goToScreen={goToScreen} flowType="walkin" t={t} projectId={kiosk?.project_id} openStaffModal={openStaffModal} callProps={callProps} selectedAmenities={selectedAmenities} setSelectedAmenities={setSelectedAmenities} amenityTotal={amenityTotal} setAmenityTotal={setAmenityTotal} selectedRoom={selectedRoom} />;
+        return <AmenitySelectionScreen goToScreen={goToScreen} flowType="walkin" t={t} projectId={kiosk?.project_id} openStaffModal={openStaffModal} callProps={callProps} selectedAmenities={selectedAmenities} setSelectedAmenities={setSelectedAmenities} amenityTotal={amenityTotal} setAmenityTotal={setAmenityTotal} selectedRoom={selectedRoom} setAmenityScreenShown={setAmenityScreenShown} />;
       case 'payment-confirm':
-        return <PaymentConfirmScreen goToScreen={goToScreen} selectedRoom={selectedRoom} t={t} openStaffModal={openStaffModal} callProps={callProps} amenityTotal={amenityTotal} previousScreen={previousScreen} />;
+        return <PaymentConfirmScreen goToScreen={goToScreen} selectedRoom={selectedRoom} t={t} openStaffModal={openStaffModal} callProps={callProps} amenityTotal={amenityTotal} previousScreen={previousScreen} amenityScreenShown={amenityScreenShown} />;
       case 'payment-process':
         // Use key prop to force remount on each new payment attempt, resetting hasStartedPayment ref
         return <PaymentProcessScreen key={`payment-${paymentSessionKey}`} goToScreen={goToScreen} selectedRoom={selectedRoom} t={t} openStaffModal={openStaffModal} paymentState={paymentState} paymentError={paymentError} setPaymentState={setPaymentState} setPaymentError={setPaymentError} callProps={callProps} amenityTotal={amenityTotal} inputData={inputData} syncInputData={syncInputData} kiosk={kiosk} />;
@@ -3683,6 +3687,7 @@ function AmenitySelectionScreen({
   setAmenityTotal,
   selectedRoom,
   reservationId,
+  setAmenityScreenShown,
 }: {
   goToScreen: (screen: ScreenName) => void;
   flowType: 'checkin' | 'walkin';
@@ -3696,6 +3701,7 @@ function AmenitySelectionScreen({
   setAmenityTotal: (total: number) => void;
   selectedRoom?: Room | null;
   reservationId?: string;
+  setAmenityScreenShown?: (shown: boolean) => void;
 }) {
   const [amenities, setAmenities] = useState<AmenityData[]>([]);
   const [loading, setLoading] = useState(true);
@@ -3735,8 +3741,11 @@ function AmenitySelectionScreen({
       } else {
         goToScreen('payment-confirm');
       }
+    } else if (!loading && amenities.length > 0) {
+      // Amenities exist, mark screen as actually shown
+      setAmenityScreenShown?.(true);
     }
-  }, [loading, amenities, flowType, goToScreen]);
+  }, [loading, amenities, flowType, goToScreen, setAmenityScreenShown]);
 
   const handleQuantityChange = (amenity: AmenityData, delta: number) => {
     const existing = selectedAmenities.find((a) => a.amenityId === amenity.id);
@@ -4013,6 +4022,7 @@ function PaymentConfirmScreen({
   callProps,
   amenityTotal = 0,
   previousScreen,
+  amenityScreenShown = false,
 }: {
   goToScreen: (screen: ScreenName) => void;
   selectedRoom: Room | null;
@@ -4021,6 +4031,7 @@ function PaymentConfirmScreen({
   callProps: CallProps;
   amenityTotal?: number;
   previousScreen: ScreenName | null;
+  amenityScreenShown?: boolean;
 }) {
   const roomPrice = selectedRoom?.price || 65000;
   const totalPrice = roomPrice + amenityTotal;
@@ -4037,15 +4048,42 @@ function PaymentConfirmScreen({
 
   // Determine which screen to go back to
   const handleBack = () => {
-    // Default fallbacks based on common flows
-    if (previousScreen === 'walkin-amenity-selection' || previousScreen === 'checkin-amenity-selection') {
-      goToScreen(previousScreen);
-    } else if (previousScreen === 'room-selection') {
-      goToScreen('room-selection');
-    } else {
-      // Fallback to amenity selection if unknown
-      goToScreen('walkin-amenity-selection');
+    console.log('[PaymentConfirm] Back button clicked, previousScreen:', previousScreen, 'amenityScreenShown:', amenityScreenShown);
+    
+    // If amenity screen was auto-skipped (not shown), skip it on back too
+    if (previousScreen === 'walkin-amenity-selection' && !amenityScreenShown) {
+      console.log('[PaymentConfirm] Amenity screen was auto-skipped, going to walkin-id-verification');
+      goToScreen('walkin-id-verification');
+      return;
     }
+    
+    if (previousScreen === 'checkin-amenity-selection' && !amenityScreenShown) {
+      console.log('[PaymentConfirm] Amenity screen was auto-skipped, going to checkin-id-verification');
+      goToScreen('checkin-id-verification');
+      return;
+    }
+    
+    // If we have a valid previous screen, go there
+    if (previousScreen) {
+      // List of screens that can lead to payment-confirm
+      const validPreviousScreens = [
+        'walkin-amenity-selection',
+        'checkin-amenity-selection',
+        'room-selection',
+        'walkin-id-verification',
+        'checkin-id-verification',
+      ];
+      
+      if (validPreviousScreens.includes(previousScreen)) {
+        console.log('[PaymentConfirm] Going back to:', previousScreen);
+        goToScreen(previousScreen);
+        return;
+      }
+    }
+    
+    // Fallback: go to ID verification (safer than amenity which might auto-skip)
+    console.log('[PaymentConfirm] No valid previous screen, defaulting to walkin-id-verification');
+    goToScreen('walkin-id-verification');
   };
 
   return (
