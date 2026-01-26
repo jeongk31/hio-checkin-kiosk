@@ -270,6 +270,7 @@ function KioskLivePreview({
   const [isReceiving, setIsReceiving] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [isCalling, setIsCalling] = useState(false);
+  const [isCancelingCheckout, setIsCancelingCheckout] = useState(false);
   const lastFrameTimeRef = useRef<number>(0);
 
   // Only super_admin has access to VoiceCallContext (returns null for others)
@@ -285,6 +286,34 @@ function KioskLivePreview({
       await callKiosk(kiosk.id);
     } finally {
       setIsCalling(false);
+    }
+  };
+
+  const handleCancelCheckout = async () => {
+    if (!confirm(`"${kiosk.name}" 키오스크의 체크아웃을 취소하시겠습니까?\n키오스크가 시작 화면으로 돌아갑니다.`)) return;
+
+    setIsCancelingCheckout(true);
+    try {
+      const response = await fetch('/api/kiosk-control', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          kioskId: kiosk.id,
+          command: 'cancel_checkout',
+          payload: {} 
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Cancel checkout failed');
+      }
+      
+      alert('체크아웃 취소 명령을 전송했습니다.');
+    } catch (error) {
+      console.error('Failed to cancel checkout:', error);
+      alert('체크아웃 취소에 실패했습니다.');
+    } finally {
+      setIsCancelingCheckout(false);
     }
   };
 
@@ -385,6 +414,14 @@ function KioskLivePreview({
                   {isCalling ? '연결 중...' : '전화'}
                 </button>
               )}
+              <button
+                onClick={handleCancelCheckout}
+                disabled={isCancelingCheckout}
+                className="px-2 py-1 text-xs bg-orange-50 text-orange-600 hover:bg-orange-100 rounded transition-colors disabled:opacity-50"
+                title="체크아웃 취소 (시작 화면으로)"
+              >
+                {isCancelingCheckout ? '취소 중...' : '체크아웃 취소'}
+              </button>
               <button
                 onClick={handleLogoutKiosk}
                 disabled={isLoggingOut}

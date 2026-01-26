@@ -477,6 +477,8 @@ export default function KioskApp({ kiosk, content, paymentResult, userRole }: Ki
   const [paymentError, setPaymentError] = useState<string | null>(null);
   // Payment session key to force PaymentProcessScreen remount on each new payment attempt
   const [paymentSessionKey, setPaymentSessionKey] = useState<number>(0);
+  // Previous screen tracking for back navigation
+  const [previousScreen, setPreviousScreen] = useState<ScreenName | null>(null);
   // Amenity state
   const [selectedAmenities, setSelectedAmenities] = useState<SelectedAmenity[]>([]);
   const [amenityTotal, setAmenityTotal] = useState(0);
@@ -558,6 +560,10 @@ export default function KioskApp({ kiosk, content, paymentResult, userRole }: Ki
           console.log('Remote logout signal received');
           window.location.href = '/api/auth/logout';
           return;
+        }
+        if (cmd.command === 'cancel_checkout') {
+          console.log('Remote cancel checkout signal received');
+          goToScreen('start');
         }
       }
     };
@@ -751,6 +757,8 @@ export default function KioskApp({ kiosk, content, paymentResult, userRole }: Ki
   }, []);
 
   const goToScreen = useCallback((screenName: ScreenName) => {
+    // Track previous screen before navigating
+    setPreviousScreen(currentScreen);
     setCurrentScreen(screenName);
     if (screenName === 'start') {
       setSelectedRoom(null);
@@ -779,7 +787,7 @@ export default function KioskApp({ kiosk, content, paymentResult, userRole }: Ki
         if (!success) console.error('Error updating current_screen');
       });
     }
-  }, [kiosk]);
+  }, [kiosk, currentScreen]);
 
   const openStaffModal = useCallback(async () => {
     // Prevent rapid clicking
@@ -939,7 +947,7 @@ export default function KioskApp({ kiosk, content, paymentResult, userRole }: Ki
       case 'walkin-amenity-selection':
         return <AmenitySelectionScreen goToScreen={goToScreen} flowType="walkin" t={t} projectId={kiosk?.project_id} openStaffModal={openStaffModal} callProps={callProps} selectedAmenities={selectedAmenities} setSelectedAmenities={setSelectedAmenities} amenityTotal={amenityTotal} setAmenityTotal={setAmenityTotal} selectedRoom={selectedRoom} />;
       case 'payment-confirm':
-        return <PaymentConfirmScreen goToScreen={goToScreen} selectedRoom={selectedRoom} t={t} openStaffModal={openStaffModal} callProps={callProps} amenityTotal={amenityTotal} />;
+        return <PaymentConfirmScreen goToScreen={goToScreen} selectedRoom={selectedRoom} t={t} openStaffModal={openStaffModal} callProps={callProps} amenityTotal={amenityTotal} previousScreen={previousScreen} />;
       case 'payment-process':
         // Use key prop to force remount on each new payment attempt, resetting hasStartedPayment ref
         return <PaymentProcessScreen key={`payment-${paymentSessionKey}`} goToScreen={goToScreen} selectedRoom={selectedRoom} t={t} openStaffModal={openStaffModal} paymentState={paymentState} paymentError={paymentError} setPaymentState={setPaymentState} setPaymentError={setPaymentError} callProps={callProps} amenityTotal={amenityTotal} inputData={inputData} syncInputData={syncInputData} kiosk={kiosk} />;
@@ -4004,6 +4012,7 @@ function PaymentConfirmScreen({
   openStaffModal,
   callProps,
   amenityTotal = 0,
+  previousScreen,
 }: {
   goToScreen: (screen: ScreenName) => void;
   selectedRoom: Room | null;
@@ -4011,6 +4020,7 @@ function PaymentConfirmScreen({
   openStaffModal: () => void;
   callProps: CallProps;
   amenityTotal?: number;
+  previousScreen: ScreenName | null;
 }) {
   const roomPrice = selectedRoom?.price || 65000;
   const totalPrice = roomPrice + amenityTotal;
@@ -4025,12 +4035,25 @@ function PaymentConfirmScreen({
     goToScreen('payment-process');
   };
 
+  // Determine which screen to go back to
+  const handleBack = () => {
+    // Default fallbacks based on common flows
+    if (previousScreen === 'walkin-amenity-selection' || previousScreen === 'checkin-amenity-selection') {
+      goToScreen(previousScreen);
+    } else if (previousScreen === 'room-selection') {
+      goToScreen('room-selection');
+    } else {
+      // Fallback to amenity selection if unknown
+      goToScreen('walkin-amenity-selection');
+    }
+  };
+
   return (
     <div className="screen">
       <div className="screen-wrapper">
         <TopButtonRow onStaffCall={openStaffModal} callStatus={callProps.callStatus} callDuration={callProps.callDuration} onEndCall={callProps.onEndCall} isCallActive={callProps.isCallActive} />
         <div className="container">
-          <NavArrow direction="left" label="이전" onClick={() => goToScreen('walkin-amenity-selection')} />
+          <NavArrow direction="left" label="이전" onClick={handleBack} />
           <div className="logo">
             <Image src="/logo.png" alt="HiO" width={200} height={80} className="logo-image" />
           </div>
