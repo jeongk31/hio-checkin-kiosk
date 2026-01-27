@@ -270,6 +270,7 @@ function KioskLivePreview({
   const [isReceiving, setIsReceiving] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [isCalling, setIsCalling] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [isCancelingCheckout, setIsCancelingCheckout] = useState(false);
   const lastFrameTimeRef = useRef<number>(0);
 
@@ -289,6 +290,7 @@ function KioskLivePreview({
     }
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleCancelCheckout = async () => {
     if (!confirm(`"${kiosk.name}" 키오스크의 체크아웃을 취소하시겠습니까?\n키오스크가 시작 화면으로 돌아갑니다.`)) return;
 

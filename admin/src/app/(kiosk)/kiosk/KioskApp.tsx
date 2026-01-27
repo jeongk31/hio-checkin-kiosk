@@ -2919,6 +2919,7 @@ function IDVerificationScreen({
   };
 
   // DEBUG: Skip ID card capture and go directly to face capture
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleSkipIdCapture = async () => {
     // Set a dummy ID card image (1x1 transparent pixel base64)
     const dummyImage = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
