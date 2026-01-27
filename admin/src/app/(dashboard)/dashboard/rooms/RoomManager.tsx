@@ -482,6 +482,44 @@ export default function RoomManager({
     }
   };
 
+  const handleCancelCheckIn = async (reservation: Reservation) => {
+    if (!confirm(`${reservation.guest_name || '게스트'}님의 체크인을 취소하시겠습니까?\n\n예약 상태가 '예약됨'으로 변경되고, 본인인증 정보가 초기화됩니다.`)) {
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await fetch('/api/reservations', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: reservation.id,
+          projectId: reservation.project_id,
+          status: 'confirmed', // Reset to confirmed status
+          // Clear verified guests
+          verified_guests: [],
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        // Update the reservation in state
+        setReservations(reservations.map((r) =>
+          r.id === data.reservation.id ? data.reservation : r
+        ));
+        alert('체크인이 취소되었습니다.');
+      } else {
+        const data = await res.json();
+        alert(data.error || '체크인 취소에 실패했습니다.');
+      }
+    } catch (error) {
+      console.error('Error canceling check-in:', error);
+      alert('체크인 취소 중 오류가 발생했습니다.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleEditRoom = (room: Room) => {
     setEditingRoom(room);
     // Find if there's an existing reservation for this room (any active status)
@@ -1012,6 +1050,15 @@ export default function RoomManager({
 
                       {/* Actions */}
                       <div className="flex items-center gap-2 ml-4">
+                        {reservation && reservation.status === 'checked_in' && (
+                          <button
+                            onClick={() => handleCancelCheckIn(reservation)}
+                            className="px-3 py-1 bg-orange-500 text-white rounded hover:bg-orange-600 text-sm font-medium"
+                            title="체크인 취소"
+                          >
+                            체크인 취소
+                          </button>
+                        )}
                         <button
                           onClick={() => handleEditRoom(room)}
                           className="text-blue-600 hover:text-blue-900 text-sm"
