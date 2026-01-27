@@ -2316,6 +2316,11 @@ function IDVerificationScreen({
   const hasAutoCapturedRef = useRef(false);
   const faceDetectedRef = useRef(false); // Ref to track face detection inside interval (avoids closure issues)
   const countdownActiveRef = useRef(false); // Ref to track if countdown is running (don't cancel once started)
+  
+  // ID card detection state for auto-capture
+  const [idCardDetected, setIdCardDetected] = useState(false);
+  const idCardDetectionIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const idCardDetectedRef = useRef(false);
 
   // Cleanup camera on unmount
   useEffect(() => {
@@ -2326,6 +2331,10 @@ function IDVerificationScreen({
       // Cleanup face detection
       if (faceDetectionIntervalRef.current) {
         clearInterval(faceDetectionIntervalRef.current);
+      }
+      // Cleanup ID card detection
+      if (idCardDetectionIntervalRef.current) {
+        clearInterval(idCardDetectionIntervalRef.current);
       }
       if (autoCaptureTimerRef.current) {
         clearTimeout(autoCaptureTimerRef.current);
@@ -2370,6 +2379,8 @@ function IDVerificationScreen({
     }
     // Stop face detection when camera stops
     stopFaceDetection();
+    // Stop ID card detection when camera stops
+    stopIdCardDetection();
   };
 
   // Initialize face-api.js models (only loads once globally)
@@ -2568,6 +2579,108 @@ function IDVerificationScreen({
     countdownActiveRef.current = false; // Reset countdown active flag
   };
 
+  // Start ID card detection loop for auto-capture
+  const startIdCardDetection = () => {
+    // Reset state
+    setIdCardDetected(false);
+    setAutoCaptureCooldown(0);
+    hasAutoCapturedRef.current = false;
+    idCardDetectedRef.current = false;
+    countdownActiveRef.current = false;
+
+    console.log('[IDDetection] Starting ID card content detection');
+
+    // Start detection loop (every 500ms)
+    idCardDetectionIntervalRef.current = setInterval(() => {
+      if (!videoRef.current || !canvasRef.current || hasAutoCapturedRef.current) return;
+
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+      const context = canvas.getContext('2d');
+      if (!context || video.readyState !== 4) return;
+
+      try {
+        // Analyze the ID card region for content
+        const videoWidth = video.videoWidth;
+        const videoHeight = video.videoHeight;
+
+        // ID card region: x=7.5%, y=15%, width=85%, height=70%
+        const cropX = videoWidth * 0.075;
+        const cropY = videoHeight * 0.15;
+        const cropWidth = videoWidth * 0.85;
+        const cropHeight = videoHeight * 0.70;
+
+        // Create a small sample canvas for analysis
+        canvas.width = 160;  // Small size for fast analysis
+        canvas.height = 120;
+
+        // Draw the ID card region scaled down
+        context.drawImage(
+          video,
+          cropX, cropY, cropWidth, cropHeight,
+          0, 0, 160, 120
+        );
+
+        // Get pixel data
+        const imageData = context.getImageData(0, 0, 160, 120);
+        const data = imageData.data;
+
+        // Calculate average brightness and variance (to detect if there's an object)
+        let totalBrightness = 0;
+        let brightPixels = 0;
+        const sampleSize = data.length / 4; // Number of pixels
+
+        for (let i = 0; i < data.length; i += 4) {
+          const r = data[i];
+          const g = data[i + 1];
+          const b = data[i + 2];
+          const brightness = (r + g + b) / 3;
+          totalBrightness += brightness;
+          if (brightness > 50) brightPixels++; // Count non-dark pixels
+        }
+
+        const avgBrightness = totalBrightness / sampleSize;
+        const brightRatio = brightPixels / sampleSize;
+
+        // Detect if there's sufficient content (not just dark/empty frame)
+        // ID card should have good lighting and content
+        const hasContent = avgBrightness > 60 && brightRatio > 0.3;
+
+        if (hasContent) {
+          if (!idCardDetectedRef.current) {
+            console.log('[IDDetection] ✅ ID card content detected! Starting countdown...');
+            idCardDetectedRef.current = true;
+            setIdCardDetected(true);
+            startAutoCaptureCooldown();
+          }
+        } else {
+          // Only cancel if countdown hasn't started yet
+          if (idCardDetectedRef.current && !countdownActiveRef.current) {
+            console.log('[IDDetection] ❌ ID card content lost (before countdown)');
+            idCardDetectedRef.current = false;
+            setIdCardDetected(false);
+            cancelAutoCapture();
+          }
+        }
+      } catch (error) {
+        console.error('[IDDetection] Detection error:', error);
+      }
+    }, 500);
+  };
+
+  // Stop ID card detection loop
+  const stopIdCardDetection = () => {
+    if (idCardDetectionIntervalRef.current) {
+      clearInterval(idCardDetectionIntervalRef.current);
+      idCardDetectionIntervalRef.current = null;
+    }
+    cancelAutoCapture();
+    setIdCardDetected(false);
+    idCardDetectedRef.current = false;
+    hasAutoCapturedRef.current = false;
+    countdownActiveRef.current = false;
+  };
+
   // Capture ID card image - crops to match the mask area (x=7.5%, y=15%, w=85%, h=70%)
   // Note: We capture the raw video data without flipping - CSS transform only affects display
   const captureIdCardImage = (): string | null => {
@@ -2654,6 +2767,8 @@ function IDVerificationScreen({
     setVerificationStep('capturing-id');
     syncInputData({ currentGuest: 1, guestCount });
     await startCamera();
+    // Start ID card detection for auto-capture
+    startIdCardDetection();
   };
 
   // Step 1: Capture ID card and show preview
@@ -3268,7 +3383,14 @@ function IDVerificationScreen({
                       </mask>
                     </defs>
                     <rect width="100%" height="100%" fill="rgba(0,0,0,0.7)" mask="url(#idCardMask)" />
-                    <rect x="7.5%" y="15%" width="85%" height="70%" rx="8" fill="none" stroke="white" strokeWidth="3" strokeDasharray="10,5" />
+                    <rect 
+                      x="7.5%" y="15%" width="85%" height="70%" rx="8" 
+                      fill="none" 
+                      stroke={idCardDetected ? '#22c55e' : 'white'} 
+                      strokeWidth={idCardDetected ? '4' : '3'} 
+                      strokeDasharray={idCardDetected ? 'none' : '10,5'}
+                      style={{ transition: 'stroke 0.2s, stroke-width 0.2s' }}
+                    />
                   </svg>
                 ) : (
                   /* Face mask - oval cutout with dynamic border color based on face detection */
@@ -3293,7 +3415,7 @@ function IDVerificationScreen({
               </div>
 
               {/* Auto-capture countdown overlay */}
-              {verificationStep === 'capturing-face' && autoCaptureCooldown > 0 && (
+              {autoCaptureCooldown > 0 && (
                 <div style={{
                   position: 'absolute',
                   top: '50%',
@@ -3335,19 +3457,40 @@ function IDVerificationScreen({
                 </div>
               )}
 
+              {/* ID card detected indicator */}
+              {verificationStep === 'capturing-id' && idCardDetected && autoCaptureCooldown === 0 && (
+                <div style={{
+                  position: 'absolute',
+                  top: '10px',
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                  background: '#22c55e',
+                  color: 'white',
+                  padding: '6px 16px',
+                  borderRadius: '20px',
+                  fontSize: '13px',
+                  fontWeight: 500,
+                  zIndex: 10,
+                }}>
+                  ✓ 신분증 인식됨
+                </div>
+              )}
+
               {/* Helper text */}
               <div style={{
                 position: 'absolute',
                 bottom: '8px',
                 left: '50%',
                 transform: 'translateX(-50%)',
-                background: !faceDetectionAvailable 
-                  ? 'rgba(245, 158, 11, 0.8)' 
-                  : !faceApiReady 
-                    ? 'rgba(59, 130, 246, 0.8)' 
-                    : faceDetected 
-                      ? 'rgba(34, 197, 94, 0.8)' 
-                      : 'rgba(0,0,0,0.6)',
+                background: verificationStep === 'capturing-id'
+                  ? (idCardDetected ? 'rgba(34, 197, 94, 0.8)' : 'rgba(0,0,0,0.6)')
+                  : !faceDetectionAvailable 
+                    ? 'rgba(245, 158, 11, 0.8)' 
+                    : !faceApiReady 
+                      ? 'rgba(59, 130, 246, 0.8)' 
+                      : faceDetected 
+                        ? 'rgba(34, 197, 94, 0.8)' 
+                        : 'rgba(0,0,0,0.6)',
                 color: 'white',
                 padding: '4px 12px',
                 borderRadius: '4px',
@@ -3356,7 +3499,11 @@ function IDVerificationScreen({
                 transition: 'background 0.2s',
               }}>
                 {verificationStep === 'capturing-id' 
-                  ? '신분증을 영역 안에 맞춰주세요' 
+                  ? (autoCaptureCooldown > 0
+                      ? `${autoCaptureCooldown}초 후 자동 촬영...`
+                      : idCardDetected
+                        ? '✓ 신분증이 인식되었습니다'
+                        : '신분증을 영역 안에 맞춰주세요')
                   : !faceDetectionAvailable
                     ? '⚠ 자동 인식 불가 - "촬영" 버튼을 눌러주세요'
                     : !faceApiReady
