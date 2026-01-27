@@ -6,6 +6,11 @@ import Image from 'next/image';
 import { Kiosk } from '@/types/database';
 import { processPayment } from '@/lib/payment/payment-agent';
 import { KeyboardInput } from './VirtualKeyboard';
+import * as faceapi from 'face-api.js';
+
+// Face-api.js model loading state (global to avoid reloading)
+let faceApiModelsLoaded = false;
+let faceApiModelsLoading = false;
 
 // Global flag to stop all polling when unauthorized
 let isUnauthorized = false;
@@ -2300,12 +2305,30 @@ function IDVerificationScreen({
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  
+  // Face detection state for auto-capture (using face-api.js)
+  const [faceDetected, setFaceDetected] = useState(false);
+  const [autoCaptureCooldown, setAutoCaptureCooldown] = useState(0);
+  const [faceDetectionAvailable, setFaceDetectionAvailable] = useState(true);
+  const [faceApiReady, setFaceApiReady] = useState(false);
+  const faceDetectionIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const autoCaptureTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const hasAutoCapturedRef = useRef(false);
+  const faceDetectedRef = useRef(false); // Ref to track face detection inside interval (avoids closure issues)
+  const countdownActiveRef = useRef(false); // Ref to track if countdown is running (don't cancel once started)
 
   // Cleanup camera on unmount
   useEffect(() => {
     return () => {
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
+      }
+      // Cleanup face detection
+      if (faceDetectionIntervalRef.current) {
+        clearInterval(faceDetectionIntervalRef.current);
+      }
+      if (autoCaptureTimerRef.current) {
+        clearTimeout(autoCaptureTimerRef.current);
       }
     };
   }, []);
@@ -2345,6 +2368,204 @@ function IDVerificationScreen({
       streamRef.current.getTracks().forEach(track => track.stop());
       streamRef.current = null;
     }
+    // Stop face detection when camera stops
+    stopFaceDetection();
+  };
+
+  // Initialize face-api.js models (only loads once globally)
+  const initFaceApi = async () => {
+    // Already loaded
+    if (faceApiModelsLoaded) {
+      console.log('[FaceDetection] face-api.js models already loaded');
+      setFaceApiReady(true);
+      setFaceDetectionAvailable(true);
+      return true;
+    }
+    
+    // Currently loading by another instance
+    if (faceApiModelsLoading) {
+      console.log('[FaceDetection] face-api.js models already loading, waiting...');
+      // Wait for loading to complete
+      let attempts = 0;
+      while (faceApiModelsLoading && attempts < 50) {
+        await new Promise(resolve => setTimeout(resolve, 200));
+        attempts++;
+      }
+      if (faceApiModelsLoaded) {
+        setFaceApiReady(true);
+        setFaceDetectionAvailable(true);
+        return true;
+      }
+      return false;
+    }
+    
+    try {
+      faceApiModelsLoading = true;
+      console.log('[FaceDetection] Loading face-api.js TinyFaceDetector model...');
+      
+      // Load the TinyFaceDetector model (lightweight, fast)
+      await faceapi.nets.tinyFaceDetector.loadFromUri('/models');
+      
+      faceApiModelsLoaded = true;
+      faceApiModelsLoading = false;
+      setFaceApiReady(true);
+      setFaceDetectionAvailable(true);
+      console.log('[FaceDetection] ✅ face-api.js models loaded successfully');
+      return true;
+    } catch (error) {
+      faceApiModelsLoading = false;
+      console.error('[FaceDetection] Failed to load face-api.js models:', error);
+      setFaceDetectionAvailable(false);
+      return false;
+    }
+  };
+
+  // Start face detection loop for auto-capture using face-api.js
+  const startFaceDetection = async () => {
+    // Reset state
+    setFaceDetected(false);
+    setAutoCaptureCooldown(0);
+    hasAutoCapturedRef.current = false;
+    faceDetectedRef.current = false; // Reset ref too
+    countdownActiveRef.current = false; // Reset countdown active flag
+    
+    // Try to initialize face-api.js
+    const isReady = await initFaceApi();
+    if (!isReady) {
+      console.log('[FaceDetection] Running without auto-capture - face-api.js not available');
+      setFaceDetectionAvailable(false);
+      return;
+    }
+
+    console.log('[FaceDetection] Starting face detection loop with face-api.js');
+    
+    // Detection options for TinyFaceDetector
+    const detectionOptions = new faceapi.TinyFaceDetectorOptions({
+      inputSize: 320,    // Smaller = faster, options: 128, 160, 224, 320, 416, 512, 608
+      scoreThreshold: 0.5 // Confidence threshold
+    });
+
+    // Start detection loop (every 300ms - slightly slower for performance)
+    faceDetectionIntervalRef.current = setInterval(async () => {
+      if (!videoRef.current || hasAutoCapturedRef.current) return;
+      
+      const video = videoRef.current;
+      if (video.readyState !== 4) return; // Not ready yet
+      
+      try {
+        // Detect faces using face-api.js
+        const detections = await faceapi.detectAllFaces(video, detectionOptions);
+        
+        if (detections.length > 0) {
+          const face = detections[0];
+          const box = face.box;
+          
+          // Check if face is roughly centered in the ellipse area
+          // Ellipse: cx=50%, cy=50%, rx=25%, ry=35%
+          const videoWidth = video.videoWidth;
+          const videoHeight = video.videoHeight;
+          
+          const faceCenterX = box.x + box.width / 2;
+          const faceCenterY = box.y + box.height / 2;
+          
+          // Face should be within the center area
+          const centerX = videoWidth * 0.5;
+          const centerY = videoHeight * 0.5;
+          const toleranceX = videoWidth * 0.20; // 20% tolerance (slightly more forgiving)
+          const toleranceY = videoHeight * 0.25; // 25% tolerance
+          
+          const isCentered = 
+            Math.abs(faceCenterX - centerX) < toleranceX &&
+            Math.abs(faceCenterY - centerY) < toleranceY;
+          
+          // Face should be appropriately sized (not too small or too big)
+          const faceWidthRatio = box.width / videoWidth;
+          const isAppropriateSize = faceWidthRatio > 0.12 && faceWidthRatio < 0.65;
+          
+          if (isCentered && isAppropriateSize) {
+            if (!faceDetectedRef.current) {
+              console.log('[FaceDetection] ✅ Face properly positioned! Starting countdown...');
+              faceDetectedRef.current = true;
+              setFaceDetected(true);
+              // Start 3-second countdown for auto-capture
+              startAutoCaptureCooldown();
+            }
+          } else {
+            // Only cancel if countdown hasn't started yet
+            if (faceDetectedRef.current && !countdownActiveRef.current) {
+              console.log('[FaceDetection] ❌ Face moved out of position (before countdown)');
+              faceDetectedRef.current = false;
+              setFaceDetected(false);
+              cancelAutoCapture();
+            }
+            // If countdown is active, keep it going despite minor movement
+          }
+        } else {
+          // Only cancel if countdown hasn't started yet
+          if (faceDetectedRef.current && !countdownActiveRef.current) {
+            console.log('[FaceDetection] No face detected anymore (before countdown)');
+            faceDetectedRef.current = false;
+            setFaceDetected(false);
+            cancelAutoCapture();
+          }
+          // If countdown is active, keep it going
+        }
+      } catch (error) {
+        console.error('[FaceDetection] Detection error:', error);
+        // Don't disable on error, just log it
+      }
+    }, 300);
+  };
+
+  // Start countdown for auto-capture (3 seconds)
+  const startAutoCaptureCooldown = () => {
+    if (autoCaptureCooldown > 0 || hasAutoCapturedRef.current) return; // Already counting or captured
+    
+    countdownActiveRef.current = true; // Mark countdown as active
+    let countdown = 3;
+    setAutoCaptureCooldown(countdown);
+    
+    const tick = () => {
+      countdown -= 1;
+      setAutoCaptureCooldown(countdown);
+      
+      if (countdown <= 0) {
+        // Auto-capture! Use ref instead of state to avoid closure issues
+        if (!hasAutoCapturedRef.current && faceDetectedRef.current) {
+          hasAutoCapturedRef.current = true;
+          countdownActiveRef.current = false; // Reset countdown active flag
+          console.log('[FaceDetection] Auto-capturing face');
+          handleCaptureSelfie();
+        }
+      } else {
+        autoCaptureTimerRef.current = setTimeout(tick, 1000);
+      }
+    };
+    
+    autoCaptureTimerRef.current = setTimeout(tick, 1000);
+  };
+
+  // Cancel auto-capture countdown
+  const cancelAutoCapture = () => {
+    if (autoCaptureTimerRef.current) {
+      clearTimeout(autoCaptureTimerRef.current);
+      autoCaptureTimerRef.current = null;
+    }
+    setAutoCaptureCooldown(0);
+    countdownActiveRef.current = false; // Reset countdown active flag
+  };
+
+  // Stop face detection loop
+  const stopFaceDetection = () => {
+    if (faceDetectionIntervalRef.current) {
+      clearInterval(faceDetectionIntervalRef.current);
+      faceDetectionIntervalRef.current = null;
+    }
+    cancelAutoCapture();
+    setFaceDetected(false);
+    faceDetectedRef.current = false;
+    hasAutoCapturedRef.current = false;
+    countdownActiveRef.current = false; // Reset countdown active flag
   };
 
   // Capture ID card image - crops to match the mask area (x=7.5%, y=15%, w=85%, h=70%)
@@ -2503,6 +2724,8 @@ function IDVerificationScreen({
     if (!editedOcrData) return;
     setVerificationStep('capturing-face');
     await startCamera();
+    // Start face detection for auto-capture
+    startFaceDetection();
   };
 
   const handleOcrRetake = async () => {
@@ -2521,7 +2744,30 @@ function IDVerificationScreen({
     }
   };
 
+  // DEBUG: Skip ID card capture and go directly to face capture
+  const handleSkipIdCapture = async () => {
+    // Set a dummy ID card image (1x1 transparent pixel base64)
+    const dummyImage = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    setIdCardImage(dummyImage);
+    
+    // Set dummy OCR data
+    setEditedOcrData({
+      name: 'TEST USER',
+      juminNo1: '900101',
+      juminNo2: '1234567',
+      issueDate: '20200101',
+      idType: '1',
+    });
+    
+    // Stop camera and move to face capture
+    stopCamera();
+    setVerificationStep('capturing-face');
+    await startCamera();
+    startFaceDetection();
+  };
+
   // DEBUG: Skip face verification for testing
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleSkipVerification = () => {
     stopCamera();
     if (currentGuest >= guestCount) {
@@ -3025,7 +3271,7 @@ function IDVerificationScreen({
                     <rect x="7.5%" y="15%" width="85%" height="70%" rx="8" fill="none" stroke="white" strokeWidth="3" strokeDasharray="10,5" />
                   </svg>
                 ) : (
-                  /* Face mask - oval cutout */
+                  /* Face mask - oval cutout with dynamic border color based on face detection */
                   <svg width="100%" height="100%" style={{ position: 'absolute' }}>
                     <defs>
                       <mask id="faceMask">
@@ -3034,10 +3280,60 @@ function IDVerificationScreen({
                       </mask>
                     </defs>
                     <rect width="100%" height="100%" fill="rgba(0,0,0,0.7)" mask="url(#faceMask)" />
-                    <ellipse cx="50%" cy="50%" rx="25%" ry="35%" fill="none" stroke="white" strokeWidth="3" strokeDasharray="10,5" />
+                    <ellipse 
+                      cx="50%" cy="50%" rx="25%" ry="35%" 
+                      fill="none" 
+                      stroke={faceDetected ? '#22c55e' : 'white'} 
+                      strokeWidth={faceDetected ? '4' : '3'} 
+                      strokeDasharray={faceDetected ? 'none' : '10,5'}
+                      style={{ transition: 'stroke 0.2s, stroke-width 0.2s' }}
+                    />
                   </svg>
                 )}
               </div>
+
+              {/* Auto-capture countdown overlay */}
+              {verificationStep === 'capturing-face' && autoCaptureCooldown > 0 && (
+                <div style={{
+                  position: 'absolute',
+                  top: '50%',
+                  left: '50%',
+                  transform: 'translate(-50%, -50%)',
+                  background: 'rgba(34, 197, 94, 0.9)',
+                  color: 'white',
+                  width: '80px',
+                  height: '80px',
+                  borderRadius: '50%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '48px',
+                  fontWeight: 'bold',
+                  zIndex: 20,
+                  animation: 'pulse 1s ease-in-out',
+                }}>
+                  {autoCaptureCooldown}
+                </div>
+              )}
+
+              {/* Face detected indicator */}
+              {verificationStep === 'capturing-face' && faceDetected && autoCaptureCooldown === 0 && (
+                <div style={{
+                  position: 'absolute',
+                  top: '10px',
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                  background: '#22c55e',
+                  color: 'white',
+                  padding: '6px 16px',
+                  borderRadius: '20px',
+                  fontSize: '13px',
+                  fontWeight: 500,
+                  zIndex: 10,
+                }}>
+                  ✓ 얼굴 인식됨
+                </div>
+              )}
 
               {/* Helper text */}
               <div style={{
@@ -3045,15 +3341,62 @@ function IDVerificationScreen({
                 bottom: '8px',
                 left: '50%',
                 transform: 'translateX(-50%)',
-                background: 'rgba(0,0,0,0.6)',
+                background: !faceDetectionAvailable 
+                  ? 'rgba(245, 158, 11, 0.8)' 
+                  : !faceApiReady 
+                    ? 'rgba(59, 130, 246, 0.8)' 
+                    : faceDetected 
+                      ? 'rgba(34, 197, 94, 0.8)' 
+                      : 'rgba(0,0,0,0.6)',
                 color: 'white',
                 padding: '4px 12px',
                 borderRadius: '4px',
                 fontSize: '13px',
                 whiteSpace: 'nowrap',
+                transition: 'background 0.2s',
               }}>
-                {verificationStep === 'capturing-id' ? '신분증을 영역 안에 맞춰주세요' : '얼굴을 원 안에 맞춰주세요'}
+                {verificationStep === 'capturing-id' 
+                  ? '신분증을 영역 안에 맞춰주세요' 
+                  : !faceDetectionAvailable
+                    ? '⚠ 자동 인식 불가 - "촬영" 버튼을 눌러주세요'
+                    : !faceApiReady
+                      ? '🔄 얼굴 인식 준비 중...'
+                      : autoCaptureCooldown > 0
+                        ? `${autoCaptureCooldown}초 후 자동 촬영...`
+                        : faceDetected 
+                          ? '✓ 얼굴이 인식되었습니다' 
+                          : '얼굴을 원 안에 맞춰주세요'}
               </div>
+
+              {/* Pulse animation for countdown */}
+              <style>{`
+                @keyframes pulse {
+                  0%, 100% { transform: translate(-50%, -50%) scale(1); }
+                  50% { transform: translate(-50%, -50%) scale(1.1); }
+                }
+              `}</style>
+
+              {/* DEBUG: Skip ID capture button - only shows during ID capture step */}
+              {verificationStep === 'capturing-id' && (
+                <button
+                  onClick={handleSkipIdCapture}
+                  style={{
+                    position: 'absolute',
+                    top: '10px',
+                    right: '10px',
+                    background: '#f97316',
+                    color: 'white',
+                    border: 'none',
+                    padding: '8px 16px',
+                    borderRadius: '6px',
+                    fontSize: '12px',
+                    cursor: 'pointer',
+                    zIndex: 10,
+                  }}
+                >
+                  신분증 건너뛰기
+                </button>
+              )}
 
               {/* DEBUG: Skip button for both ID and face capture */}
               {/* <button
