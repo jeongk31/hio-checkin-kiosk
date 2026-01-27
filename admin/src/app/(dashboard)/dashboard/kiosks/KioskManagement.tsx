@@ -414,14 +414,7 @@ function KioskLivePreview({
                   {isCalling ? '연결 중...' : '전화'}
                 </button>
               )}
-              <button
-                onClick={handleCancelCheckout}
-                disabled={isCancelingCheckout}
-                className="px-2 py-1 text-xs bg-orange-50 text-orange-600 hover:bg-orange-100 rounded transition-colors disabled:opacity-50"
-                title="체크아웃 취소 (시작 화면으로)"
-              >
-                {isCancelingCheckout ? '취소 중...' : '체크아웃 취소'}
-              </button>
+              
               <button
                 onClick={handleLogoutKiosk}
                 disabled={isLoggingOut}

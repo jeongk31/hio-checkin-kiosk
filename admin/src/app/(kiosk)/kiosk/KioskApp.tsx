@@ -3524,7 +3524,7 @@ function IDVerificationScreen({
               `}</style>
 
               {/* DEBUG: Skip ID capture button - only shows during ID capture step */}
-              {verificationStep === 'capturing-id' && (
+              {/* {verificationStep === 'capturing-id' && (
                 <button
                   onClick={handleSkipIdCapture}
                   style={{
@@ -3543,10 +3543,10 @@ function IDVerificationScreen({
                 >
                   신분증 건너뛰기
                 </button>
-              )}
+              )} */}
 
               {/* DEBUG: Skip button for both ID and face capture */}
-              {/* <button
+              <button
                 onClick={handleSkipVerification}
                 style={{
                   position: 'absolute',
@@ -3563,7 +3563,7 @@ function IDVerificationScreen({
                 }}
               >
                 건너뛰기 (DEBUG)
-              </button> */}
+              </button>
             </div>
             {/* Camera capture button - positioned below camera */}
             <button
@@ -4536,6 +4536,12 @@ function PaymentConfirmScreen({
     goToScreen('payment-process');
   };
 
+  // DEBUG: Skip payment and mark as successful
+  const handleSkipPayment = () => {
+    console.log('[PaymentConfirm] DEBUG: Skipping payment, going to walkin-info');
+    goToScreen('walkin-info');
+  };
+
   // Determine which screen to go back to
   const handleBack = () => {
     console.log('[PaymentConfirm] Back button clicked, previousScreen:', previousScreen, 'amenityScreenShown:', amenityScreenShown);
@@ -4640,6 +4646,27 @@ function PaymentConfirmScreen({
           >
             결제
           </button>
+          
+          {/* DEBUG: Skip payment button */}
+          <button
+            onClick={handleSkipPayment}
+            style={{
+              position: 'absolute',
+              top: '10px',
+              right: '10px',
+              background: '#f97316',
+              color: 'white',
+              border: 'none',
+              padding: '8px 16px',
+              borderRadius: '6px',
+              fontSize: '12px',
+              cursor: 'pointer',
+              zIndex: 10,
+            }}
+          >
+            결제 건너뛰기
+          </button>
+          
           <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
         </div>
       </div>
