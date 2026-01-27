@@ -2542,9 +2542,14 @@ function IDVerificationScreen({
       
       if (countdown <= 0) {
         // Auto-capture! Use ref instead of state to avoid closure issues
-        if (!hasAutoCapturedRef.current && faceDetectedRef.current) {
-          hasAutoCapturedRef.current = true;
-          countdownActiveRef.current = false; // Reset countdown active flag
+        hasAutoCapturedRef.current = true;
+        countdownActiveRef.current = false; // Reset countdown active flag
+        
+        // Check if this is ID card capture or face capture
+        if (idCardDetectedRef.current) {
+          console.log('[IDDetection] Auto-capturing ID card and proceeding to OCR');
+          handleAutoIdCapture();
+        } else if (faceDetectedRef.current) {
           console.log('[FaceDetection] Auto-capturing face');
           handleCaptureSelfie();
         }
@@ -2554,6 +2559,60 @@ function IDVerificationScreen({
     };
     
     autoCaptureTimerRef.current = setTimeout(tick, 1000);
+  };
+
+  // Auto-capture ID card and proceed directly to OCR (skip preview)
+  const handleAutoIdCapture = async () => {
+    const image = captureIdCardImage();
+    if (image) {
+      setIdCardImage(image);
+      stopCamera();
+      stopIdCardDetection();
+      
+      // Skip preview, go directly to OCR
+      setVerificationStep('verifying');
+      
+      // Call OCR to get ID card data
+      try {
+        const response = await fetch('/api/identity-verification', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            idCardImage: image,
+            action: 'ocr',
+          }),
+          credentials: 'include',
+        });
+
+        const result = await response.json();
+
+        if (result.success && result.data?.ocrResult?.data) {
+          const ocr = result.data.ocrResult.data;
+          const extractedData = {
+            name: ocr.name || '',
+            juminNo1: ocr.juminNo1 || '',
+            juminNo2: ocr.juminNo2 || '',
+            issueDate: ocr.issueDate || '',
+            idType: ocr.idType || '1',
+            driverNo: ocr.driverNo,
+          };
+          setEditedOcrData({ ...extractedData });
+          setVerificationStep('ocr-confirm');
+        } else {
+          // OCR failed
+          let errorMsg = result.error || result.data?.ocrResult?.error || '신분증 인식에 실패했습니다';
+          if (result.data?.ocrResult?.errorCode === 'O003') {
+            errorMsg = '주민등록증 또는 운전면허증만 인증 가능합니다.';
+          }
+          setErrorMessage(errorMsg);
+          setVerificationStep('error');
+        }
+      } catch (error) {
+        console.error('OCR API error:', error);
+        setErrorMessage('서버 연결에 실패했습니다. 다시 시도해주세요.');
+        setVerificationStep('error');
+      }
+    }
   };
 
   // Cancel auto-capture countdown
@@ -3543,7 +3602,7 @@ function IDVerificationScreen({
                 >
                   신분증 건너뛰기
                 </button>
-              )} */}
+              )} }
 
               {/* DEBUG: Skip button for both ID and face capture */}
               <button
