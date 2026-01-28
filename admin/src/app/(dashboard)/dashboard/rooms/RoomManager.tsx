@@ -488,7 +488,7 @@ export default function RoomManager({
     
     const confirmMessage = isWalkIn
       ? `${reservation.guest_name || '게스트'}님의 체크인을 취소하시겠습니까?\n\n워크인 예약이므로 예약 정보가 완전히 삭제됩니다.`
-      : `${reservation.guest_name || '게스트'}님의 체크인을 취소하시겠습니까?\n\n예약 상태가 '예약됨'으로 변경되고, 본인인증 정보가 초기화됩니다.`;
+      : `${reservation.guest_name || '게스트'}님의 체크인을 취소하시겠습니까?\n\n예약 상태로 롤백되고, 객실은 예약 상태로 유지됩니다.`;
 
     if (!confirm(confirmMessage)) {
       return;
@@ -540,15 +540,15 @@ export default function RoomManager({
           alert(data.error || '체크인 취소에 실패했습니다.');
         }
       } else {
-        // For regular reservations: Update status to 'confirmed'
+        // For regular reservations: Roll back to 'reserved' status, keep room assignment
         const res = await fetch('/api/reservations', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             id: reservation.id,
             projectId: reservation.project_id,
-            status: 'confirmed', // Reset to confirmed status
-            roomNumber: null, // Clear room assignment
+            status: 'reserved', // Roll back to reserved status
+            // Keep room assignment (roomNumber) - don't clear it
             // Clear verified guests
             verified_guests: [],
           }),
@@ -561,7 +561,7 @@ export default function RoomManager({
             r.id === data.reservation.id ? data.reservation : r
           ));
           
-          // Update room status to reserved (since reservation still exists)
+          // Update room status back to reserved
           if (room) {
             const roomRes = await fetch('/api/rooms', {
               method: 'PUT',
@@ -569,7 +569,7 @@ export default function RoomManager({
               body: JSON.stringify({
                 id: room.id,
                 projectId: room.project_id,
-                status: 'available', // Room is available again since we cleared room assignment
+                status: 'reserved', // Room goes back to reserved status
               }),
             });
             
@@ -581,7 +581,7 @@ export default function RoomManager({
             }
           }
           
-          alert('체크인이 취소되었습니다. 예약 정보는 유지됩니다.');
+          alert('체크인이 취소되었습니다. 예약 상태로 롤백됩니다.');
         } else {
           const data = await res.json();
           alert(data.error || '체크인 취소에 실패했습니다.');
