@@ -483,34 +483,109 @@ export default function RoomManager({
   };
 
   const handleCancelCheckIn = async (reservation: Reservation) => {
-    if (!confirm(`${reservation.guest_name || '게스트'}님의 체크인을 취소하시겠습니까?\n\n예약 상태가 '예약됨'으로 변경되고, 본인인증 정보가 초기화됩니다.`)) {
+    // Check if this is a walk-in reservation (created via kiosk)
+    const isWalkIn = reservation.source === 'kiosk_walkin';
+    
+    const confirmMessage = isWalkIn
+      ? `${reservation.guest_name || '게스트'}님의 체크인을 취소하시겠습니까?\n\n워크인 예약이므로 예약 정보가 완전히 삭제됩니다.`
+      : `${reservation.guest_name || '게스트'}님의 체크인을 취소하시겠습니까?\n\n예약 상태가 '예약됨'으로 변경되고, 본인인증 정보가 초기화됩니다.`;
+
+    if (!confirm(confirmMessage)) {
       return;
     }
 
     setLoading(true);
     try {
-      const res = await fetch('/api/reservations', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: reservation.id,
-          projectId: reservation.project_id,
-          status: 'confirmed', // Reset to confirmed status
-          // Clear verified guests
-          verified_guests: [],
-        }),
-      });
+      // Find the room associated with this reservation
+      const room = rooms.find(r => r.room_number === reservation.room_number);
 
-      if (res.ok) {
-        const data = await res.json();
-        // Update the reservation in state
-        setReservations(reservations.map((r) =>
-          r.id === data.reservation.id ? data.reservation : r
-        ));
-        alert('체크인이 취소되었습니다.');
+      if (isWalkIn) {
+        // For walk-in reservations: DELETE the reservation completely
+        const res = await fetch('/api/reservations', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: reservation.id,
+            projectId: reservation.project_id,
+          }),
+        });
+
+        if (res.ok) {
+          // Remove the reservation from state
+          setReservations(reservations.filter((r) => r.id !== reservation.id));
+          
+          // Update room status to available
+          if (room) {
+            const roomRes = await fetch('/api/rooms', {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                id: room.id,
+                projectId: room.project_id,
+                status: 'available',
+              }),
+            });
+            
+            if (roomRes.ok) {
+              const roomData = await roomRes.json();
+              setRooms(rooms.map((r) =>
+                r.id === roomData.room.id ? roomData.room : r
+              ));
+            }
+          }
+          
+          alert('워크인 체크인이 취소되고 예약이 삭제되었습니다.');
+        } else {
+          const data = await res.json();
+          alert(data.error || '체크인 취소에 실패했습니다.');
+        }
       } else {
-        const data = await res.json();
-        alert(data.error || '체크인 취소에 실패했습니다.');
+        // For regular reservations: Update status to 'confirmed'
+        const res = await fetch('/api/reservations', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: reservation.id,
+            projectId: reservation.project_id,
+            status: 'confirmed', // Reset to confirmed status
+            roomNumber: null, // Clear room assignment
+            // Clear verified guests
+            verified_guests: [],
+          }),
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          // Update the reservation in state
+          setReservations(reservations.map((r) =>
+            r.id === data.reservation.id ? data.reservation : r
+          ));
+          
+          // Update room status to reserved (since reservation still exists)
+          if (room) {
+            const roomRes = await fetch('/api/rooms', {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                id: room.id,
+                projectId: room.project_id,
+                status: 'available', // Room is available again since we cleared room assignment
+              }),
+            });
+            
+            if (roomRes.ok) {
+              const roomData = await roomRes.json();
+              setRooms(rooms.map((r) =>
+                r.id === roomData.room.id ? roomData.room : r
+              ));
+            }
+          }
+          
+          alert('체크인이 취소되었습니다. 예약 정보는 유지됩니다.');
+        } else {
+          const data = await res.json();
+          alert(data.error || '체크인 취소에 실패했습니다.');
+        }
       }
     } catch (error) {
       console.error('Error canceling check-in:', error);
