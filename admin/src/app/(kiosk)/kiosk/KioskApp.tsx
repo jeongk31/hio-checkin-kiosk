@@ -2316,11 +2316,6 @@ function IDVerificationScreen({
   const hasAutoCapturedRef = useRef(false);
   const faceDetectedRef = useRef(false); // Ref to track face detection inside interval (avoids closure issues)
   const countdownActiveRef = useRef(false); // Ref to track if countdown is running (don't cancel once started)
-  
-  // ID card detection state for auto-capture
-  const [idCardDetected, setIdCardDetected] = useState(false);
-  const idCardDetectionIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const idCardDetectedRef = useRef(false);
 
   // Cleanup camera on unmount
   useEffect(() => {
@@ -2331,10 +2326,6 @@ function IDVerificationScreen({
       // Cleanup face detection
       if (faceDetectionIntervalRef.current) {
         clearInterval(faceDetectionIntervalRef.current);
-      }
-      // Cleanup ID card detection
-      if (idCardDetectionIntervalRef.current) {
-        clearInterval(idCardDetectionIntervalRef.current);
       }
       if (autoCaptureTimerRef.current) {
         clearTimeout(autoCaptureTimerRef.current);
@@ -2379,8 +2370,6 @@ function IDVerificationScreen({
     }
     // Stop face detection when camera stops
     stopFaceDetection();
-    // Stop ID card detection when camera stops
-    stopIdCardDetection();
   };
 
   // Initialize face-api.js models (only loads once globally)
@@ -2545,11 +2534,8 @@ function IDVerificationScreen({
         hasAutoCapturedRef.current = true;
         countdownActiveRef.current = false; // Reset countdown active flag
         
-        // Check if this is ID card capture or face capture
-        if (idCardDetectedRef.current) {
-          console.log('[IDDetection] Auto-capturing ID card and proceeding to OCR');
-          handleAutoIdCapture();
-        } else if (faceDetectedRef.current) {
+        // Only face capture uses auto-capture
+        if (faceDetectedRef.current) {
           console.log('[FaceDetection] Auto-capturing face');
           handleCaptureSelfie();
         }
@@ -2559,60 +2545,6 @@ function IDVerificationScreen({
     };
     
     autoCaptureTimerRef.current = setTimeout(tick, 1000);
-  };
-
-  // Auto-capture ID card and proceed directly to OCR (skip preview)
-  const handleAutoIdCapture = async () => {
-    const image = captureIdCardImage();
-    if (image) {
-      setIdCardImage(image);
-      stopCamera();
-      stopIdCardDetection();
-      
-      // Skip preview, go directly to OCR
-      setVerificationStep('verifying');
-      
-      // Call OCR to get ID card data
-      try {
-        const response = await fetch('/api/identity-verification', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            idCardImage: image,
-            action: 'ocr',
-          }),
-          credentials: 'include',
-        });
-
-        const result = await response.json();
-
-        if (result.success && result.data?.ocrResult?.data) {
-          const ocr = result.data.ocrResult.data;
-          const extractedData = {
-            name: ocr.name || '',
-            juminNo1: ocr.juminNo1 || '',
-            juminNo2: ocr.juminNo2 || '',
-            issueDate: ocr.issueDate || '',
-            idType: ocr.idType || '1',
-            driverNo: ocr.driverNo,
-          };
-          setEditedOcrData({ ...extractedData });
-          setVerificationStep('ocr-confirm');
-        } else {
-          // OCR failed
-          let errorMsg = result.error || result.data?.ocrResult?.error || '신분증 인식에 실패했습니다';
-          if (result.data?.ocrResult?.errorCode === 'O003') {
-            errorMsg = '주민등록증 또는 운전면허증만 인증 가능합니다.';
-          }
-          setErrorMessage(errorMsg);
-          setVerificationStep('error');
-        }
-      } catch (error) {
-        console.error('OCR API error:', error);
-        setErrorMessage('서버 연결에 실패했습니다. 다시 시도해주세요.');
-        setVerificationStep('error');
-      }
-    }
   };
 
   // Cancel auto-capture countdown
@@ -2636,108 +2568,6 @@ function IDVerificationScreen({
     faceDetectedRef.current = false;
     hasAutoCapturedRef.current = false;
     countdownActiveRef.current = false; // Reset countdown active flag
-  };
-
-  // Start ID card detection loop for auto-capture
-  const startIdCardDetection = () => {
-    // Reset state
-    setIdCardDetected(false);
-    setAutoCaptureCooldown(0);
-    hasAutoCapturedRef.current = false;
-    idCardDetectedRef.current = false;
-    countdownActiveRef.current = false;
-
-    console.log('[IDDetection] Starting ID card content detection');
-
-    // Start detection loop (every 500ms)
-    idCardDetectionIntervalRef.current = setInterval(() => {
-      if (!videoRef.current || !canvasRef.current || hasAutoCapturedRef.current) return;
-
-      const video = videoRef.current;
-      const canvas = canvasRef.current;
-      const context = canvas.getContext('2d');
-      if (!context || video.readyState !== 4) return;
-
-      try {
-        // Analyze the ID card region for content
-        const videoWidth = video.videoWidth;
-        const videoHeight = video.videoHeight;
-
-        // ID card region: x=7.5%, y=15%, width=85%, height=70%
-        const cropX = videoWidth * 0.075;
-        const cropY = videoHeight * 0.15;
-        const cropWidth = videoWidth * 0.85;
-        const cropHeight = videoHeight * 0.70;
-
-        // Create a small sample canvas for analysis
-        canvas.width = 160;  // Small size for fast analysis
-        canvas.height = 120;
-
-        // Draw the ID card region scaled down
-        context.drawImage(
-          video,
-          cropX, cropY, cropWidth, cropHeight,
-          0, 0, 160, 120
-        );
-
-        // Get pixel data
-        const imageData = context.getImageData(0, 0, 160, 120);
-        const data = imageData.data;
-
-        // Calculate average brightness and variance (to detect if there's an object)
-        let totalBrightness = 0;
-        let brightPixels = 0;
-        const sampleSize = data.length / 4; // Number of pixels
-
-        for (let i = 0; i < data.length; i += 4) {
-          const r = data[i];
-          const g = data[i + 1];
-          const b = data[i + 2];
-          const brightness = (r + g + b) / 3;
-          totalBrightness += brightness;
-          if (brightness > 50) brightPixels++; // Count non-dark pixels
-        }
-
-        const avgBrightness = totalBrightness / sampleSize;
-        const brightRatio = brightPixels / sampleSize;
-
-        // Detect if there's sufficient content (not just dark/empty frame)
-        // ID card should have good lighting and content
-        const hasContent = avgBrightness > 60 && brightRatio > 0.3;
-
-        if (hasContent) {
-          if (!idCardDetectedRef.current) {
-            console.log('[IDDetection] ✅ ID card content detected! Starting countdown...');
-            idCardDetectedRef.current = true;
-            setIdCardDetected(true);
-            startAutoCaptureCooldown();
-          }
-        } else {
-          // Only cancel if countdown hasn't started yet
-          if (idCardDetectedRef.current && !countdownActiveRef.current) {
-            console.log('[IDDetection] ❌ ID card content lost (before countdown)');
-            idCardDetectedRef.current = false;
-            setIdCardDetected(false);
-            cancelAutoCapture();
-          }
-        }
-      } catch (error) {
-        console.error('[IDDetection] Detection error:', error);
-      }
-    }, 500);
-  };
-
-  // Stop ID card detection loop
-  const stopIdCardDetection = () => {
-    if (idCardDetectionIntervalRef.current) {
-      clearInterval(idCardDetectionIntervalRef.current);
-      idCardDetectionIntervalRef.current = null;
-    }
-    cancelAutoCapture();
-    setIdCardDetected(false);
-    idCardDetectedRef.current = false;
-    hasAutoCapturedRef.current = false;
-    countdownActiveRef.current = false;
   };
 
   // Capture ID card image - crops to match the mask area (x=7.5%, y=15%, w=85%, h=70%)
@@ -2826,8 +2656,6 @@ function IDVerificationScreen({
     setVerificationStep('capturing-id');
     syncInputData({ currentGuest: 1, guestCount });
     await startCamera();
-    // Start ID card detection for auto-capture
-    startIdCardDetection();
   };
 
   // Step 1: Capture ID card and show preview
@@ -3446,10 +3274,9 @@ function IDVerificationScreen({
                     <rect 
                       x="7.5%" y="15%" width="85%" height="70%" rx="8" 
                       fill="none" 
-                      stroke={idCardDetected ? '#22c55e' : 'white'} 
-                      strokeWidth={idCardDetected ? '4' : '3'} 
-                      strokeDasharray={idCardDetected ? 'none' : '10,5'}
-                      style={{ transition: 'stroke 0.2s, stroke-width 0.2s' }}
+                      stroke="white" 
+                      strokeWidth="3" 
+                      strokeDasharray="10,5"
                     />
                   </svg>
                 ) : (
@@ -3517,25 +3344,6 @@ function IDVerificationScreen({
                 </div>
               )}
 
-              {/* ID card detected indicator */}
-              {verificationStep === 'capturing-id' && idCardDetected && autoCaptureCooldown === 0 && (
-                <div style={{
-                  position: 'absolute',
-                  top: '10px',
-                  left: '50%',
-                  transform: 'translateX(-50%)',
-                  background: '#22c55e',
-                  color: 'white',
-                  padding: '6px 16px',
-                  borderRadius: '20px',
-                  fontSize: '13px',
-                  fontWeight: 500,
-                  zIndex: 10,
-                }}>
-                  ✓ 신분증 인식됨
-                </div>
-              )}
-
               {/* Helper text */}
               <div style={{
                 position: 'absolute',
@@ -3543,7 +3351,7 @@ function IDVerificationScreen({
                 left: '50%',
                 transform: 'translateX(-50%)',
                 background: verificationStep === 'capturing-id'
-                  ? (idCardDetected ? 'rgba(34, 197, 94, 0.8)' : 'rgba(0,0,0,0.6)')
+                  ? 'rgba(0,0,0,0.6)'
                   : !faceDetectionAvailable 
                     ? 'rgba(245, 158, 11, 0.8)' 
                     : !faceApiReady 
@@ -3559,11 +3367,7 @@ function IDVerificationScreen({
                 transition: 'background 0.2s',
               }}>
                 {verificationStep === 'capturing-id' 
-                  ? (autoCaptureCooldown > 0
-                      ? `${autoCaptureCooldown}초 후 자동 촬영...`
-                      : idCardDetected
-                        ? '✓ 신분증이 인식되었습니다'
-                        : '신분증을 영역 안에 맞춰주세요')
+                  ? '신분증을 영역 안에 맞춰주세요'
                   : !faceDetectionAvailable
                     ? '⚠ 자동 인식 불가 - "촬영" 버튼을 눌러주세요'
                     : !faceApiReady
@@ -3583,9 +3387,7 @@ function IDVerificationScreen({
                 }
               `}</style>
 
-              {/* DEBUG: Skip ID capture button - only shows during ID capture step */}
-              {/* {verificationStep === 'capturing-id' && (
-                <button
+               {/* <button
                   onClick={handleSkipIdCapture}
                   style={{
                     position: 'absolute',
@@ -3603,10 +3405,10 @@ function IDVerificationScreen({
                 >
                   신분증 건너뛰기
                 </button>
-              )} }
+               */}
 
               {/* DEBUG: Skip button for both ID and face capture */}
-              <button
+              {/* <button
                 onClick={handleSkipVerification}
                 style={{
                   position: 'absolute',
@@ -3623,7 +3425,7 @@ function IDVerificationScreen({
                 }}
               >
                 건너뛰기 (DEBUG)
-              </button>
+              </button> */}
             </div>
             {/* Camera capture button - positioned below camera */}
             <button
@@ -4596,12 +4398,6 @@ function PaymentConfirmScreen({
     goToScreen('payment-process');
   };
 
-  // DEBUG: Skip payment and mark as successful
-  const handleSkipPayment = () => {
-    console.log('[PaymentConfirm] DEBUG: Skipping payment, going to walkin-info');
-    goToScreen('walkin-info');
-  };
-
   // Determine which screen to go back to
   const handleBack = () => {
     console.log('[PaymentConfirm] Back button clicked, previousScreen:', previousScreen, 'amenityScreenShown:', amenityScreenShown);
@@ -4708,7 +4504,7 @@ function PaymentConfirmScreen({
           </button>
           
           {/* DEBUG: Skip payment button */}
-          <button
+          {/* <button
             onClick={handleSkipPayment}
             style={{
               position: 'absolute',
@@ -4725,7 +4521,7 @@ function PaymentConfirmScreen({
             }}
           >
             결제 건너뛰기
-          </button>
+          </button> */}
           
           <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
         </div>
