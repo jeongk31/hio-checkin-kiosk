@@ -178,11 +178,12 @@ export async function approveCreditCard(
   transactionId: string,
   installmentMonths: InstallmentMonth = InstallmentMonth.LUMP_SUM,
   remarks?: string[],
+  keyin: string = '',
   paymentAgentUrl?: string
 ): Promise<ApprovalResponse> {
   const tax = Math.round(amount / 11); // 10% VAT
   
-  console.log('[approveCreditCard] Input params:', { amount, trackData, emvData, transactionId, installmentMonths });
+  console.log('[approveCreditCard] Input params:', { amount, trackData, emvData, transactionId, installmentMonths, keyin });
   
   // Build subbuffer with ALL 12 Remark fields (VTR API requires complete structure)
   const remarkCount = remarks ? remarks.filter(r => r && r.trim()).length : 0;
@@ -206,7 +207,7 @@ export async function approveCreditCard(
     sbuffer: {
       Msg_type: PaymentMessageType.CREDIT_APPROVAL,
       Cancel_reason: '',
-      Keyin: '',
+      Keyin: keyin,
       Track_data: trackData,
       Halbu: installmentMonths,
       Pay_amount: amount.toString(),
@@ -408,9 +409,9 @@ export async function processPayment(
     // Step 2: Process approval
     onStatusChange?.('processing');
     const remarks = [
-      `호텔 체크인 결제`,
-      roomNumber ? `객실: ${roomNumber}` : '',
-      guestName ? `고객명: ${guestName}` : '',
+      `Hotel Checkin Payment`,
+      roomNumber ? `Room: ${roomNumber}` : '',
+      guestName ? `Guest: ${guestName.replace(/[^a-zA-Z0-9\s]/g, '')}` : '',
     ].filter(Boolean);
     
     const approvalResponse = await approveCreditCard(
@@ -420,6 +421,7 @@ export async function processPayment(
       transactionId,
       installmentMonths,
       remarks,
+      tokenResponse.Keyin || '',
       paymentAgentUrl
     );
     
