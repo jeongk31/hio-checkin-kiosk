@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
-import { useVoiceCall, CallStatus } from '@/hooks/useVoiceCall';
+import { useVoiceCall, type CallStatus } from '@/lib/voicecall';
 import type { Profile, VideoSession } from '@/types/database';
 
 interface KioskInfo {
@@ -48,8 +48,9 @@ export function VoiceCallProvider({ children, profile }: VoiceCallProviderProps)
   const callStartTimeRef = useRef<Date | null>(null);
   const isEndingCallRef = useRef<boolean>(false);
 
-  // Voice call hook
+  // Voice call hook (admin side)
   const voiceCall = useVoiceCall({
+    callerType: 'admin',
     onStatusChange: (status) => {
       console.log('[Manager Dashboard Context] 📢 onStatusChange called with status:', status);
       console.log('[Manager Dashboard Context] Current state.status:', state.status);

@@ -7,6 +7,8 @@ import { Kiosk } from '@/types/database';
 import { processPayment } from '@/lib/payment/payment-agent';
 import { KeyboardInput } from './VirtualKeyboard';
 import * as faceapi from 'face-api.js';
+// New unified voicecall library (for future migration)
+// import { useVoiceCall, SignalingChannel as VoiceCallSignalingChannel, type CallStatus as VoiceCallStatus } from '@/lib/voicecall';
 
 // Face-api.js model loading state (global to avoid reloading)
 let faceApiModelsLoaded = false;
