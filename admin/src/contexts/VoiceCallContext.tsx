@@ -337,6 +337,12 @@ export function VoiceCallProvider({ children, profile }: VoiceCallProviderProps)
 
     console.log('[Manager] Answering call, session:', state.currentSession.id);
 
+    // IMPORTANT: Update status to 'connecting' immediately to prevent poll race condition
+    // The poll skips when status is not 'idle' or 'incoming', so this prevents it from
+    // checking the session while we're in the middle of answering
+    statusRef.current = 'connecting';
+    setState((prev) => ({ ...prev, status: 'connecting' }));
+
     // Update session status via API
     await fetch('/api/video-sessions', {
       method: 'PUT',
