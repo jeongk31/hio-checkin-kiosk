@@ -1945,11 +1945,25 @@ function IncomingCallFromManager({ session, onClose, callStatus, onCallStatusCha
           }
 
           if (payload.type === 'offer' && 'sdp' in payload) {
+            // IMPORTANT: Check if already connected first - don't process more offers
+            if (hasSetConnected) {
+              console.log('[Incoming Debug] ⚠️ Already connected, ignoring offer');
+              return;
+            }
+
             const currentPc = peerConnectionRef.current;
             if (!currentPc) {
               console.log('[Incoming Debug] ⚠️ No peer connection available');
               return;
             }
+
+            // Also check if connection is already established
+            if (currentPc.connectionState === 'connected' || currentPc.iceConnectionState === 'connected') {
+              console.log('[Incoming Debug] ⚠️ Connection already established, ignoring offer');
+              hasSetConnected = true; // Ensure flag is set
+              return;
+            }
+
             console.log('[Incoming Debug] 📨 Received SDP offer');
             console.log('[Incoming Debug]   Current signaling state:', currentPc.signalingState);
             console.log('[Incoming Debug]   Current connection state:', currentPc.connectionState);

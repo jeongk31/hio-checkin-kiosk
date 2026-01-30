@@ -305,8 +305,15 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
         console.log('[Manager Debug] 📥 Received signaling message:', msg.type);
 
         if (msg.type === 'call-answered') {
+          // IMPORTANT: Check if already connected first - don't process more signals
+          if (hasConnectedRef.current) {
+            console.log('[Manager Debug] ⚠️ Already connected, ignoring call-answered');
+            return;
+          }
+
           // Kiosk is ready - NOW send the offer
-          if (hassentOffer && !connectionTimeoutRef.current) {
+          // Only skip if we've sent offer and timeout is still running (active negotiation in progress)
+          if (hassentOffer) {
             console.log('[Manager Debug] Already sent offer, ignoring duplicate call-answered');
             return;
           }
