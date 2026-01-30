@@ -18,7 +18,7 @@ export class SignalingChannel {
   constructor(sessionId: string, sender: CallerType) {
     this.sessionId = sessionId;
     this.sender = sender;
-    console.log(`${DEBUG_PREFIX} SignalingChannel created for session: ${sessionId}, sender: ${sender}`);
+    console.log(`${DEBUG_PREFIX} [${sender}] SignalingChannel created for session: ${sessionId}`);
   }
 
   /**
@@ -33,12 +33,12 @@ export class SignalingChannel {
    */
   async subscribe(): Promise<void> {
     if (this.isSubscribed) {
-      console.log(`${DEBUG_PREFIX} Already subscribed to signaling channel`);
+      console.log(`${DEBUG_PREFIX} [${this.sender}] Already subscribed to signaling channel`);
       return;
     }
 
     this.isSubscribed = true;
-    console.log(`${DEBUG_PREFIX} Subscribing to signaling channel...`);
+    console.log(`${DEBUG_PREFIX} [${this.sender}] Subscribing to signaling channel, session: ${this.sessionId}, poll interval: ${SIGNALING_POLL_INTERVAL}ms`);
 
     // Start polling for messages, excluding our own messages
     this.pollInterval = setInterval(async () => {
@@ -53,8 +53,14 @@ export class SignalingChannel {
               // Update last message ID
               this.lastMessageId = Math.max(this.lastMessageId, msg.id);
 
-              // Log received message
-              console.log(`${DEBUG_PREFIX} 📥 Received:`, msg.payload?.type);
+              // Log received message with details
+              console.log(`${DEBUG_PREFIX} [${this.sender}] 📥 Received: type=${msg.payload?.type}, from=${msg.sender}, id=${msg.id}, session=${this.sessionId}`);
+              if (msg.payload?.type === 'offer' || msg.payload?.type === 'answer') {
+                console.log(`${DEBUG_PREFIX} [${this.sender}]    SDP length: ${('sdp' in msg.payload && msg.payload.sdp) ? msg.payload.sdp.length : 0} chars`);
+              }
+              if (msg.payload?.type === 'ice-candidate' && 'candidate' in msg.payload) {
+                console.log(`${DEBUG_PREFIX} [${this.sender}]    ICE candidate: ${JSON.stringify(msg.payload.candidate).substring(0, 100)}...`);
+              }
 
               // Call handler
               if (this.messageHandler && msg.payload) {
@@ -64,7 +70,7 @@ export class SignalingChannel {
           }
         }
       } catch (error) {
-        console.error(`${DEBUG_PREFIX} Poll error:`, error);
+        console.error(`${DEBUG_PREFIX} [${this.sender}] Poll error:`, error);
       }
     }, SIGNALING_POLL_INTERVAL);
   }
@@ -74,7 +80,16 @@ export class SignalingChannel {
    */
   async send(payload: SignalingMessage): Promise<void> {
     try {
-      console.log(`${DEBUG_PREFIX} 📤 Sending:`, payload.type);
+      console.log(`${DEBUG_PREFIX} [${this.sender}] 📤 Sending: type=${payload.type}, session=${this.sessionId}`);
+      if (payload.type === 'offer' || payload.type === 'answer') {
+        console.log(`${DEBUG_PREFIX} [${this.sender}]    SDP length: ${('sdp' in payload && payload.sdp) ? payload.sdp.length : 0} chars`);
+      }
+      if (payload.type === 'ice-candidate' && 'candidate' in payload) {
+        console.log(`${DEBUG_PREFIX} [${this.sender}]    ICE candidate: ${JSON.stringify(payload.candidate).substring(0, 100)}...`);
+      }
+      if (payload.type === 'call-ended' && 'reason' in payload) {
+        console.log(`${DEBUG_PREFIX} [${this.sender}]    Reason: ${payload.reason}`);
+      }
 
       const response = await fetch('/api/signaling', {
         method: 'POST',
@@ -87,10 +102,14 @@ export class SignalingChannel {
       });
 
       if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`${DEBUG_PREFIX} [${this.sender}] ❌ Send failed: ${response.status} - ${errorText}`);
         throw new Error(`Failed to send signaling message: ${response.status}`);
       }
+
+      console.log(`${DEBUG_PREFIX} [${this.sender}] ✅ Send successful: ${payload.type}`);
     } catch (error) {
-      console.error(`${DEBUG_PREFIX} Send error:`, error);
+      console.error(`${DEBUG_PREFIX} [${this.sender}] ❌ Send error:`, error);
       throw error;
     }
   }
@@ -100,14 +119,19 @@ export class SignalingChannel {
    */
   async clearMessages(): Promise<void> {
     try {
-      await fetch('/api/signaling', {
+      console.log(`${DEBUG_PREFIX} [${this.sender}] Clearing old messages for session: ${this.sessionId}`);
+      const response = await fetch('/api/signaling', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionId: this.sessionId }),
       });
-      console.log(`${DEBUG_PREFIX} Cleared old messages for session:`, this.sessionId);
+      if (response.ok) {
+        console.log(`${DEBUG_PREFIX} [${this.sender}] ✅ Cleared old messages for session: ${this.sessionId}`);
+      } else {
+        console.warn(`${DEBUG_PREFIX} [${this.sender}] ⚠️ Clear messages returned: ${response.status}`);
+      }
     } catch (error) {
-      console.error(`${DEBUG_PREFIX} Failed to clear messages:`, error);
+      console.error(`${DEBUG_PREFIX} [${this.sender}] ❌ Failed to clear messages:`, error);
     }
   }
 
@@ -115,13 +139,15 @@ export class SignalingChannel {
    * Close the signaling channel and stop polling
    */
   close(): void {
+    console.log(`${DEBUG_PREFIX} [${this.sender}] Closing SignalingChannel for session: ${this.sessionId}`);
     if (this.pollInterval) {
       clearInterval(this.pollInterval);
       this.pollInterval = null;
+      console.log(`${DEBUG_PREFIX} [${this.sender}]    Poll interval cleared`);
     }
     this.messageHandler = null;
     this.isSubscribed = false;
-    console.log(`${DEBUG_PREFIX} SignalingChannel closed`);
+    console.log(`${DEBUG_PREFIX} [${this.sender}] ✅ SignalingChannel closed`);
   }
 
   /**

@@ -211,20 +211,26 @@ export function useVoiceCall(options: UseVoiceCallOptions): UseVoiceCallReturn {
 
   // Create peer connection with all handlers
   const createPeerConnection = useCallback((): RTCPeerConnection => {
-    log('Creating peer connection...');
+    log('Creating peer connection with ICE servers:', ICE_SERVERS.length);
     const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
 
     // Handle ICE candidates
     pc.onicecandidate = (event) => {
       if (event.candidate && channelRef.current) {
-        log('📤 Sending ICE candidate');
+        // Parse candidate type for logging (host, srflx, relay)
+        const candidateStr = event.candidate.candidate;
+        const typeMatch = candidateStr.match(/typ (\w+)/);
+        const candidateType = typeMatch ? typeMatch[1] : 'unknown';
+        log(`📤 Sending ICE candidate: type=${candidateType}, protocol=${event.candidate.protocol || 'unknown'}`);
         channelRef.current.send({ type: 'ice-candidate', candidate: event.candidate.toJSON() });
+      } else if (!event.candidate) {
+        log('📤 ICE gathering complete (null candidate)');
       }
     };
 
     // Handle remote track
     pc.ontrack = (event) => {
-      log('🎧 Received remote track');
+      log(`🎧 Received remote track: kind=${event.track.kind}, enabled=${event.track.enabled}`);
       const [remoteStream] = event.streams;
       remoteStreamRef.current = remoteStream;
       onRemoteStreamRef.current?.(remoteStream);
@@ -235,13 +241,25 @@ export function useVoiceCall(options: UseVoiceCallOptions): UseVoiceCallReturn {
       log(`🟣 Connection state: ${pc.connectionState}`);
       switch (pc.connectionState) {
         case 'connected':
+          // Log selected candidate pair info if available
+          pc.getStats().then(stats => {
+            stats.forEach(report => {
+              if (report.type === 'candidate-pair' && report.state === 'succeeded') {
+                log(`✅ Connected via: local=${report.localCandidateId}, remote=${report.remoteCandidateId}`);
+              }
+              if (report.type === 'local-candidate' || report.type === 'remote-candidate') {
+                log(`   Candidate: type=${report.candidateType}, protocol=${report.protocol}, address=${report.address || 'hidden'}`);
+              }
+            });
+          }).catch(() => {});
           setConnectedStatus();
           break;
         case 'disconnected':
           log('⚠️ Connection disconnected (waiting for failed state if permanent)');
           break;
         case 'failed':
-          log('❌ Connection failed');
+          log('❌ Connection failed - could not establish P2P connection');
+          log('   This may be due to: firewall blocking, NAT issues, or TURN server unavailable');
           onErrorRef.current?.('연결이 끊어졌습니다.');
           setStatus('failed');
           break;
@@ -258,14 +276,24 @@ export function useVoiceCall(options: UseVoiceCallOptions): UseVoiceCallReturn {
       if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
         setConnectedStatus();
       } else if (pc.iceConnectionState === 'failed') {
-        log('❌ ICE connection failed');
+        log('❌ ICE connection failed - no valid candidate pair found');
         onErrorRef.current?.('네트워크 연결에 실패했습니다.');
         setStatus('failed');
+      } else if (pc.iceConnectionState === 'disconnected') {
+        log('⚠️ ICE disconnected - connection may recover or fail');
       }
     };
 
     pc.onicegatheringstatechange = () => {
       log(`ICE gathering: ${pc.iceGatheringState}`);
+      if (pc.iceGatheringState === 'complete') {
+        log('✅ ICE gathering complete');
+      }
+    };
+
+    // Log ICE candidate errors
+    pc.onicecandidateerror = (event) => {
+      log(`❌ ICE candidate error: ${event.errorCode} - ${event.errorText || 'unknown'}, url=${event.url || 'unknown'}`);
     };
 
     peerConnectionRef.current = pc;
@@ -465,11 +493,20 @@ export function useVoiceCall(options: UseVoiceCallOptions): UseVoiceCallReturn {
       }
     } else if (msg.type === 'ice-candidate' && 'candidate' in msg) {
       // Both sides handle ICE candidates
+      // Parse candidate type for logging
+      const candidateStr = msg.candidate?.candidate || '';
+      const typeMatch = candidateStr.match(/typ (\w+)/);
+      const candidateType = typeMatch ? typeMatch[1] : 'unknown';
+
       if (pc.remoteDescription) {
-        log('📥 Adding ICE candidate');
-        await pc.addIceCandidate(msg.candidate);
+        log(`📥 Adding ICE candidate: type=${candidateType}`);
+        try {
+          await pc.addIceCandidate(msg.candidate);
+        } catch (err) {
+          log(`❌ Error adding ICE candidate: ${err}`);
+        }
       } else {
-        log('📥 Queuing ICE candidate (no remote description yet)');
+        log(`📥 Queuing ICE candidate: type=${candidateType} (no remote description yet)`);
         pendingCandidatesRef.current.push(msg.candidate);
       }
     } else if (msg.type === 'call-ended') {

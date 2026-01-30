@@ -1043,25 +1043,34 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
   const voiceCall = useVoiceCall({
     callerType: 'kiosk',
     onStatusChange: (status) => {
-      console.log('[StaffCallModal] Status changed:', status);
+      console.log(`[StaffCallModal] 📢 Status changed: ${status}, sessionId: ${sessionId}`);
       onCallStatusChange(status);
     },
     onDurationChange: (duration) => {
+      if (duration % 10 === 0) {
+        console.log(`[StaffCallModal] ⏱️ Call duration: ${duration}s`);
+      }
       onCallDurationChange(duration);
     },
     onError: (err) => {
-      console.error('[StaffCallModal] Error:', err);
+      console.error(`[StaffCallModal] ❌ Error: ${err}, sessionId: ${sessionId}`);
       setError(err);
     },
     onRemoteStream: (stream) => {
-      console.log('[StaffCallModal] Remote stream received');
+      console.log(`[StaffCallModal] 🎧 Remote stream received, tracks: ${stream.getTracks().length}, sessionId: ${sessionId}`);
+      stream.getTracks().forEach(track => {
+        console.log(`[StaffCallModal]    Track: kind=${track.kind}, enabled=${track.enabled}, muted=${track.muted}`);
+      });
       if (remoteAudioRef.current) {
         remoteAudioRef.current.srcObject = stream;
-        remoteAudioRef.current.play().catch(console.error);
+        remoteAudioRef.current.play().catch(err => {
+          console.error(`[StaffCallModal] ❌ Audio play error:`, err);
+        });
+        console.log(`[StaffCallModal] ✅ Audio element attached`);
       }
     },
     onCallEnded: (reason) => {
-      console.log('[StaffCallModal] Call ended:', reason);
+      console.log(`[StaffCallModal] 📞 Call ended by other party: reason=${reason}, sessionId: ${sessionId}`);
       if (reason === 'declined') {
         setError('관리자가 통화를 거절했습니다.');
         onCallStatusChange('failed');
@@ -1074,18 +1083,22 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
     if (!isOpen || !sessionId || hasInitiatedRef.current) return;
 
     hasInitiatedRef.current = true;
-    console.log('[StaffCallModal] Initiating call for session:', sessionId);
+    console.log(`[StaffCallModal] 📞 Initiating call for session: ${sessionId}`);
+    console.log(`[StaffCallModal]    Modal open: ${isOpen}, hasInitiated: ${hasInitiatedRef.current}`);
 
     voiceCall.initiateCall(sessionId).then((success) => {
-      if (!success) {
-        console.error('[StaffCallModal] Failed to initiate call');
+      if (success) {
+        console.log(`[StaffCallModal] ✅ Call initiated successfully, sessionId: ${sessionId}`);
+      } else {
+        console.error(`[StaffCallModal] ❌ Failed to initiate call, sessionId: ${sessionId}`);
         onCallStatusChange('failed');
       }
     });
 
     // Set timeout for no answer (60 seconds)
+    console.log(`[StaffCallModal] ⏱️ Starting 60s no-answer timeout`);
     timeoutRef.current = setTimeout(() => {
-      console.log('[StaffCallModal] No answer timeout');
+      console.log(`[StaffCallModal] ⏰ No answer timeout (60s), sessionId: ${sessionId}`);
       setError('응답이 없습니다. 잠시 후 다시 시도해 주세요.');
       onCallStatusChange('failed');
       voiceCall.cleanup();
@@ -1093,6 +1106,7 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
 
     return () => {
       if (timeoutRef.current) {
+        console.log(`[StaffCallModal] 🧹 Clearing timeout on cleanup`);
         clearTimeout(timeoutRef.current);
         timeoutRef.current = null;
       }
@@ -1102,6 +1116,7 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
   // Reset state when modal closes
   useEffect(() => {
     if (!isOpen) {
+      console.log(`[StaffCallModal] 🔄 Modal closed, resetting state`);
       hasInitiatedRef.current = false;
       onCallStatusChange('calling');
       onCallDurationChange(0);
@@ -1113,6 +1128,7 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
   useEffect(() => {
     if (callStatus === 'connected' || callStatus === 'connecting') {
       if (timeoutRef.current) {
+        console.log(`[StaffCallModal] ✅ Call ${callStatus}, clearing no-answer timeout`);
         clearTimeout(timeoutRef.current);
         timeoutRef.current = null;
       }
@@ -1272,51 +1288,68 @@ function IncomingCallFromManager({ session, onClose, callStatus, onCallStatusCha
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
   const hasAnsweredRef = useRef(false);
 
+  console.log(`[IncomingCallFromManager] 📞 Component rendered, session: ${session.id}, status: ${callStatus}`);
+
   // Use the unified voice call hook
   const voiceCall = useVoiceCall({
     callerType: 'kiosk',
     onStatusChange: (status) => {
-      console.log('[IncomingCallFromManager] Status changed:', status);
+      console.log(`[IncomingCallFromManager] 📢 Status changed: ${status}, session: ${session.id}`);
       onCallStatusChange(status);
     },
     onDurationChange: (duration) => {
+      if (duration % 10 === 0) {
+        console.log(`[IncomingCallFromManager] ⏱️ Call duration: ${duration}s`);
+      }
       onCallDurationChange(duration);
     },
     onError: (err) => {
-      console.error('[IncomingCallFromManager] Error:', err);
+      console.error(`[IncomingCallFromManager] ❌ Error: ${err}, session: ${session.id}`);
     },
     onRemoteStream: (stream) => {
-      console.log('[IncomingCallFromManager] Remote stream received');
+      console.log(`[IncomingCallFromManager] 🎧 Remote stream received, tracks: ${stream.getTracks().length}, session: ${session.id}`);
+      stream.getTracks().forEach(track => {
+        console.log(`[IncomingCallFromManager]    Track: kind=${track.kind}, enabled=${track.enabled}, muted=${track.muted}`);
+      });
       if (remoteAudioRef.current) {
         remoteAudioRef.current.srcObject = stream;
-        remoteAudioRef.current.play().catch(console.error);
+        remoteAudioRef.current.play().catch(err => {
+          console.error(`[IncomingCallFromManager] ❌ Audio play error:`, err);
+        });
+        console.log(`[IncomingCallFromManager] ✅ Audio element attached`);
       }
     },
     onCallEnded: (reason) => {
-      console.log('[IncomingCallFromManager] Call ended by manager:', reason);
+      console.log(`[IncomingCallFromManager] 📞 Call ended by manager: reason=${reason}, session: ${session.id}`);
     },
   });
 
   // Auto-answer the incoming call
   useEffect(() => {
-    if (hasAnsweredRef.current) return;
+    if (hasAnsweredRef.current) {
+      console.log(`[IncomingCallFromManager] ⚠️ Already answered, skipping. session: ${session.id}`);
+      return;
+    }
     hasAnsweredRef.current = true;
 
-    console.log('[IncomingCallFromManager] Auto-answering call for session:', session.id);
+    console.log(`[IncomingCallFromManager] 📞 Auto-answering incoming call, session: ${session.id}, room: ${session.room_name}`);
 
     // Small delay before answering
     const timer = setTimeout(async () => {
+      console.log(`[IncomingCallFromManager] 🔄 Calling voiceCall.answerCall(), session: ${session.id}`);
       const success = await voiceCall.answerCall(session.id);
       if (success) {
+        console.log(`[IncomingCallFromManager] ✅ Answer successful, updating DB status to connected`);
         // Update database session status
         updateVideoSession(session.id, { status: 'connected' });
       } else {
-        console.error('[IncomingCallFromManager] Failed to answer call');
+        console.error(`[IncomingCallFromManager] ❌ Failed to answer call, session: ${session.id}`);
         onCallStatusChange('failed');
       }
     }, 500);
 
     return () => {
+      console.log(`[IncomingCallFromManager] 🧹 Cleanup: clearing answer timer`);
       clearTimeout(timer);
     };
   }, [session.id, voiceCall, onCallStatusChange]);
@@ -1325,17 +1358,21 @@ function IncomingCallFromManager({ session, onClose, callStatus, onCallStatusCha
   useEffect(() => {
     if (callStatus === 'ended' || callStatus === 'failed') {
       const handleEnd = async () => {
-        console.log('[IncomingCallFromManager] Ending call, status:', callStatus);
+        console.log(`[IncomingCallFromManager] 📞 Ending call: status=${callStatus}, session: ${session.id}`);
 
         // End call using the hook
-        voiceCall.endCall(callStatus === 'ended' ? 'ended' : 'error');
+        const reason = callStatus === 'ended' ? 'ended' : 'error';
+        console.log(`[IncomingCallFromManager]    Calling voiceCall.endCall(${reason})`);
+        voiceCall.endCall(reason);
 
         // Update database
+        console.log(`[IncomingCallFromManager]    Updating DB: status=ended, ended_at=${new Date().toISOString()}`);
         await updateVideoSession(session.id, {
           status: 'ended',
           ended_at: new Date().toISOString(),
         });
 
+        console.log(`[IncomingCallFromManager] ✅ Call ended, closing modal`);
         onClose();
       };
       handleEnd();
