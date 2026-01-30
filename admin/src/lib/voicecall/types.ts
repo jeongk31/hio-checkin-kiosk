@@ -12,6 +12,9 @@ export type CallRole = 'initiator' | 'responder';
 // Call status states
 export type CallStatus =
   | 'idle'        // No active call
+  | 'calling'     // Initiating call (kiosk: before session created)
+  | 'outgoing'    // Outgoing call (admin: waiting for kiosk to answer)
+  | 'incoming'    // Incoming call (admin: kiosk is calling)
   | 'ringing'     // Waiting for other party to answer
   | 'connecting'  // WebRTC negotiation in progress
   | 'connected'   // Call is active

@@ -7,8 +7,7 @@ import { Kiosk } from '@/types/database';
 import { processPayment } from '@/lib/payment/payment-agent';
 import { KeyboardInput } from './VirtualKeyboard';
 import * as faceapi from 'face-api.js';
-// New unified voicecall library (for future migration)
-// import { useVoiceCall, SignalingChannel as VoiceCallSignalingChannel, type CallStatus as VoiceCallStatus } from '@/lib/voicecall';
+import { useVoiceCall, SignalingChannel, type CallStatus } from '@/lib/voicecall';
 
 // Face-api.js model loading state (global to avoid reloading)
 let faceApiModelsLoaded = false;
@@ -179,95 +178,7 @@ async function uploadScreenFrame(frameData: string): Promise<boolean> {
   }
 }
 
-// Signaling message types for WebRTC
-type SignalingMessage =
-  | { type: 'offer'; sdp: string }
-  | { type: 'answer'; sdp: string }
-  | { type: 'ice-candidate'; candidate: RTCIceCandidateInit }
-  | { type: 'call-answered' }
-  | { type: 'call-ended'; reason: 'declined' | 'ended' | 'timeout' | 'error' };
-
-// Polling-based signaling channel (replaces Supabase Realtime)
-class SignalingChannel {
-  private sessionId: string;
-  private sender: string;
-  private pollInterval: ReturnType<typeof setInterval> | null = null;
-  private messageHandler: ((msg: SignalingMessage) => void) | null = null;
-  private lastMessageId: number = 0;
-
-  constructor(sessionId: string, sender: string = 'kiosk') {
-    this.sessionId = sessionId;
-    this.sender = sender;
-  }
-
-  onMessage(handler: (msg: SignalingMessage) => void) {
-    this.messageHandler = handler;
-  }
-
-  async subscribe(): Promise<void> {
-    // Start polling for messages, excluding our own messages
-    this.pollInterval = setInterval(async () => {
-      try {
-        const response = await fetch(`/api/signaling?sessionId=${this.sessionId}&lastId=${this.lastMessageId}&excludeSender=${this.sender}`, {
-          credentials: 'include',
-        });
-        if (response.status === 401 && typeof window !== 'undefined') {
-          window.location.href = '/login';
-          return;
-        }
-        if (response.ok) {
-          const data = await response.json();
-          if (data.messages && Array.isArray(data.messages)) {
-            for (const msg of data.messages) {
-              this.lastMessageId = Math.max(this.lastMessageId, msg.id);
-              if (this.messageHandler) {
-                this.messageHandler(msg.payload);
-              }
-            }
-          }
-        }
-      } catch (error) {
-        console.error('[Signaling] Poll error:', error);
-      }
-    }, 250); // Poll every 250ms for faster real-time response
-  }
-
-  async send(payload: SignalingMessage): Promise<void> {
-    try {
-      await fetch('/api/signaling', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId: this.sessionId, payload, sender: this.sender }),
-        credentials: 'include',
-      });
-    } catch (error) {
-      console.error('[Signaling] Send error:', error);
-    }
-  }
-
-  close() {
-    if (this.pollInterval) {
-      clearInterval(this.pollInterval);
-      this.pollInterval = null;
-    }
-    this.messageHandler = null;
-  }
-
-  // Clear all messages for this session (useful when starting a new call)
-  async clearMessages(): Promise<void> {
-    try {
-      await fetch('/api/signaling', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId: this.sessionId }),
-        credentials: 'include',
-      });
-      console.log('[Kiosk Signaling] Cleared old messages for session:', this.sessionId);
-    } catch (error) {
-      console.error('[Kiosk Signaling] Failed to clear messages:', error);
-    }
-  }
-}
+// SignalingChannel and SignalingMessage are now imported from @/lib/voicecall
 
 // Payment result from URL callback
 interface PaymentResult {
@@ -473,7 +384,7 @@ interface InputData {
 
 // Call props for TopButtonRow
 interface CallProps {
-  callStatus: 'calling' | 'ringing' | 'connecting' | 'connected' | 'ended' | 'failed';
+  callStatus: CallStatus;
   callDuration: number;
   onEndCall: () => void;
   isCallActive: boolean;
@@ -490,10 +401,10 @@ export default function KioskApp({ kiosk, content, paymentResult, userRole }: Ki
   const [isStaffModalOpen, setIsStaffModalOpen] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   // Staff call state (lifted from StaffCallModal for TopButtonRow access)
-  const [staffCallStatus, setStaffCallStatus] = useState<'calling' | 'ringing' | 'connecting' | 'connected' | 'ended' | 'failed'>('calling');
+  const [staffCallStatus, setStaffCallStatus] = useState<CallStatus>('calling');
   const [staffCallDuration, setStaffCallDuration] = useState(0);
   // Incoming call from manager state (lifted from IncomingCallFromManager for TopButtonRow access)
-  const [incomingCallStatus, setIncomingCallStatus] = useState<'calling' | 'ringing' | 'connecting' | 'connected' | 'ended' | 'failed'>('ringing');
+  const [incomingCallStatus, setIncomingCallStatus] = useState<CallStatus>('ringing');
   const [incomingCallDuration, setIncomingCallDuration] = useState(0);
   const [selectedRoom, setSelectedRoom] = useState<Room | null>(null);
   const [inputData, setInputData] = useState<InputData>({});
@@ -1056,7 +967,7 @@ function TopButtonRow({
   hideStaffButton
 }: {
   onStaffCall: () => void;
-  callStatus?: 'calling' | 'ringing' | 'connecting' | 'connected' | 'ended' | 'failed';
+  callStatus?: CallStatus;
   callDuration?: number;
   onEndCall?: () => void;
   isCallActive?: boolean;
@@ -1106,13 +1017,7 @@ function TopButtonRow({
   );
 }
 
-// STUN servers for WebRTC
-const ICE_SERVERS: RTCIceServer[] = [
-  { urls: 'stun:stun.l.google.com:19302' },
-  { urls: 'stun:stun1.l.google.com:19302' },
-];
-
-type CallStatus = 'calling' | 'ringing' | 'connecting' | 'connected' | 'ended' | 'failed';
+// CallStatus, SignalingChannel, etc. are now imported from @/lib/voicecall
 
 interface StaffCallModalProps {
   isOpen: boolean;
@@ -1126,462 +1031,95 @@ interface StaffCallModalProps {
   t: (key: string) => string;
 }
 
-// Staff Call Modal with WebRTC
+// Staff Call Modal - Uses unified voicecall hook
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusChange, callDuration, onCallDurationChange, signalingChannelRef, t }: StaffCallModalProps) {
   const [error, setError] = useState<string | null>(null);
-
-  // Use refs to avoid stale closure issues with callbacks
-  const onCallStatusChangeRef = useRef(onCallStatusChange);
-  const onCallDurationChangeRef = useRef(onCallDurationChange);
-  onCallStatusChangeRef.current = onCallStatusChange;
-  onCallDurationChangeRef.current = onCallDurationChange;
-
-  // Stable setters that always use latest callback
-  const setCallStatus = useCallback((status: CallStatus) => {
-    console.log('[Kiosk Debug] 📢 setCallStatus called with:', status);
-    onCallStatusChangeRef.current(status);
-  }, []);
-  const setCallDuration = useCallback((duration: number) => {
-    onCallDurationChangeRef.current(duration);
-  }, []);
-
-  const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
-  const localStreamRef = useRef<MediaStream | null>(null);
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
-  // signalingChannelRef is passed as a prop from parent
-  const durationIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const durationCounterRef = useRef(0);
+  const hasInitiatedRef = useRef(false);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
-  const connectionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const debugCountdownRef = useRef<NodeJS.Timeout | null>(null);
-  const connectionStartTimeRef = useRef<number>(0);
-  const retryCountRef = useRef(0);
-  const MAX_CONNECTION_RETRIES = 3;
-  const CONNECTION_TIMEOUT_MS = 15000; // 15 seconds
 
-  // Debug: Log connection state every second when connecting
-  const startDebugCountdown = useCallback((label: string) => {
-    if (debugCountdownRef.current) {
-      clearInterval(debugCountdownRef.current);
-    }
-    connectionStartTimeRef.current = Date.now();
-    console.log(`[Kiosk Debug] 🕐 ${label} - Starting connection timer`);
-
-    debugCountdownRef.current = setInterval(() => {
-      const elapsed = Math.floor((Date.now() - connectionStartTimeRef.current) / 1000);
-      const remaining = Math.ceil((CONNECTION_TIMEOUT_MS / 1000) - elapsed);
-      const pc = peerConnectionRef.current;
-      console.log(`[Kiosk Debug] ⏱️ ${label} - Elapsed: ${elapsed}s, Retry in: ${remaining}s`);
-      console.log(`[Kiosk Debug]   📊 Connection: ${pc?.connectionState || 'null'}, ICE: ${pc?.iceConnectionState || 'null'}, Signaling: ${pc?.signalingState || 'null'}`);
-      console.log(`[Kiosk Debug]   🔄 Retry count: ${retryCountRef.current}/${MAX_CONNECTION_RETRIES}`);
-    }, 1000);
-  }, []);
-
-  const stopDebugCountdown = useCallback(() => {
-    if (debugCountdownRef.current) {
-      clearInterval(debugCountdownRef.current);
-      debugCountdownRef.current = null;
-      console.log('[Kiosk Debug] ✅ Connection timer stopped');
-    }
-  }, []);
-
-  // Cleanup function
-  const cleanup = useCallback(() => {
-    console.log('[Kiosk Debug] 🧹 Cleanup called');
-    if (durationIntervalRef.current) {
-      clearInterval(durationIntervalRef.current);
-      durationIntervalRef.current = null;
-    }
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current);
-      timeoutRef.current = null;
-    }
-    if (connectionTimeoutRef.current) {
-      clearTimeout(connectionTimeoutRef.current);
-      connectionTimeoutRef.current = null;
-    }
-    stopDebugCountdown();
-    localStreamRef.current?.getTracks().forEach((track) => track.stop());
-    localStreamRef.current = null;
-    peerConnectionRef.current?.close();
-    peerConnectionRef.current = null;
-    signalingChannelRef.current?.close();
-    signalingChannelRef.current = null;
-    pendingCandidatesRef.current = [];
-    retryCountRef.current = 0;
-  }, [stopDebugCountdown]);
-
-  // Setup WebRTC when modal opens with a session
-  useEffect(() => {
-    if (!isOpen || !sessionId) return;
-
-    let isActive = true;
-
-    const setupCall = async () => {
-      try {
-        // Check if we're in a browser environment
-        if (typeof window === 'undefined' || typeof navigator === 'undefined') {
-          console.log('Not in browser environment, skipping call setup');
-          return;
-        }
-
-        // Check if getUserMedia is supported
-        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-          console.warn('getUserMedia not supported in this browser');
-          setError('이 브라우저는 음성 통화를 지원하지 않습니다');
-          setCallStatus('failed');
-          return;
-        }
-
-        // Get microphone access
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: { echoCancellation: true, noiseSuppression: true },
-          video: false,
-        });
-        if (!isActive) {
-          stream.getTracks().forEach((t) => t.stop());
-          return;
-        }
-        localStreamRef.current = stream;
-
-        // Create peer connection
-        const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
-        peerConnectionRef.current = pc;
-
-        // Add local tracks
-        stream.getTracks().forEach((track) => {
-          pc.addTrack(track, stream);
-        });
-
-        // Setup signaling channel
-        console.log('[Kiosk] Setting up signaling channel for session:', sessionId);
-        const signalingChannel = new SignalingChannel(sessionId);
-        signalingChannelRef.current = signalingChannel;
-
-        // Handle ICE candidates
-        pc.onicecandidate = (event) => {
-          if (event.candidate && signalingChannelRef.current) {
-            console.log('[Kiosk] Sending ICE candidate');
-            signalingChannelRef.current.send({ type: 'ice-candidate', candidate: event.candidate.toJSON() });
-          }
-        };
-
-        // Handle remote stream
-        pc.ontrack = (event) => {
-          console.log('[Kiosk] Received remote track');
-          const [remoteStream] = event.streams;
-          if (remoteAudioRef.current) {
-            remoteAudioRef.current.srcObject = remoteStream;
-            remoteAudioRef.current.play().catch(console.error);
-          }
-        };
-
-        // Track if call was intentionally ended (not a network failure)
-        let callEndedIntentionally = false;
-        // Track if we've already sent an offer to prevent duplicates
-        let hasCreatedOffer = false;
-
-        // Track if we've already set connected status
-        let hasSetConnected = false;
-
-        // Helper to set connected status (only once)
-        const setConnectedStatus = () => {
-          if (hasSetConnected || !isActive) return;
-          hasSetConnected = true;
-          console.log('[Kiosk Debug] ✅ Call connected! Stopping timers...');
-          // Clear connection timeout on successful connection
-          if (connectionTimeoutRef.current) {
-            clearTimeout(connectionTimeoutRef.current);
-            connectionTimeoutRef.current = null;
-          }
-          stopDebugCountdown();
-          retryCountRef.current = 0;
-          setCallStatus('connected');
-          durationCounterRef.current = 0;
-          durationIntervalRef.current = setInterval(() => {
-            durationCounterRef.current += 1;
-            setCallDuration(durationCounterRef.current);
-          }, 1000);
-        };
-
-        // Handle ICE connection state (more reliable than connection state in some browsers)
-        pc.oniceconnectionstatechange = () => {
-          console.log('[Kiosk Debug] 🔵 ICE connection state changed:', pc.iceConnectionState);
-          if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
-            setConnectedStatus();
-          } else if (pc.iceConnectionState === 'failed') {
-            console.log('[Kiosk Debug] ❌ ICE connection failed');
-          } else if (pc.iceConnectionState === 'disconnected') {
-            console.log('[Kiosk Debug] ⚠️ ICE connection disconnected');
-          }
-        };
-
-        // Handle connection state
-        pc.onconnectionstatechange = () => {
-          console.log('[Kiosk Debug] 🟣 Connection state changed:', pc.connectionState);
-          if (!isActive) return;
-          switch (pc.connectionState) {
-            case 'connected':
-              setConnectedStatus();
-              break;
-            case 'disconnected':
-            case 'failed':
-            case 'closed':
-              console.log('[Kiosk] Connection state:', pc.connectionState, 'callEndedIntentionally:', callEndedIntentionally);
-              // Only show error if call wasn't ended intentionally
-              if (!callEndedIntentionally) {
-                console.log('[Kiosk] Connection lost unexpectedly');
-                setError('연결이 끊어졌습니다');
-                setCallStatus('failed');
-              } else {
-                console.log('[Kiosk] Call ended gracefully');
-                // Don't set error or failed status - it was intentional
-              }
-              break;
-          }
-        };
-
-        // Listen for signaling messages
-        signalingChannel.onMessage(async (payload) => {
-          console.log('[Kiosk] 📥 Received signaling message:', payload.type);
-          if (!isActive) return;
-
-          if (payload.type === 'answer' && 'sdp' in payload) {
-            const currentPc = peerConnectionRef.current;
-            if (!currentPc) return;
-            // Only process answer if we're waiting for one
-            if (currentPc.signalingState !== 'have-local-offer') {
-              console.log('[Kiosk] Ignoring answer - not in have-local-offer state:', currentPc.signalingState);
-              return;
-            }
-            console.log('[Kiosk] Setting remote description from answer');
-            try {
-              await currentPc.setRemoteDescription({ type: 'answer', sdp: payload.sdp });
-              for (const candidate of pendingCandidatesRef.current) {
-                await currentPc.addIceCandidate(candidate);
-              }
-              pendingCandidatesRef.current = [];
-            } catch (err) {
-              console.error('[Kiosk] Error setting remote description:', err);
-            }
-          } else if (payload.type === 'ice-candidate' && 'candidate' in payload) {
-            const currentPc = peerConnectionRef.current;
-            if (!currentPc) return;
-            if (currentPc.remoteDescription) {
-              await currentPc.addIceCandidate(payload.candidate);
-            } else {
-              pendingCandidatesRef.current.push(payload.candidate);
-            }
-          } else if (payload.type === 'call-ended') {
-            console.log('[Kiosk] Call ended by manager, reason:', 'reason' in payload ? payload.reason : 'unknown');
-            callEndedIntentionally = true; // Mark as intentional before cleanup
-            if (timeoutRef.current) {
-              clearTimeout(timeoutRef.current);
-              timeoutRef.current = null;
-            }
-            // Show appropriate message based on reason
-            if ('reason' in payload && payload.reason === 'declined') {
-              setError('관리자가 통화를 거절했습니다.');
-              setCallStatus('failed');
-            } else {
-              // Normal end - no error message
-              setCallStatus('ended');
-            }
-            cleanup();
-          } else if (payload.type === 'call-answered') {
-            console.log('[Kiosk] Manager answered the call!');
-
-            // IMPORTANT: Check if already connected first - don't overwrite connected status!
-            if (hasSetConnected) {
-              console.log('[Kiosk Debug] Already connected, ignoring call-answered');
-              return;
-            }
-
-            // Create and send offer - only once per call (unless retrying)
-            if (hasCreatedOffer) {
-              console.log('[Kiosk] Already created offer, ignoring duplicate call-answered');
-              return;
-            }
-
-            // Only set connecting AFTER the checks pass
-            setCallStatus('connecting');
-            if (timeoutRef.current) {
-              clearTimeout(timeoutRef.current);
-              timeoutRef.current = null;
-            }
-
-            // Function to create and send offer (can be called for retries)
-            const createAndSendOffer = async (isRetry: boolean = false) => {
-              if (hasSetConnected) {
-                console.log('[Kiosk Debug] Already connected, skipping offer creation');
-                return;
-              }
-
-              if (isRetry) {
-                retryCountRef.current++;
-                console.log(`[Kiosk Debug] 🔄 RETRY ${retryCountRef.current}/${MAX_CONNECTION_RETRIES} - Recreating peer connection...`);
-
-                if (retryCountRef.current > MAX_CONNECTION_RETRIES) {
-                  console.log('[Kiosk Debug] ❌ MAX RETRIES REACHED - Ending call');
-                  stopDebugCountdown();
-                  setError('연결에 실패했습니다. 다시 시도해 주세요.');
-                  setCallStatus('failed');
-                  cleanup();
-                  return;
-                }
-
-                // Close existing peer connection and create new one for retry
-                console.log('[Kiosk Debug] Closing old peer connection...');
-                pc.close();
-                const newPc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
-                peerConnectionRef.current = newPc;
-                console.log('[Kiosk Debug] Created new peer connection');
-
-                // Re-add local tracks
-                if (localStreamRef.current) {
-                  localStreamRef.current.getTracks().forEach((track) => {
-                    newPc.addTrack(track, localStreamRef.current!);
-                  });
-                  console.log('[Kiosk Debug] Re-added local tracks');
-                }
-
-                // Re-setup ICE candidate handler
-                newPc.onicecandidate = (event) => {
-                  if (event.candidate && signalingChannelRef.current) {
-                    console.log('[Kiosk Debug] 📤 Sending ICE candidate');
-                    signalingChannelRef.current.send({ type: 'ice-candidate', candidate: event.candidate.toJSON() });
-                  }
-                };
-
-                // Re-setup remote stream handler
-                newPc.ontrack = (event) => {
-                  console.log('[Kiosk Debug] 🎧 Received remote track');
-                  const [remoteStream] = event.streams;
-                  if (remoteAudioRef.current) {
-                    remoteAudioRef.current.srcObject = remoteStream;
-                    remoteAudioRef.current.play().catch(console.error);
-                  }
-                };
-
-                // Re-setup connection state handlers
-                newPc.oniceconnectionstatechange = () => {
-                  console.log('[Kiosk Debug] 🔵 ICE connection state (retry):', newPc.iceConnectionState);
-                  if (newPc.iceConnectionState === 'connected' || newPc.iceConnectionState === 'completed') {
-                    setConnectedStatus();
-                  }
-                };
-
-                newPc.onconnectionstatechange = () => {
-                  console.log('[Kiosk Debug] 🟣 Connection state (retry):', newPc.connectionState);
-                  if (!isActive) return;
-                  switch (newPc.connectionState) {
-                    case 'connected':
-                      setConnectedStatus();
-                      break;
-                    case 'disconnected':
-                    case 'failed':
-                    case 'closed':
-                      if (!callEndedIntentionally && !hasSetConnected) {
-                        console.log('[Kiosk Debug] Connection lost unexpectedly (retry)');
-                      }
-                      break;
-                  }
-                };
-
-                // Clear pending candidates for new attempt
-                pendingCandidatesRef.current = [];
-              }
-
-              const currentPc = peerConnectionRef.current;
-              if (!currentPc || currentPc.signalingState !== 'stable') {
-                console.warn('[Kiosk Debug] ⚠️ Cannot create offer - wrong state:', currentPc?.signalingState);
-                return;
-              }
-
-              try {
-                hasCreatedOffer = true;
-                console.log('[Kiosk Debug] Creating offer...');
-                const offer = await currentPc.createOffer();
-                await currentPc.setLocalDescription(offer);
-                console.log('[Kiosk Debug] 📤 Sending offer to manager');
-                signalingChannel.send({ type: 'offer', sdp: offer.sdp! });
-
-                // Start debug countdown
-                startDebugCountdown(`Kiosk→Admin (attempt ${retryCountRef.current + 1})`);
-
-                // Start connection timeout for retry
-                if (connectionTimeoutRef.current) {
-                  clearTimeout(connectionTimeoutRef.current);
-                }
-                console.log(`[Kiosk Debug] ⏱️ Starting ${CONNECTION_TIMEOUT_MS/1000}s connection timeout...`);
-                connectionTimeoutRef.current = setTimeout(() => {
-                  if (!hasSetConnected && isActive) {
-                    console.log('[Kiosk Debug] ⏰ CONNECTION TIMEOUT - Will retry...');
-                    hasCreatedOffer = false; // Allow new offer
-                    createAndSendOffer(true);
-                  }
-                }, CONNECTION_TIMEOUT_MS);
-              } catch (err) {
-                console.error('[Kiosk Debug] ❌ Failed to create/send offer:', err);
-                hasCreatedOffer = false; // Reset on failure to allow retry
-              }
-            };
-
-            // Initial offer creation
-            await createAndSendOffer(false);
-          }
-        });
-
-        // Clear any old signaling messages before subscribing
-        await signalingChannel.clearMessages();
-
-        // Subscribe and start polling
-        await signalingChannel.subscribe();
-        console.log('[Kiosk] Signaling channel subscribed, waiting for manager to answer');
-        setCallStatus('ringing');
-
-        // Set timeout for no answer (60 seconds)
-        timeoutRef.current = setTimeout(() => {
-          if (isActive) {
-            setError('응답이 없습니다. 잠시 후 다시 시도해 주세요.');
-            setCallStatus('failed');
-          }
-        }, 60000);
-      } catch (err) {
-        console.error('Failed to setup call:', err);
-        if (err instanceof DOMException && err.name === 'NotAllowedError') {
-          setError('마이크 권한이 필요합니다');
-        } else if (err instanceof Error && err.message.includes('지원하지 않습니다')) {
-          setError(err.message);
-        } else {
-          setError('통화를 시작할 수 없습니다');
-        }
-        setCallStatus('failed');
+  // Use the unified voice call hook
+  const voiceCall = useVoiceCall({
+    callerType: 'kiosk',
+    onStatusChange: (status) => {
+      console.log('[StaffCallModal] Status changed:', status);
+      onCallStatusChange(status);
+    },
+    onDurationChange: (duration) => {
+      onCallDurationChange(duration);
+    },
+    onError: (err) => {
+      console.error('[StaffCallModal] Error:', err);
+      setError(err);
+    },
+    onRemoteStream: (stream) => {
+      console.log('[StaffCallModal] Remote stream received');
+      if (remoteAudioRef.current) {
+        remoteAudioRef.current.srcObject = stream;
+        remoteAudioRef.current.play().catch(console.error);
       }
-    };
+    },
+    onCallEnded: (reason) => {
+      console.log('[StaffCallModal] Call ended:', reason);
+      if (reason === 'declined') {
+        setError('관리자가 통화를 거절했습니다.');
+        onCallStatusChange('failed');
+      }
+    },
+  });
 
-    setupCall();
+  // Initiate call when modal opens with a session
+  useEffect(() => {
+    if (!isOpen || !sessionId || hasInitiatedRef.current) return;
+
+    hasInitiatedRef.current = true;
+    console.log('[StaffCallModal] Initiating call for session:', sessionId);
+
+    voiceCall.initiateCall(sessionId).then((success) => {
+      if (!success) {
+        console.error('[StaffCallModal] Failed to initiate call');
+        onCallStatusChange('failed');
+      }
+    });
+
+    // Set timeout for no answer (60 seconds)
+    timeoutRef.current = setTimeout(() => {
+      console.log('[StaffCallModal] No answer timeout');
+      setError('응답이 없습니다. 잠시 후 다시 시도해 주세요.');
+      onCallStatusChange('failed');
+      voiceCall.cleanup();
+    }, 60000);
 
     return () => {
-      isActive = false;
-      cleanup();
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, sessionId]);
+  }, [isOpen, sessionId, voiceCall, onCallStatusChange]);
 
   // Reset state when modal closes
   useEffect(() => {
     if (!isOpen) {
-      setCallStatus('calling');
-      setCallDuration(0);
+      hasInitiatedRef.current = false;
+      onCallStatusChange('calling');
+      onCallDurationChange(0);
       setError(null);
     }
-  }, [isOpen]);
+  }, [isOpen, onCallStatusChange, onCallDurationChange]);
+
+  // Clear timeout when call connects
+  useEffect(() => {
+    if (callStatus === 'connected' || callStatus === 'connecting') {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+    }
+  }, [callStatus]);
 
   // Poll for admin status when waiting for answer
-  // This detects if admin answers another kiosk's call (not ours)
   useEffect(() => {
     if (!isOpen || !sessionId || callStatus !== 'ringing') return;
 
@@ -1591,109 +1129,79 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
       if (!isActive) return;
 
       try {
-        // Check our own session status first
         const sessionResponse = await fetch(`/api/video-sessions?status=waiting`, {
           credentials: 'include',
         });
-        if (!isActive) return; // Check again after async operation
+        if (!isActive) return;
 
         if (sessionResponse.ok) {
           const data = await sessionResponse.json();
           const ourSession = data.sessions?.find((s: { id: string }) => s.id === sessionId);
 
-          // If our session is not in waiting list, it could be:
-          // 1. Admin answered OUR call (session is now 'connected') - GOOD, don't set failed
-          // 2. Admin declined our call (session is 'ended') - BAD, set failed
-          // 3. Admin is busy with another call - BAD, set failed
           if (!ourSession) {
-            console.log('[Kiosk] Our session not in waiting list, checking session status...');
-
-            // First check if our session was answered (status = 'connected')
+            // Check if our session was answered
             const ourSessionResponse = await fetch(`/api/video-sessions/${sessionId}`, {
               credentials: 'include',
             });
-            if (!isActive) return; // Check again after async operation
+            if (!isActive) return;
 
             if (ourSessionResponse.ok) {
               const ourSessionData = await ourSessionResponse.json();
               if (ourSessionData.status === 'connected') {
-                // Our session was answered! This is good, don't set failed
-                console.log('[Kiosk] Our session was answered by admin, not setting failed');
-                return;
+                return; // Our session was answered
               }
             }
 
-            // Our session was not answered, check if admin is busy with someone else
+            // Check if admin is busy with someone else
             const statusResponse = await fetch(`/api/video-sessions/status`, {
               credentials: 'include',
             });
-            if (!isActive) return; // Check again after async operation
+            if (!isActive) return;
 
             if (statusResponse.ok) {
               const statusData = await statusResponse.json();
               if (!statusData.available) {
-                // Admin is on a call with someone else (not us)
                 setError('관리자가 다른 통화 중입니다. 잠시 후 다시 시도해 주세요.');
-                setCallStatus('failed');
-                return;
+                onCallStatusChange('failed');
+                voiceCall.cleanup();
               }
             }
           }
         }
       } catch (error) {
-        console.error('[Kiosk] Error checking admin status:', error);
+        console.error('[StaffCallModal] Error checking admin status:', error);
       }
     };
 
-    // Poll every 3 seconds while ringing
     const interval = setInterval(checkAdminStatus, 3000);
-
     return () => {
       isActive = false;
       clearInterval(interval);
     };
-  }, [isOpen, sessionId, callStatus, setCallStatus]);
+  }, [isOpen, sessionId, callStatus, voiceCall, onCallStatusChange]);
 
   const handleClose = async () => {
-    console.log('[Kiosk StaffCallModal] handleClose called, callStatus:', callStatus);
-    
-    // Update database session status to cancelled if we're still waiting/calling
+    console.log('[StaffCallModal] handleClose called, callStatus:', callStatus);
+
+    // Update database session status to cancelled if still waiting
     if (sessionId && (callStatus === 'calling' || callStatus === 'ringing')) {
-      console.log('[Kiosk StaffCallModal] Updating session status to cancelled in database');
       try {
         await fetch('/api/video-sessions', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            id: sessionId,
-            status: 'cancelled'
-          })
+          body: JSON.stringify({ id: sessionId, status: 'cancelled' })
         });
-        console.log('[Kiosk StaffCallModal] Session cancelled in database');
       } catch (err) {
-        console.error('[Kiosk StaffCallModal] Failed to cancel session in database:', err);
+        console.error('[StaffCallModal] Failed to cancel session:', err);
       }
     }
-    
-    // Send end signal if connected
-    if (signalingChannelRef.current && (callStatus === 'connected' || callStatus === 'ringing' || callStatus === 'connecting')) {
-      console.log('[Kiosk StaffCallModal] Sending call-ended signal to manager');
-      try {
-        await signalingChannelRef.current.send({ type: 'call-ended', reason: 'ended' });
-        console.log('[Kiosk StaffCallModal] Signal sent successfully');
-      } catch (err) {
-        console.error('[Kiosk StaffCallModal] Failed to send signal:', err);
-      }
-    } else {
-      console.log('[Kiosk StaffCallModal] Not sending signal - channel:', !!signalingChannelRef.current, 'status:', callStatus);
-    }
-    cleanup();
+
+    // End the call using the hook
+    voiceCall.endCall('ended');
     onClose();
   };
 
-  // IMPORTANT: Always render the same audio element to preserve the attached stream
-  // The audio element must be outside conditional rendering to prevent React from
-  // unmounting/remounting it when callStatus changes (which would lose the stream)
+  // Show modal when not connecting/connected
   const showModal = callStatus !== 'connecting' && callStatus !== 'connected' && isOpen;
 
   return (
@@ -1748,7 +1256,7 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
   );
 }
 
-// Incoming call from manager modal
+// Incoming call from manager modal - Uses unified voicecall hook
 interface IncomingCallFromManagerProps {
   session: { id: string; room_name: string };
   onClose: () => void;
@@ -1761,377 +1269,78 @@ interface IncomingCallFromManagerProps {
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 function IncomingCallFromManager({ session, onClose, callStatus, onCallStatusChange, callDuration, onCallDurationChange, signalingChannelRef }: IncomingCallFromManagerProps) {
-  // Error state for logging purposes (errors are handled by parent component)
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [_error, setError] = useState<string | null>(null);
-  const durationCounterRef = useRef(0);
-
-  // Use refs to avoid stale closure issues with callbacks
-  const onCallStatusChangeRef = useRef(onCallStatusChange);
-  const onCallDurationChangeRef = useRef(onCallDurationChange);
-  onCallStatusChangeRef.current = onCallStatusChange;
-  onCallDurationChangeRef.current = onCallDurationChange;
-
-  // Stable setters that always use latest callback
-  const setCallStatus = useCallback((status: CallStatus) => {
-    console.log('[Incoming Debug] 📢 setCallStatus called with:', status);
-    onCallStatusChangeRef.current(status);
-  }, []);
-  const setCallDuration = useCallback((duration: number) => {
-    onCallDurationChangeRef.current(duration);
-  }, []);
-
-  const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
-  const localStreamRef = useRef<MediaStream | null>(null);
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
-  // signalingChannelRef is passed as a prop from parent
-  const durationIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
-  const connectionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const debugCountdownRef = useRef<NodeJS.Timeout | null>(null);
-  const connectionStartTimeRef = useRef<number>(0);
-  const retryCountRef = useRef(0);
-  const MAX_CONNECTION_RETRIES = 3;
-  const CONNECTION_TIMEOUT_MS = 15000; // 15 seconds
+  const hasAnsweredRef = useRef(false);
 
-  // Debug: Log connection state every second when connecting
-  const startDebugCountdown = useCallback((label: string) => {
-    if (debugCountdownRef.current) {
-      clearInterval(debugCountdownRef.current);
-    }
-    connectionStartTimeRef.current = Date.now();
-    console.log(`[Incoming Debug] 🕐 ${label} - Starting connection timer`);
-
-    debugCountdownRef.current = setInterval(() => {
-      const elapsed = Math.floor((Date.now() - connectionStartTimeRef.current) / 1000);
-      const remaining = Math.ceil((CONNECTION_TIMEOUT_MS / 1000) - elapsed);
-      const pc = peerConnectionRef.current;
-      console.log(`[Incoming Debug] ⏱️ ${label} - Elapsed: ${elapsed}s, Retry in: ${remaining}s`);
-      console.log(`[Incoming Debug]   📊 Connection: ${pc?.connectionState || 'null'}, ICE: ${pc?.iceConnectionState || 'null'}, Signaling: ${pc?.signalingState || 'null'}`);
-      console.log(`[Incoming Debug]   🔄 Retry count: ${retryCountRef.current}/${MAX_CONNECTION_RETRIES}`);
-    }, 1000);
-  }, []);
-
-  const stopDebugCountdown = useCallback(() => {
-    if (debugCountdownRef.current) {
-      clearInterval(debugCountdownRef.current);
-      debugCountdownRef.current = null;
-      console.log('[Incoming Debug] ✅ Connection timer stopped');
-    }
-  }, []);
-
-  const cleanup = useCallback(() => {
-    console.log('[Incoming Debug] 🧹 Cleanup called');
-    if (durationIntervalRef.current) {
-      clearInterval(durationIntervalRef.current);
-      durationIntervalRef.current = null;
-    }
-    if (connectionTimeoutRef.current) {
-      clearTimeout(connectionTimeoutRef.current);
-      connectionTimeoutRef.current = null;
-    }
-    stopDebugCountdown();
-    localStreamRef.current?.getTracks().forEach((track) => track.stop());
-    localStreamRef.current = null;
-    peerConnectionRef.current?.close();
-    peerConnectionRef.current = null;
-    signalingChannelRef.current?.close();
-    signalingChannelRef.current = null;
-    pendingCandidatesRef.current = [];
-    retryCountRef.current = 0;
-  }, [stopDebugCountdown]);
-
-  // Auto-answer the call
-  useEffect(() => {
-    console.log('[IncomingCallFromManager] useEffect triggered, session:', session.id);
-    let isActive = true;
-
-    const answerCall = async () => {
-      console.log('[IncomingCallFromManager] answerCall starting...');
-      try {
-        // Check if we're in a browser environment
-        if (typeof window === 'undefined' || typeof navigator === 'undefined') {
-          console.log('Not in browser environment, skipping call answer');
-          return;
-        }
-
-        // Check if getUserMedia is supported
-        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-          console.warn('getUserMedia not supported in this browser');
-          setError('이 브라우저는 음성 통화를 지원하지 않습니다');
-          setCallStatus('failed');
-          return;
-        }
-        // Get microphone
-        console.log('[IncomingCallFromManager] Requesting microphone...');
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: { echoCancellation: true, noiseSuppression: true },
-          video: false,
-        });
-        console.log('[IncomingCallFromManager] Microphone access granted');
-        if (!isActive) {
-          stream.getTracks().forEach((t) => t.stop());
-          return;
-        }
-        localStreamRef.current = stream;
-
-        // Create peer connection
-        const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
-        peerConnectionRef.current = pc;
-
-        // Add local tracks
-        stream.getTracks().forEach((track) => {
-          pc.addTrack(track, stream);
-        });
-
-        // Setup signaling channel
-        console.log('[IncomingCallFromManager] Setting up signaling channel for session:', session.id);
-        const signalingChannel = new SignalingChannel(session.id);
-        signalingChannelRef.current = signalingChannel;
-
-        // Handle ICE candidates
-        pc.onicecandidate = (event) => {
-          if (event.candidate && signalingChannelRef.current) {
-            signalingChannelRef.current.send({ type: 'ice-candidate', candidate: event.candidate.toJSON() });
-          }
-        };
-
-        // Handle remote stream
-        pc.ontrack = (event) => {
-          const [remoteStream] = event.streams;
-          if (remoteAudioRef.current) {
-            remoteAudioRef.current.srcObject = remoteStream;
-            remoteAudioRef.current.play().catch(console.error);
-          }
-        };
-
-        // Track if call was intentionally ended
-        let callEndedIntentionally = false;
-        // Track if we've already set connected status
-        let hasSetConnected = false;
-
-        // Helper to set connected status (only once)
-        const setConnectedStatus = () => {
-          if (hasSetConnected || !isActive) return;
-          hasSetConnected = true;
-          console.log('[Incoming Debug] ✅ Call connected! Stopping timers...');
-          // Clear connection timeout on successful connection
-          if (connectionTimeoutRef.current) {
-            clearTimeout(connectionTimeoutRef.current);
-            connectionTimeoutRef.current = null;
-          }
-          stopDebugCountdown();
-          retryCountRef.current = 0;
-          setCallStatus('connected');
-          durationCounterRef.current = 0;
-          durationIntervalRef.current = setInterval(() => {
-            durationCounterRef.current += 1;
-            setCallDuration(durationCounterRef.current);
-          }, 1000);
-        };
-
-        // Handle ICE connection state (more reliable than connection state in some browsers)
-        pc.oniceconnectionstatechange = () => {
-          console.log('[Incoming Debug] 🔵 ICE connection state changed:', pc.iceConnectionState);
-          if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
-            setConnectedStatus();
-          } else if (pc.iceConnectionState === 'failed') {
-            console.log('[Incoming Debug] ❌ ICE connection failed');
-          } else if (pc.iceConnectionState === 'disconnected') {
-            console.log('[Incoming Debug] ⚠️ ICE connection disconnected');
-          }
-        };
-
-        // Handle connection state
-        pc.onconnectionstatechange = () => {
-          console.log('[Incoming Debug] 🟣 Connection state changed:', pc.connectionState);
-          if (!isActive) return;
-          switch (pc.connectionState) {
-            case 'connected':
-              setConnectedStatus();
-              break;
-            case 'disconnected':
-            case 'failed':
-            case 'closed':
-              // Only show error if call wasn't ended intentionally
-              if (!callEndedIntentionally && !hasSetConnected) {
-                console.log('[Incoming Debug] Connection lost unexpectedly');
-              }
-              break;
-          }
-        };
-
-        // Listen for signaling messages
-        console.log('[Incoming Debug] Setting up signaling message listener...');
-        signalingChannel.onMessage(async (payload) => {
-          console.log('[Incoming Debug] 📥 Received signaling message:', payload.type);
-          if (!isActive) {
-            console.log('[Incoming Debug] ⚠️ Ignoring message - component not active');
-            return;
-          }
-
-          if (payload.type === 'offer' && 'sdp' in payload) {
-            // IMPORTANT: Check if already connected first - don't process more offers
-            if (hasSetConnected) {
-              console.log('[Incoming Debug] ⚠️ Already connected, ignoring offer');
-              return;
-            }
-
-            const currentPc = peerConnectionRef.current;
-            if (!currentPc) {
-              console.log('[Incoming Debug] ⚠️ No peer connection available');
-              return;
-            }
-
-            // Also check if connection is already established
-            if (currentPc.connectionState === 'connected' || currentPc.iceConnectionState === 'connected') {
-              console.log('[Incoming Debug] ⚠️ Connection already established, ignoring offer');
-              hasSetConnected = true; // Ensure flag is set
-              return;
-            }
-
-            console.log('[Incoming Debug] 📨 Received SDP offer');
-            console.log('[Incoming Debug]   Current signaling state:', currentPc.signalingState);
-            console.log('[Incoming Debug]   Current connection state:', currentPc.connectionState);
-            console.log('[Incoming Debug]   Current ICE state:', currentPc.iceConnectionState);
-
-            // Check if we're in the right state to set remote description
-            if (currentPc.signalingState !== 'stable' && currentPc.signalingState !== 'have-local-offer') {
-              console.warn('[Incoming Debug] ⚠️ Ignoring offer - wrong signaling state:', currentPc.signalingState);
-              return;
-            }
-            try {
-              console.log('[Incoming Debug] Setting remote description...');
-              await currentPc.setRemoteDescription({ type: 'offer', sdp: payload.sdp });
-              console.log('[Incoming Debug] ✅ Remote description set, new state:', currentPc.signalingState);
-
-              const pendingCount = pendingCandidatesRef.current.length;
-              if (pendingCount > 0) {
-                console.log(`[Incoming Debug] Adding ${pendingCount} pending ICE candidates...`);
-              }
-              for (const candidate of pendingCandidatesRef.current) {
-                await currentPc.addIceCandidate(candidate);
-              }
-              pendingCandidatesRef.current = [];
-
-              // Create and send answer
-              console.log('[Incoming Debug] Creating answer...');
-              const answer = await currentPc.createAnswer();
-              await currentPc.setLocalDescription(answer);
-              console.log('[Incoming Debug] 📤 Sending answer to manager');
-              signalingChannel.send({ type: 'answer', sdp: answer.sdp! });
-              setCallStatus('connecting');
-
-              // Start debug countdown
-              startDebugCountdown(`Admin→Kiosk (attempt ${retryCountRef.current + 1})`);
-
-              // Start connection timeout for retry
-              if (connectionTimeoutRef.current) {
-                clearTimeout(connectionTimeoutRef.current);
-              }
-              console.log(`[Incoming Debug] ⏱️ Starting ${CONNECTION_TIMEOUT_MS/1000}s connection timeout...`);
-              connectionTimeoutRef.current = setTimeout(() => {
-                if (!hasSetConnected && isActive) {
-                  retryCountRef.current++;
-                  console.log(`[Incoming Debug] ⏰ CONNECTION TIMEOUT - Retry ${retryCountRef.current}/${MAX_CONNECTION_RETRIES}`);
-
-                  if (retryCountRef.current > MAX_CONNECTION_RETRIES) {
-                    console.log('[Incoming Debug] ❌ MAX RETRIES REACHED - Ending call');
-                    stopDebugCountdown();
-                    setError('연결에 실패했습니다. 다시 시도해 주세요.');
-                    setCallStatus('failed');
-                    return;
-                  }
-
-                  // Resend call-answered to trigger manager to resend offer
-                  console.log('[Incoming Debug] 🔄 Resending call-answered to trigger new offer');
-                  signalingChannel.send({ type: 'call-answered' });
-                }
-              }, CONNECTION_TIMEOUT_MS);
-            } catch (error) {
-              console.error('[Incoming Debug] ❌ Error handling offer:', error);
-            }
-          } else if (payload.type === 'ice-candidate' && 'candidate' in payload) {
-            const currentPc = peerConnectionRef.current;
-            if (!currentPc) return;
-            if (currentPc.remoteDescription) {
-              console.log('[Incoming Debug] 📥 Adding ICE candidate');
-              await currentPc.addIceCandidate(payload.candidate);
-            } else {
-              console.log('[Incoming Debug] 📥 Queuing ICE candidate (no remote description yet)');
-              pendingCandidatesRef.current.push(payload.candidate);
-            }
-          } else if (payload.type === 'call-answered') {
-            // Ignore - this is our own signal echoed back
-            console.log('[Incoming Debug] Ignoring echoed call-answered signal');
-          } else if (payload.type === 'answer') {
-            // Ignore - kiosk doesn't expect answer (it sends answer, not receives it)
-            console.log('[Incoming Debug] Ignoring unexpected answer signal');
-          } else if (payload.type === 'call-ended') {
-            console.log('[Incoming Debug] 📥 Call ended by manager');
-            callEndedIntentionally = true;
-            setCallStatus('ended');
-            cleanup();
-          }
-        });
-
-        // Clear any old signaling messages before subscribing
-        await signalingChannel.clearMessages();
-
-        // Subscribe to channel
-        await signalingChannel.subscribe();
-        console.log('[IncomingCallFromManager] Signaling channel subscribed');
-
-        // Send call-answered signal immediately - admin is waiting for this
-        console.log('[IncomingCallFromManager] 📤 Sending call-answered signal');
-        signalingChannel.send({ type: 'call-answered' });
-        updateVideoSession(session.id, { status: 'connected' });
-        setCallStatus('connecting');
-      } catch (err) {
-        console.error('[IncomingCallFromManager] Failed to answer call:', err);
-        setCallStatus('failed');
+  // Use the unified voice call hook
+  const voiceCall = useVoiceCall({
+    callerType: 'kiosk',
+    onStatusChange: (status) => {
+      console.log('[IncomingCallFromManager] Status changed:', status);
+      onCallStatusChange(status);
+    },
+    onDurationChange: (duration) => {
+      onCallDurationChange(duration);
+    },
+    onError: (err) => {
+      console.error('[IncomingCallFromManager] Error:', err);
+    },
+    onRemoteStream: (stream) => {
+      console.log('[IncomingCallFromManager] Remote stream received');
+      if (remoteAudioRef.current) {
+        remoteAudioRef.current.srcObject = stream;
+        remoteAudioRef.current.play().catch(console.error);
       }
-    };
+    },
+    onCallEnded: (reason) => {
+      console.log('[IncomingCallFromManager] Call ended by manager:', reason);
+    },
+  });
 
-    // Auto-answer after short delay
-    const timer = setTimeout(() => {
-      answerCall();
+  // Auto-answer the incoming call
+  useEffect(() => {
+    if (hasAnsweredRef.current) return;
+    hasAnsweredRef.current = true;
+
+    console.log('[IncomingCallFromManager] Auto-answering call for session:', session.id);
+
+    // Small delay before answering
+    const timer = setTimeout(async () => {
+      const success = await voiceCall.answerCall(session.id);
+      if (success) {
+        // Update database session status
+        updateVideoSession(session.id, { status: 'connected' });
+      } else {
+        console.error('[IncomingCallFromManager] Failed to answer call');
+        onCallStatusChange('failed');
+      }
     }, 500);
 
     return () => {
-      isActive = false;
       clearTimeout(timer);
-      cleanup();
     };
-  }, [session.id, cleanup, setCallDuration, setCallStatus]);
+  }, [session.id, voiceCall, onCallStatusChange]);
 
-  // Send call-ended signal and cleanup when status changes to ended or failed
+  // Handle call end/fail - cleanup and close
   useEffect(() => {
     if (callStatus === 'ended' || callStatus === 'failed') {
       const handleEnd = async () => {
         console.log('[IncomingCallFromManager] Ending call, status:', callStatus);
-        // Send call-ended signal and wait for it
-        if (signalingChannelRef.current) {
-          try {
-            await signalingChannelRef.current.send({ type: 'call-ended', reason: callStatus === 'ended' ? 'ended' : 'error' });
-            console.log('[IncomingCallFromManager] Signal sent to manager');
-          } catch (err) {
-            console.error('[IncomingCallFromManager] Failed to send signal:', err);
-          }
-        }
-        // Update database via fetch API
+
+        // End call using the hook
+        voiceCall.endCall(callStatus === 'ended' ? 'ended' : 'error');
+
+        // Update database
         await updateVideoSession(session.id, {
           status: 'ended',
           ended_at: new Date().toISOString(),
         });
-        console.log('[IncomingCallFromManager] Database updated');
-        // Cleanup and close immediately for instant response
-        cleanup();
+
         onClose();
       };
       handleEnd();
     }
-  }, [callStatus, session.id, cleanup, onClose]);
+  }, [callStatus, session.id, voiceCall, onClose]);
 
   // Only render the audio element - UI is handled by TopButtonRow
   return <audio ref={remoteAudioRef} autoPlay playsInline style={{ display: 'none' }} />;
