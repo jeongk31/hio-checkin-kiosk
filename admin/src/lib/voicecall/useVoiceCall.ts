@@ -15,7 +15,6 @@ import {
 } from './constants';
 import { SignalingChannel } from './SignalingChannel';
 import type {
-  CallerType,
   CallStatus,
   SignalingMessage,
   UseVoiceCallOptions,
