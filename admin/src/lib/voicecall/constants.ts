@@ -4,34 +4,52 @@
  */
 
 // STUN and TURN servers for NAT traversal
-// TURN servers are needed when direct P2P connection fails (common in AWS/cloud environments)
+// TURN servers are REQUIRED when:
+// - Behind corporate firewall
+// - On LTE/mobile networks (CGNAT)
+// - In cloud environments like AWS
+//
+// TCP transport on port 443 is critical for firewall bypass
 export const ICE_SERVERS: RTCIceServer[] = [
-  // Google STUN servers
+  // Google STUN servers (for NAT discovery, but often blocked on restricted networks)
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
-  { urls: 'stun:stun2.l.google.com:19302' },
-  { urls: 'stun:stun3.l.google.com:19302' },
-  { urls: 'stun:stun4.l.google.com:19302' },
-  // Additional STUN servers for redundancy
-  { urls: 'stun:stun.stunprotocol.org:3478' },
-  // OpenRelay TURN servers (free, for testing/development)
-  // These provide relay when direct P2P fails
+
+  // Metered TURN servers (free tier - more reliable than OpenRelay)
+  // TCP on port 443 works through most firewalls (looks like HTTPS traffic)
   {
-    urls: 'turn:openrelay.metered.ca:80',
-    username: 'openrelayproject',
-    credential: 'openrelayproject',
+    urls: 'turn:a.relay.metered.ca:443?transport=tcp',
+    username: 'e8dd65c92af533b23e42a0a8',
+    credential: 'hJKrxj8FpMfLaL3D',
   },
   {
-    urls: 'turn:openrelay.metered.ca:443',
-    username: 'openrelayproject',
-    credential: 'openrelayproject',
+    urls: 'turns:a.relay.metered.ca:443?transport=tcp',
+    username: 'e8dd65c92af533b23e42a0a8',
+    credential: 'hJKrxj8FpMfLaL3D',
   },
+  // UDP options (may work on less restrictive networks)
+  {
+    urls: 'turn:a.relay.metered.ca:80?transport=udp',
+    username: 'e8dd65c92af533b23e42a0a8',
+    credential: 'hJKrxj8FpMfLaL3D',
+  },
+  {
+    urls: 'turn:a.relay.metered.ca:443?transport=udp',
+    username: 'e8dd65c92af533b23e42a0a8',
+    credential: 'hJKrxj8FpMfLaL3D',
+  },
+
+  // OpenRelay backup (free, less reliable)
   {
     urls: 'turn:openrelay.metered.ca:443?transport=tcp',
     username: 'openrelayproject',
     credential: 'openrelayproject',
   },
 ];
+
+// Force relay mode - set to true to always use TURN servers (bypasses firewall issues)
+// This increases latency slightly but guarantees connection through firewalls
+export const FORCE_RELAY_MODE = true;
 
 // Connection timeout before retry (15 seconds)
 export const CONNECTION_TIMEOUT_MS = 15000;

@@ -12,6 +12,7 @@ import {
   CONNECTION_TIMEOUT_MS,
   MAX_CONNECTION_RETRIES,
   DEBUG_PREFIX,
+  FORCE_RELAY_MODE,
 } from './constants';
 import { SignalingChannel } from './SignalingChannel';
 import type {
@@ -211,8 +212,17 @@ export function useVoiceCall(options: UseVoiceCallOptions): UseVoiceCallReturn {
 
   // Create peer connection with all handlers
   const createPeerConnection = useCallback((): RTCPeerConnection => {
-    log('Creating peer connection with ICE servers:', ICE_SERVERS.length);
-    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+    log(`Creating peer connection with ${ICE_SERVERS.length} ICE servers, relay mode: ${FORCE_RELAY_MODE}`);
+
+    // Configuration for RTCPeerConnection
+    const config: RTCConfiguration = {
+      iceServers: ICE_SERVERS,
+      // When FORCE_RELAY_MODE is true, only use TURN relay candidates
+      // This bypasses firewall issues but adds slight latency
+      ...(FORCE_RELAY_MODE && { iceTransportPolicy: 'relay' as RTCIceTransportPolicy }),
+    };
+
+    const pc = new RTCPeerConnection(config);
 
     // Handle ICE candidates
     pc.onicecandidate = (event) => {
