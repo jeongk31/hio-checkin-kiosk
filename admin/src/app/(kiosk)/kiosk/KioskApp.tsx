@@ -1579,35 +1579,58 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
   }, [isOpen]);
 
   // Poll for admin status when waiting for answer
-  // This detects if admin answers another kiosk's call
+  // This detects if admin answers another kiosk's call (not ours)
   useEffect(() => {
     if (!isOpen || !sessionId || callStatus !== 'ringing') return;
-    
+
     let isActive = true;
-    
+
     const checkAdminStatus = async () => {
       if (!isActive) return;
-      
+
       try {
         // Check our own session status first
         const sessionResponse = await fetch(`/api/video-sessions?status=waiting`, {
           credentials: 'include',
         });
+        if (!isActive) return; // Check again after async operation
+
         if (sessionResponse.ok) {
           const data = await sessionResponse.json();
           const ourSession = data.sessions?.find((s: { id: string }) => s.id === sessionId);
-          
-          // If our session was ended (by admin declining), notify user
+
+          // If our session is not in waiting list, it could be:
+          // 1. Admin answered OUR call (session is now 'connected') - GOOD, don't set failed
+          // 2. Admin declined our call (session is 'ended') - BAD, set failed
+          // 3. Admin is busy with another call - BAD, set failed
           if (!ourSession) {
-            console.log('[Kiosk] Our session was ended or not found');
-            // Session might have been picked up or cancelled, check for active calls
+            console.log('[Kiosk] Our session not in waiting list, checking session status...');
+
+            // First check if our session was answered (status = 'connected')
+            const ourSessionResponse = await fetch(`/api/video-sessions/${sessionId}`, {
+              credentials: 'include',
+            });
+            if (!isActive) return; // Check again after async operation
+
+            if (ourSessionResponse.ok) {
+              const ourSessionData = await ourSessionResponse.json();
+              if (ourSessionData.status === 'connected') {
+                // Our session was answered! This is good, don't set failed
+                console.log('[Kiosk] Our session was answered by admin, not setting failed');
+                return;
+              }
+            }
+
+            // Our session was not answered, check if admin is busy with someone else
             const statusResponse = await fetch(`/api/video-sessions/status`, {
               credentials: 'include',
             });
+            if (!isActive) return; // Check again after async operation
+
             if (statusResponse.ok) {
               const statusData = await statusResponse.json();
               if (!statusData.available) {
-                // Admin is on a call with someone else
+                // Admin is on a call with someone else (not us)
                 setError('관리자가 다른 통화 중입니다. 잠시 후 다시 시도해 주세요.');
                 setCallStatus('failed');
                 return;
@@ -1619,10 +1642,10 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
         console.error('[Kiosk] Error checking admin status:', error);
       }
     };
-    
+
     // Poll every 3 seconds while ringing
     const interval = setInterval(checkAdminStatus, 3000);
-    
+
     return () => {
       isActive = false;
       clearInterval(interval);
@@ -1666,59 +1689,60 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
     onClose();
   };
 
-  // For connecting/connected states, just render audio element (indicator is in TopButtonRow)
-  if (callStatus === 'connecting' || callStatus === 'connected') {
-    return <audio ref={remoteAudioRef} autoPlay playsInline style={{ display: 'none' }} />;
-  }
+  // IMPORTANT: Always render the same audio element to preserve the attached stream
+  // The audio element must be outside conditional rendering to prevent React from
+  // unmounting/remounting it when callStatus changes (which would lose the stream)
+  const showModal = callStatus !== 'connecting' && callStatus !== 'connected' && isOpen;
 
-  if (!isOpen) return null;
-
-  // Show modal for calling/ringing/ended/failed states
   return (
-    <div className="modal active">
-      <div className="modal-content">
-        <div className="modal-header">
-          <h3>
-            {callStatus === 'calling' && '직원 호출 중...'}
-            {callStatus === 'ringing' && '직원 호출 중...'}
-            {callStatus === 'ended' && '통화 종료'}
-            {callStatus === 'failed' && '연결 실패'}
-          </h3>
-          <button className="close-btn" onClick={handleClose}>✕</button>
-        </div>
-        <div className="video-call-container">
-          <div className="video-placeholder">
-            <div className="calling-animation">
-              {(callStatus === 'calling' || callStatus === 'ringing') && (
-                <>
-                  <div className="calling-icon"></div>
-                  <p>직원과 연결 중입니다</p>
-                  <p className="sub-text">잠시만 기다려주세요</p>
-                </>
-              )}
-              {callStatus === 'failed' && (
-                <>
-                  <div style={{ fontSize: '48px', marginBottom: '16px' }}>❌</div>
-                  <p style={{ color: '#dc2626' }}>{error || '연결에 실패했습니다'}</p>
-                </>
-              )}
-              {callStatus === 'ended' && (
-                <>
-                  <div style={{ fontSize: '48px', marginBottom: '16px' }}>📞</div>
-                  <p>통화가 종료되었습니다</p>
-                </>
-              )}
+    <>
+      <audio ref={remoteAudioRef} autoPlay playsInline style={{ display: 'none' }} />
+      {showModal && (
+        <div className="modal active">
+          <div className="modal-content">
+            <div className="modal-header">
+              <h3>
+                {callStatus === 'calling' && '직원 호출 중...'}
+                {callStatus === 'ringing' && '직원 호출 중...'}
+                {callStatus === 'ended' && '통화 종료'}
+                {callStatus === 'failed' && '연결 실패'}
+              </h3>
+              <button className="close-btn" onClick={handleClose}>✕</button>
+            </div>
+            <div className="video-call-container">
+              <div className="video-placeholder">
+                <div className="calling-animation">
+                  {(callStatus === 'calling' || callStatus === 'ringing') && (
+                    <>
+                      <div className="calling-icon"></div>
+                      <p>직원과 연결 중입니다</p>
+                      <p className="sub-text">잠시만 기다려주세요</p>
+                    </>
+                  )}
+                  {callStatus === 'failed' && (
+                    <>
+                      <div style={{ fontSize: '48px', marginBottom: '16px' }}>❌</div>
+                      <p style={{ color: '#dc2626' }}>{error || '연결에 실패했습니다'}</p>
+                    </>
+                  )}
+                  {callStatus === 'ended' && (
+                    <>
+                      <div style={{ fontSize: '48px', marginBottom: '16px' }}>📞</div>
+                      <p>통화가 종료되었습니다</p>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+            <div className="modal-footer" style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
+              <button className="danger-btn" onClick={handleClose}>
+                {(callStatus === 'ended' || callStatus === 'failed') ? t('btn_close') : t('btn_cancel')}
+              </button>
             </div>
           </div>
         </div>
-        <div className="modal-footer" style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
-          <button className="danger-btn" onClick={handleClose}>
-            {(callStatus === 'ended' || callStatus === 'failed') ? t('btn_close') : t('btn_cancel')}
-          </button>
-        </div>
-      </div>
-      <audio ref={remoteAudioRef} autoPlay playsInline style={{ display: 'none' }} />
-    </div>
+      )}
+    </>
   );
 }
 
