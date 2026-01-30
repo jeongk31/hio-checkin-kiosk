@@ -125,6 +125,11 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
   const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
   const isNegotiatingRef = useRef<boolean>(false);
   const makingOfferRef = useRef<boolean>(false);
+  const connectionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const retryCountRef = useRef<number>(0);
+  const hasConnectedRef = useRef<boolean>(false);
+  const MAX_CONNECTION_RETRIES = 3;
+  const CONNECTION_TIMEOUT_MS = 15000; // 15 seconds
 
   // Request microphone access
   const requestMicrophone = useCallback(async (): Promise<MediaStream | null> => {
@@ -183,6 +188,13 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
       switch (pc.connectionState) {
         case 'connected':
           console.log('[Manager] 🟢 Call connected! Calling onStatusChange(connected)...');
+          // Clear connection timeout on successful connection
+          if (connectionTimeoutRef.current) {
+            clearTimeout(connectionTimeoutRef.current);
+            connectionTimeoutRef.current = null;
+          }
+          hasConnectedRef.current = true;
+          retryCountRef.current = 0;
           onStatusChangeRef.current?.('connected');
           console.log('[Manager] 🟢 onStatusChange(connected) called');
           break;
@@ -208,6 +220,13 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
       console.log('[Manager] ICE connection state:', pc.iceConnectionState);
       if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
         console.log('[Manager] ✅ ICE connection established!');
+        // Clear connection timeout on successful ICE connection
+        if (connectionTimeoutRef.current) {
+          clearTimeout(connectionTimeoutRef.current);
+          connectionTimeoutRef.current = null;
+        }
+        hasConnectedRef.current = true;
+        retryCountRef.current = 0;
         onStatusChangeRef.current?.('connected');
       } else if (pc.iceConnectionState === 'failed') {
         onErrorRef.current?.('네트워크 연결에 실패했습니다. 다시 시도해주세요.');
@@ -257,22 +276,74 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
 
         if (msg.type === 'call-answered') {
           // Kiosk is ready - NOW send the offer
-          if (hassentOffer) {
+          if (hassentOffer && !connectionTimeoutRef.current) {
             console.log('[Manager] Already sent offer, ignoring duplicate call-answered');
             return;
           }
-          console.log('[Manager] Kiosk is ready, creating and sending offer...');
-          hassentOffer = true;
-          try {
-            const offer = await pc.createOffer();
-            await pc.setLocalDescription(offer);
-            console.log('[Manager] 📤 Sending offer to kiosk');
-            channel.send({ type: 'offer', sdp: offer.sdp! });
-            onStatusChangeRef.current?.('connecting');
-          } catch (err) {
-            console.error('[Manager] Failed to create/send offer:', err);
-            hassentOffer = false;
-          }
+
+          // Function to create and send offer (can be called for retries)
+          const createAndSendOffer = async (isRetry: boolean = false) => {
+            if (hasConnectedRef.current) {
+              console.log('[Manager] Already connected, skipping offer creation');
+              return;
+            }
+
+            if (isRetry) {
+              retryCountRef.current++;
+              console.log(`[Manager] 🔄 Retry attempt ${retryCountRef.current}/${MAX_CONNECTION_RETRIES}`);
+
+              if (retryCountRef.current > MAX_CONNECTION_RETRIES) {
+                console.log('[Manager] ❌ Max retries reached, ending call');
+                onErrorRef.current?.('연결에 실패했습니다. 다시 시도해주세요.');
+                onStatusChangeRef.current?.('failed');
+                cleanup();
+                return;
+              }
+            }
+
+            console.log('[Manager] Kiosk is ready, creating and sending offer...');
+            hassentOffer = true;
+            try {
+              const currentPc = peerConnectionRef.current;
+              if (!currentPc || currentPc.signalingState !== 'stable') {
+                // Need to recreate peer connection for retry
+                if (isRetry && localStreamRef.current) {
+                  const newPc = createPeerConnection();
+                  localStreamRef.current.getTracks().forEach((track) => {
+                    newPc.addTrack(track, localStreamRef.current!);
+                  });
+                  pendingCandidatesRef.current = [];
+                }
+              }
+
+              const pcToUse = peerConnectionRef.current;
+              if (!pcToUse) return;
+
+              const offer = await pcToUse.createOffer();
+              await pcToUse.setLocalDescription(offer);
+              console.log('[Manager] 📤 Sending offer to kiosk');
+              channel.send({ type: 'offer', sdp: offer.sdp! });
+              onStatusChangeRef.current?.('connecting');
+
+              // Start connection timeout for retry
+              if (connectionTimeoutRef.current) {
+                clearTimeout(connectionTimeoutRef.current);
+              }
+              connectionTimeoutRef.current = setTimeout(() => {
+                if (!hasConnectedRef.current) {
+                  console.log('[Manager] ⏰ Connection timeout, attempting retry...');
+                  hassentOffer = false;
+                  createAndSendOffer(true);
+                }
+              }, CONNECTION_TIMEOUT_MS);
+            } catch (err) {
+              console.error('[Manager] Failed to create/send offer:', err);
+              hassentOffer = false;
+            }
+          };
+
+          // Initial offer creation
+          await createAndSendOffer(false);
         } else if (msg.type === 'answer' && 'sdp' in msg) {
           console.log('[Manager] Received answer, current state:', pc.signalingState);
           // Only set remote description if we're in have-local-offer state
@@ -380,9 +451,12 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
 
         if (msg.type === 'offer' && 'sdp' in msg) {
           try {
+            const currentPc = peerConnectionRef.current;
+            if (!currentPc) return;
+
             // Check if we can accept an offer right now
-            const currentState = pc.signalingState;
-            const connectionState = pc.connectionState;
+            const currentState = currentPc.signalingState;
+            const connectionState = currentPc.connectionState;
             console.log('[Manager] Current signaling state:', currentState, 'connection state:', connectionState);
 
             // Ignore offer if we're already negotiating
@@ -392,7 +466,7 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
             }
 
             // Ignore offer if connection is already established
-            if (connectionState === 'connected') {
+            if (connectionState === 'connected' || hasConnectedRef.current) {
               console.log('[Manager] Already connected, ignoring offer');
               return;
             }
@@ -406,20 +480,20 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
             console.log('[Manager] Processing offer from kiosk...');
             isNegotiatingRef.current = true;
 
-            await pc.setRemoteDescription({ type: 'offer', sdp: msg.sdp });
+            await currentPc.setRemoteDescription({ type: 'offer', sdp: msg.sdp });
             console.log('[Manager] Remote description set');
 
             // Add any pending ICE candidates
             for (const candidate of pendingCandidatesRef.current) {
               console.log('[Manager] Adding pending ICE candidate');
-              await pc.addIceCandidate(candidate);
+              await currentPc.addIceCandidate(candidate);
             }
             pendingCandidatesRef.current = [];
 
             // Create and send answer
             console.log('[Manager] Creating answer...');
-            const answer = await pc.createAnswer();
-            await pc.setLocalDescription(answer);
+            const answer = await currentPc.createAnswer();
+            await currentPc.setLocalDescription(answer);
             console.log('[Manager] Local description set, sending answer...');
 
             channel.send({ type: 'answer', sdp: answer.sdp! });
@@ -427,6 +501,29 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
             onStatusChangeRef.current?.('connecting');
 
             isNegotiatingRef.current = false;
+
+            // Start connection timeout for retry
+            if (connectionTimeoutRef.current) {
+              clearTimeout(connectionTimeoutRef.current);
+            }
+            connectionTimeoutRef.current = setTimeout(() => {
+              if (!hasConnectedRef.current) {
+                retryCountRef.current++;
+                console.log(`[Manager] ⏰ Connection timeout, retry ${retryCountRef.current}/${MAX_CONNECTION_RETRIES}`);
+
+                if (retryCountRef.current > MAX_CONNECTION_RETRIES) {
+                  console.log('[Manager] ❌ Max retries reached, ending call');
+                  onErrorRef.current?.('연결에 실패했습니다. 다시 시도해주세요.');
+                  onStatusChangeRef.current?.('failed');
+                  cleanup();
+                  return;
+                }
+
+                // Resend call-answered to trigger kiosk to resend offer
+                console.log('[Manager] 🔄 Resending call-answered to trigger new offer');
+                channel.send({ type: 'call-answered' });
+              }
+            }, CONNECTION_TIMEOUT_MS);
           } catch (err) {
             console.error('[Manager] Error processing offer:', err);
             isNegotiatingRef.current = false;
@@ -504,7 +601,13 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
   // Cleanup all resources
   const cleanup = useCallback(() => {
     console.log('[Manager] cleanup called');
-    
+
+    // Clear connection timeout
+    if (connectionTimeoutRef.current) {
+      clearTimeout(connectionTimeoutRef.current);
+      connectionTimeoutRef.current = null;
+    }
+
     // Stop local tracks
     localStreamRef.current?.getTracks().forEach((track) => {
       track.stop();
@@ -532,7 +635,9 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
     sessionIdRef.current = null;
     isNegotiatingRef.current = false;
     makingOfferRef.current = false;
-    
+    retryCountRef.current = 0;
+    hasConnectedRef.current = false;
+
     console.log('[Manager] cleanup complete');
   }, []);
 

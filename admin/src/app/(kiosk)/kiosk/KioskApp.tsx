@@ -1139,6 +1139,10 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
   const durationCounterRef = useRef(0);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
   const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
+  const connectionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const retryCountRef = useRef(0);
+  const MAX_CONNECTION_RETRIES = 3;
+  const CONNECTION_TIMEOUT_MS = 15000; // 15 seconds
 
   // Cleanup function
   const cleanup = useCallback(() => {
@@ -1150,6 +1154,10 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
       clearTimeout(timeoutRef.current);
       timeoutRef.current = null;
     }
+    if (connectionTimeoutRef.current) {
+      clearTimeout(connectionTimeoutRef.current);
+      connectionTimeoutRef.current = null;
+    }
     localStreamRef.current?.getTracks().forEach((track) => track.stop());
     localStreamRef.current = null;
     peerConnectionRef.current?.close();
@@ -1157,6 +1165,7 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
     signalingChannelRef.current?.close();
     signalingChannelRef.current = null;
     pendingCandidatesRef.current = [];
+    retryCountRef.current = 0;
   }, []);
 
   // Setup WebRTC when modal opens with a session
@@ -1237,6 +1246,12 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
           if (hasSetConnected || !isActive) return;
           hasSetConnected = true;
           console.log('[Kiosk] ✅ Call connected!');
+          // Clear connection timeout on successful connection
+          if (connectionTimeoutRef.current) {
+            clearTimeout(connectionTimeoutRef.current);
+            connectionTimeoutRef.current = null;
+          }
+          retryCountRef.current = 0;
           setCallStatus('connected');
           durationCounterRef.current = 0;
           durationIntervalRef.current = setInterval(() => {
@@ -1284,24 +1299,28 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
           if (!isActive) return;
 
           if (payload.type === 'answer' && 'sdp' in payload) {
+            const currentPc = peerConnectionRef.current;
+            if (!currentPc) return;
             // Only process answer if we're waiting for one
-            if (pc.signalingState !== 'have-local-offer') {
-              console.log('[Kiosk] Ignoring answer - not in have-local-offer state:', pc.signalingState);
+            if (currentPc.signalingState !== 'have-local-offer') {
+              console.log('[Kiosk] Ignoring answer - not in have-local-offer state:', currentPc.signalingState);
               return;
             }
             console.log('[Kiosk] Setting remote description from answer');
             try {
-              await pc.setRemoteDescription({ type: 'answer', sdp: payload.sdp });
+              await currentPc.setRemoteDescription({ type: 'answer', sdp: payload.sdp });
               for (const candidate of pendingCandidatesRef.current) {
-                await pc.addIceCandidate(candidate);
+                await currentPc.addIceCandidate(candidate);
               }
               pendingCandidatesRef.current = [];
             } catch (err) {
               console.error('[Kiosk] Error setting remote description:', err);
             }
           } else if (payload.type === 'ice-candidate' && 'candidate' in payload) {
-            if (pc.remoteDescription) {
-              await pc.addIceCandidate(payload.candidate);
+            const currentPc = peerConnectionRef.current;
+            if (!currentPc) return;
+            if (currentPc.remoteDescription) {
+              await currentPc.addIceCandidate(payload.candidate);
             } else {
               pendingCandidatesRef.current.push(payload.candidate);
             }
@@ -1328,25 +1347,122 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
               clearTimeout(timeoutRef.current);
               timeoutRef.current = null;
             }
-            // Create and send offer - only once per call
+            // Create and send offer - only once per call (unless retrying)
             if (hasCreatedOffer) {
               console.log('[Kiosk] Already created offer, ignoring duplicate call-answered');
               return;
             }
-            if (pc.signalingState === 'stable') {
+
+            // Function to create and send offer (can be called for retries)
+            const createAndSendOffer = async (isRetry: boolean = false) => {
+              if (hasSetConnected) {
+                console.log('[Kiosk] Already connected, skipping offer creation');
+                return;
+              }
+
+              if (isRetry) {
+                retryCountRef.current++;
+                console.log(`[Kiosk] 🔄 Retry attempt ${retryCountRef.current}/${MAX_CONNECTION_RETRIES}`);
+
+                if (retryCountRef.current > MAX_CONNECTION_RETRIES) {
+                  console.log('[Kiosk] ❌ Max retries reached, ending call');
+                  setError('연결에 실패했습니다. 다시 시도해 주세요.');
+                  setCallStatus('failed');
+                  cleanup();
+                  return;
+                }
+
+                // Close existing peer connection and create new one for retry
+                pc.close();
+                const newPc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+                peerConnectionRef.current = newPc;
+
+                // Re-add local tracks
+                if (localStreamRef.current) {
+                  localStreamRef.current.getTracks().forEach((track) => {
+                    newPc.addTrack(track, localStreamRef.current!);
+                  });
+                }
+
+                // Re-setup ICE candidate handler
+                newPc.onicecandidate = (event) => {
+                  if (event.candidate && signalingChannelRef.current) {
+                    console.log('[Kiosk] Sending ICE candidate');
+                    signalingChannelRef.current.send({ type: 'ice-candidate', candidate: event.candidate.toJSON() });
+                  }
+                };
+
+                // Re-setup remote stream handler
+                newPc.ontrack = (event) => {
+                  console.log('[Kiosk] Received remote track');
+                  const [remoteStream] = event.streams;
+                  if (remoteAudioRef.current) {
+                    remoteAudioRef.current.srcObject = remoteStream;
+                    remoteAudioRef.current.play().catch(console.error);
+                  }
+                };
+
+                // Re-setup connection state handlers
+                newPc.oniceconnectionstatechange = () => {
+                  console.log('[Kiosk] ICE connection state:', newPc.iceConnectionState);
+                  if (newPc.iceConnectionState === 'connected' || newPc.iceConnectionState === 'completed') {
+                    setConnectedStatus();
+                  }
+                };
+
+                newPc.onconnectionstatechange = () => {
+                  console.log('[Kiosk] Connection state:', newPc.connectionState);
+                  if (!isActive) return;
+                  switch (newPc.connectionState) {
+                    case 'connected':
+                      setConnectedStatus();
+                      break;
+                    case 'disconnected':
+                    case 'failed':
+                    case 'closed':
+                      if (!callEndedIntentionally && !hasSetConnected) {
+                        console.log('[Kiosk] Connection lost unexpectedly');
+                      }
+                      break;
+                  }
+                };
+
+                // Clear pending candidates for new attempt
+                pendingCandidatesRef.current = [];
+              }
+
+              const currentPc = peerConnectionRef.current;
+              if (!currentPc || currentPc.signalingState !== 'stable') {
+                console.warn('[Kiosk] Cannot create offer - wrong state:', currentPc?.signalingState);
+                return;
+              }
+
               try {
                 hasCreatedOffer = true;
-                const offer = await pc.createOffer();
-                await pc.setLocalDescription(offer);
+                const offer = await currentPc.createOffer();
+                await currentPc.setLocalDescription(offer);
                 console.log('[Kiosk] 📤 Sending offer to manager');
                 signalingChannel.send({ type: 'offer', sdp: offer.sdp! });
+
+                // Start connection timeout for retry
+                if (connectionTimeoutRef.current) {
+                  clearTimeout(connectionTimeoutRef.current);
+                }
+                connectionTimeoutRef.current = setTimeout(() => {
+                  if (!hasSetConnected && isActive) {
+                    console.log('[Kiosk] ⏰ Connection timeout, attempting retry...');
+                    hasCreatedOffer = false; // Allow new offer
+                    createAndSendOffer(true);
+                  }
+                }, CONNECTION_TIMEOUT_MS);
               } catch (err) {
                 console.error('[Kiosk] Failed to create/send offer:', err);
                 hasCreatedOffer = false; // Reset on failure to allow retry
               }
-            } else {
-              console.warn('[Kiosk] Cannot create offer - wrong signaling state:', pc.signalingState);
-            }
+            };
+
+            // Initial offer creation
+            await createAndSendOffer(false);
           }
         });
 
@@ -1566,11 +1682,19 @@ function IncomingCallFromManager({ session, onClose, callStatus, onCallStatusCha
   // signalingChannelRef is passed as a prop from parent
   const durationIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
+  const connectionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const retryCountRef = useRef(0);
+  const MAX_CONNECTION_RETRIES = 3;
+  const CONNECTION_TIMEOUT_MS = 15000; // 15 seconds
 
   const cleanup = useCallback(() => {
     if (durationIntervalRef.current) {
       clearInterval(durationIntervalRef.current);
       durationIntervalRef.current = null;
+    }
+    if (connectionTimeoutRef.current) {
+      clearTimeout(connectionTimeoutRef.current);
+      connectionTimeoutRef.current = null;
     }
     localStreamRef.current?.getTracks().forEach((track) => track.stop());
     localStreamRef.current = null;
@@ -1579,6 +1703,7 @@ function IncomingCallFromManager({ session, onClose, callStatus, onCallStatusCha
     signalingChannelRef.current?.close();
     signalingChannelRef.current = null;
     pendingCandidatesRef.current = [];
+    retryCountRef.current = 0;
   }, []);
 
   // Auto-answer the call
@@ -1655,6 +1780,12 @@ function IncomingCallFromManager({ session, onClose, callStatus, onCallStatusCha
           if (hasSetConnected || !isActive) return;
           hasSetConnected = true;
           console.log('[IncomingCallFromManager] ✅ Call connected!');
+          // Clear connection timeout on successful connection
+          if (connectionTimeoutRef.current) {
+            clearTimeout(connectionTimeoutRef.current);
+            connectionTimeoutRef.current = null;
+          }
+          retryCountRef.current = 0;
           setCallStatus('connected');
           durationCounterRef.current = 0;
           durationIntervalRef.current = setInterval(() => {
@@ -1683,11 +1814,8 @@ function IncomingCallFromManager({ session, onClose, callStatus, onCallStatusCha
             case 'failed':
             case 'closed':
               // Only show error if call wasn't ended intentionally
-              if (!callEndedIntentionally) {
+              if (!callEndedIntentionally && !hasSetConnected) {
                 console.log('[IncomingCallFromManager] Connection lost unexpectedly');
-                setCallStatus('failed');
-              } else {
-                console.log('[IncomingCallFromManager] Call ended gracefully');
               }
               break;
           }
@@ -1700,32 +1828,58 @@ function IncomingCallFromManager({ session, onClose, callStatus, onCallStatusCha
           if (!isActive) return;
 
           if (payload.type === 'offer' && 'sdp' in payload) {
-            console.log('[IncomingCallFromManager] Received SDP offer, current state:', pc.signalingState);
+            const currentPc = peerConnectionRef.current;
+            if (!currentPc) return;
+            console.log('[IncomingCallFromManager] Received SDP offer, current state:', currentPc.signalingState);
             // Check if we're in the right state to set remote description
-            if (pc.signalingState !== 'stable' && pc.signalingState !== 'have-local-offer') {
-              console.warn('[IncomingCallFromManager] Ignoring offer - wrong signaling state:', pc.signalingState);
+            if (currentPc.signalingState !== 'stable' && currentPc.signalingState !== 'have-local-offer') {
+              console.warn('[IncomingCallFromManager] Ignoring offer - wrong signaling state:', currentPc.signalingState);
               return;
             }
             try {
-              await pc.setRemoteDescription({ type: 'offer', sdp: payload.sdp });
-              console.log('[IncomingCallFromManager] Remote description set, new state:', pc.signalingState);
-              
+              await currentPc.setRemoteDescription({ type: 'offer', sdp: payload.sdp });
+              console.log('[IncomingCallFromManager] Remote description set, new state:', currentPc.signalingState);
+
               for (const candidate of pendingCandidatesRef.current) {
-                await pc.addIceCandidate(candidate);
+                await currentPc.addIceCandidate(candidate);
               }
               pendingCandidatesRef.current = [];
-              
+
               // Create and send answer
-              const answer = await pc.createAnswer();
-              await pc.setLocalDescription(answer);
+              const answer = await currentPc.createAnswer();
+              await currentPc.setLocalDescription(answer);
               signalingChannel.send({ type: 'answer', sdp: answer.sdp! });
               setCallStatus('connecting');
+
+              // Start connection timeout for retry
+              if (connectionTimeoutRef.current) {
+                clearTimeout(connectionTimeoutRef.current);
+              }
+              connectionTimeoutRef.current = setTimeout(() => {
+                if (!hasSetConnected && isActive) {
+                  retryCountRef.current++;
+                  console.log(`[IncomingCallFromManager] ⏰ Connection timeout, retry ${retryCountRef.current}/${MAX_CONNECTION_RETRIES}`);
+
+                  if (retryCountRef.current > MAX_CONNECTION_RETRIES) {
+                    console.log('[IncomingCallFromManager] ❌ Max retries reached, ending call');
+                    setError('연결에 실패했습니다. 다시 시도해 주세요.');
+                    setCallStatus('failed');
+                    return;
+                  }
+
+                  // Resend call-answered to trigger manager to resend offer
+                  console.log('[IncomingCallFromManager] 🔄 Resending call-answered to trigger new offer');
+                  signalingChannel.send({ type: 'call-answered' });
+                }
+              }, CONNECTION_TIMEOUT_MS);
             } catch (error) {
               console.error('[IncomingCallFromManager] Error handling offer:', error);
             }
           } else if (payload.type === 'ice-candidate' && 'candidate' in payload) {
-            if (pc.remoteDescription) {
-              await pc.addIceCandidate(payload.candidate);
+            const currentPc = peerConnectionRef.current;
+            if (!currentPc) return;
+            if (currentPc.remoteDescription) {
+              await currentPc.addIceCandidate(payload.candidate);
             } else {
               pendingCandidatesRef.current.push(payload.candidate);
             }
