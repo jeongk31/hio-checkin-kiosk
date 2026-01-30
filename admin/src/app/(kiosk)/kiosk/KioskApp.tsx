@@ -1140,12 +1140,41 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
   const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
   const connectionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const debugCountdownRef = useRef<NodeJS.Timeout | null>(null);
+  const connectionStartTimeRef = useRef<number>(0);
   const retryCountRef = useRef(0);
   const MAX_CONNECTION_RETRIES = 3;
   const CONNECTION_TIMEOUT_MS = 15000; // 15 seconds
 
+  // Debug: Log connection state every second when connecting
+  const startDebugCountdown = useCallback((label: string) => {
+    if (debugCountdownRef.current) {
+      clearInterval(debugCountdownRef.current);
+    }
+    connectionStartTimeRef.current = Date.now();
+    console.log(`[Kiosk Debug] 🕐 ${label} - Starting connection timer`);
+
+    debugCountdownRef.current = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - connectionStartTimeRef.current) / 1000);
+      const remaining = Math.ceil((CONNECTION_TIMEOUT_MS / 1000) - elapsed);
+      const pc = peerConnectionRef.current;
+      console.log(`[Kiosk Debug] ⏱️ ${label} - Elapsed: ${elapsed}s, Retry in: ${remaining}s`);
+      console.log(`[Kiosk Debug]   📊 Connection: ${pc?.connectionState || 'null'}, ICE: ${pc?.iceConnectionState || 'null'}, Signaling: ${pc?.signalingState || 'null'}`);
+      console.log(`[Kiosk Debug]   🔄 Retry count: ${retryCountRef.current}/${MAX_CONNECTION_RETRIES}`);
+    }, 1000);
+  }, []);
+
+  const stopDebugCountdown = useCallback(() => {
+    if (debugCountdownRef.current) {
+      clearInterval(debugCountdownRef.current);
+      debugCountdownRef.current = null;
+      console.log('[Kiosk Debug] ✅ Connection timer stopped');
+    }
+  }, []);
+
   // Cleanup function
   const cleanup = useCallback(() => {
+    console.log('[Kiosk Debug] 🧹 Cleanup called');
     if (durationIntervalRef.current) {
       clearInterval(durationIntervalRef.current);
       durationIntervalRef.current = null;
@@ -1158,6 +1187,7 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
       clearTimeout(connectionTimeoutRef.current);
       connectionTimeoutRef.current = null;
     }
+    stopDebugCountdown();
     localStreamRef.current?.getTracks().forEach((track) => track.stop());
     localStreamRef.current = null;
     peerConnectionRef.current?.close();
@@ -1166,7 +1196,7 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
     signalingChannelRef.current = null;
     pendingCandidatesRef.current = [];
     retryCountRef.current = 0;
-  }, []);
+  }, [stopDebugCountdown]);
 
   // Setup WebRTC when modal opens with a session
   useEffect(() => {
@@ -1245,12 +1275,13 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
         const setConnectedStatus = () => {
           if (hasSetConnected || !isActive) return;
           hasSetConnected = true;
-          console.log('[Kiosk] ✅ Call connected!');
+          console.log('[Kiosk Debug] ✅ Call connected! Stopping timers...');
           // Clear connection timeout on successful connection
           if (connectionTimeoutRef.current) {
             clearTimeout(connectionTimeoutRef.current);
             connectionTimeoutRef.current = null;
           }
+          stopDebugCountdown();
           retryCountRef.current = 0;
           setCallStatus('connected');
           durationCounterRef.current = 0;
@@ -1262,15 +1293,19 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
 
         // Handle ICE connection state (more reliable than connection state in some browsers)
         pc.oniceconnectionstatechange = () => {
-          console.log('[Kiosk] ICE connection state:', pc.iceConnectionState);
+          console.log('[Kiosk Debug] 🔵 ICE connection state changed:', pc.iceConnectionState);
           if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
             setConnectedStatus();
+          } else if (pc.iceConnectionState === 'failed') {
+            console.log('[Kiosk Debug] ❌ ICE connection failed');
+          } else if (pc.iceConnectionState === 'disconnected') {
+            console.log('[Kiosk Debug] ⚠️ ICE connection disconnected');
           }
         };
 
         // Handle connection state
         pc.onconnectionstatechange = () => {
-          console.log('[Kiosk] Connection state:', pc.connectionState);
+          console.log('[Kiosk Debug] 🟣 Connection state changed:', pc.connectionState);
           if (!isActive) return;
           switch (pc.connectionState) {
             case 'connected':
@@ -1356,16 +1391,17 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
             // Function to create and send offer (can be called for retries)
             const createAndSendOffer = async (isRetry: boolean = false) => {
               if (hasSetConnected) {
-                console.log('[Kiosk] Already connected, skipping offer creation');
+                console.log('[Kiosk Debug] Already connected, skipping offer creation');
                 return;
               }
 
               if (isRetry) {
                 retryCountRef.current++;
-                console.log(`[Kiosk] 🔄 Retry attempt ${retryCountRef.current}/${MAX_CONNECTION_RETRIES}`);
+                console.log(`[Kiosk Debug] 🔄 RETRY ${retryCountRef.current}/${MAX_CONNECTION_RETRIES} - Recreating peer connection...`);
 
                 if (retryCountRef.current > MAX_CONNECTION_RETRIES) {
-                  console.log('[Kiosk] ❌ Max retries reached, ending call');
+                  console.log('[Kiosk Debug] ❌ MAX RETRIES REACHED - Ending call');
+                  stopDebugCountdown();
                   setError('연결에 실패했습니다. 다시 시도해 주세요.');
                   setCallStatus('failed');
                   cleanup();
@@ -1373,28 +1409,31 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
                 }
 
                 // Close existing peer connection and create new one for retry
+                console.log('[Kiosk Debug] Closing old peer connection...');
                 pc.close();
                 const newPc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
                 peerConnectionRef.current = newPc;
+                console.log('[Kiosk Debug] Created new peer connection');
 
                 // Re-add local tracks
                 if (localStreamRef.current) {
                   localStreamRef.current.getTracks().forEach((track) => {
                     newPc.addTrack(track, localStreamRef.current!);
                   });
+                  console.log('[Kiosk Debug] Re-added local tracks');
                 }
 
                 // Re-setup ICE candidate handler
                 newPc.onicecandidate = (event) => {
                   if (event.candidate && signalingChannelRef.current) {
-                    console.log('[Kiosk] Sending ICE candidate');
+                    console.log('[Kiosk Debug] 📤 Sending ICE candidate');
                     signalingChannelRef.current.send({ type: 'ice-candidate', candidate: event.candidate.toJSON() });
                   }
                 };
 
                 // Re-setup remote stream handler
                 newPc.ontrack = (event) => {
-                  console.log('[Kiosk] Received remote track');
+                  console.log('[Kiosk Debug] 🎧 Received remote track');
                   const [remoteStream] = event.streams;
                   if (remoteAudioRef.current) {
                     remoteAudioRef.current.srcObject = remoteStream;
@@ -1404,14 +1443,14 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
 
                 // Re-setup connection state handlers
                 newPc.oniceconnectionstatechange = () => {
-                  console.log('[Kiosk] ICE connection state:', newPc.iceConnectionState);
+                  console.log('[Kiosk Debug] 🔵 ICE connection state (retry):', newPc.iceConnectionState);
                   if (newPc.iceConnectionState === 'connected' || newPc.iceConnectionState === 'completed') {
                     setConnectedStatus();
                   }
                 };
 
                 newPc.onconnectionstatechange = () => {
-                  console.log('[Kiosk] Connection state:', newPc.connectionState);
+                  console.log('[Kiosk Debug] 🟣 Connection state (retry):', newPc.connectionState);
                   if (!isActive) return;
                   switch (newPc.connectionState) {
                     case 'connected':
@@ -1421,7 +1460,7 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
                     case 'failed':
                     case 'closed':
                       if (!callEndedIntentionally && !hasSetConnected) {
-                        console.log('[Kiosk] Connection lost unexpectedly');
+                        console.log('[Kiosk Debug] Connection lost unexpectedly (retry)');
                       }
                       break;
                   }
@@ -1433,30 +1472,35 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
 
               const currentPc = peerConnectionRef.current;
               if (!currentPc || currentPc.signalingState !== 'stable') {
-                console.warn('[Kiosk] Cannot create offer - wrong state:', currentPc?.signalingState);
+                console.warn('[Kiosk Debug] ⚠️ Cannot create offer - wrong state:', currentPc?.signalingState);
                 return;
               }
 
               try {
                 hasCreatedOffer = true;
+                console.log('[Kiosk Debug] Creating offer...');
                 const offer = await currentPc.createOffer();
                 await currentPc.setLocalDescription(offer);
-                console.log('[Kiosk] 📤 Sending offer to manager');
+                console.log('[Kiosk Debug] 📤 Sending offer to manager');
                 signalingChannel.send({ type: 'offer', sdp: offer.sdp! });
+
+                // Start debug countdown
+                startDebugCountdown(`Kiosk→Admin (attempt ${retryCountRef.current + 1})`);
 
                 // Start connection timeout for retry
                 if (connectionTimeoutRef.current) {
                   clearTimeout(connectionTimeoutRef.current);
                 }
+                console.log(`[Kiosk Debug] ⏱️ Starting ${CONNECTION_TIMEOUT_MS/1000}s connection timeout...`);
                 connectionTimeoutRef.current = setTimeout(() => {
                   if (!hasSetConnected && isActive) {
-                    console.log('[Kiosk] ⏰ Connection timeout, attempting retry...');
+                    console.log('[Kiosk Debug] ⏰ CONNECTION TIMEOUT - Will retry...');
                     hasCreatedOffer = false; // Allow new offer
                     createAndSendOffer(true);
                   }
                 }, CONNECTION_TIMEOUT_MS);
               } catch (err) {
-                console.error('[Kiosk] Failed to create/send offer:', err);
+                console.error('[Kiosk Debug] ❌ Failed to create/send offer:', err);
                 hasCreatedOffer = false; // Reset on failure to allow retry
               }
             };
@@ -1683,11 +1727,40 @@ function IncomingCallFromManager({ session, onClose, callStatus, onCallStatusCha
   const durationIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
   const connectionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const debugCountdownRef = useRef<NodeJS.Timeout | null>(null);
+  const connectionStartTimeRef = useRef<number>(0);
   const retryCountRef = useRef(0);
   const MAX_CONNECTION_RETRIES = 3;
   const CONNECTION_TIMEOUT_MS = 15000; // 15 seconds
 
+  // Debug: Log connection state every second when connecting
+  const startDebugCountdown = useCallback((label: string) => {
+    if (debugCountdownRef.current) {
+      clearInterval(debugCountdownRef.current);
+    }
+    connectionStartTimeRef.current = Date.now();
+    console.log(`[Incoming Debug] 🕐 ${label} - Starting connection timer`);
+
+    debugCountdownRef.current = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - connectionStartTimeRef.current) / 1000);
+      const remaining = Math.ceil((CONNECTION_TIMEOUT_MS / 1000) - elapsed);
+      const pc = peerConnectionRef.current;
+      console.log(`[Incoming Debug] ⏱️ ${label} - Elapsed: ${elapsed}s, Retry in: ${remaining}s`);
+      console.log(`[Incoming Debug]   📊 Connection: ${pc?.connectionState || 'null'}, ICE: ${pc?.iceConnectionState || 'null'}, Signaling: ${pc?.signalingState || 'null'}`);
+      console.log(`[Incoming Debug]   🔄 Retry count: ${retryCountRef.current}/${MAX_CONNECTION_RETRIES}`);
+    }, 1000);
+  }, []);
+
+  const stopDebugCountdown = useCallback(() => {
+    if (debugCountdownRef.current) {
+      clearInterval(debugCountdownRef.current);
+      debugCountdownRef.current = null;
+      console.log('[Incoming Debug] ✅ Connection timer stopped');
+    }
+  }, []);
+
   const cleanup = useCallback(() => {
+    console.log('[Incoming Debug] 🧹 Cleanup called');
     if (durationIntervalRef.current) {
       clearInterval(durationIntervalRef.current);
       durationIntervalRef.current = null;
@@ -1696,6 +1769,7 @@ function IncomingCallFromManager({ session, onClose, callStatus, onCallStatusCha
       clearTimeout(connectionTimeoutRef.current);
       connectionTimeoutRef.current = null;
     }
+    stopDebugCountdown();
     localStreamRef.current?.getTracks().forEach((track) => track.stop());
     localStreamRef.current = null;
     peerConnectionRef.current?.close();
@@ -1704,7 +1778,7 @@ function IncomingCallFromManager({ session, onClose, callStatus, onCallStatusCha
     signalingChannelRef.current = null;
     pendingCandidatesRef.current = [];
     retryCountRef.current = 0;
-  }, []);
+  }, [stopDebugCountdown]);
 
   // Auto-answer the call
   useEffect(() => {
@@ -1779,12 +1853,13 @@ function IncomingCallFromManager({ session, onClose, callStatus, onCallStatusCha
         const setConnectedStatus = () => {
           if (hasSetConnected || !isActive) return;
           hasSetConnected = true;
-          console.log('[IncomingCallFromManager] ✅ Call connected!');
+          console.log('[Incoming Debug] ✅ Call connected! Stopping timers...');
           // Clear connection timeout on successful connection
           if (connectionTimeoutRef.current) {
             clearTimeout(connectionTimeoutRef.current);
             connectionTimeoutRef.current = null;
           }
+          stopDebugCountdown();
           retryCountRef.current = 0;
           setCallStatus('connected');
           durationCounterRef.current = 0;
@@ -1796,15 +1871,19 @@ function IncomingCallFromManager({ session, onClose, callStatus, onCallStatusCha
 
         // Handle ICE connection state (more reliable than connection state in some browsers)
         pc.oniceconnectionstatechange = () => {
-          console.log('[IncomingCallFromManager] ICE connection state:', pc.iceConnectionState);
+          console.log('[Incoming Debug] 🔵 ICE connection state changed:', pc.iceConnectionState);
           if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
             setConnectedStatus();
+          } else if (pc.iceConnectionState === 'failed') {
+            console.log('[Incoming Debug] ❌ ICE connection failed');
+          } else if (pc.iceConnectionState === 'disconnected') {
+            console.log('[Incoming Debug] ⚠️ ICE connection disconnected');
           }
         };
 
         // Handle connection state
         pc.onconnectionstatechange = () => {
-          console.log('[IncomingCallFromManager] Connection state:', pc.connectionState);
+          console.log('[Incoming Debug] 🟣 Connection state changed:', pc.connectionState);
           if (!isActive) return;
           switch (pc.connectionState) {
             case 'connected':
@@ -1815,82 +1894,106 @@ function IncomingCallFromManager({ session, onClose, callStatus, onCallStatusCha
             case 'closed':
               // Only show error if call wasn't ended intentionally
               if (!callEndedIntentionally && !hasSetConnected) {
-                console.log('[IncomingCallFromManager] Connection lost unexpectedly');
+                console.log('[Incoming Debug] Connection lost unexpectedly');
               }
               break;
           }
         };
 
         // Listen for signaling messages
-        console.log('[IncomingCallFromManager] Setting up signaling message listener...');
+        console.log('[Incoming Debug] Setting up signaling message listener...');
         signalingChannel.onMessage(async (payload) => {
-          console.log('[IncomingCallFromManager] 📥 Received signaling message:', payload.type);
-          if (!isActive) return;
+          console.log('[Incoming Debug] 📥 Received signaling message:', payload.type);
+          if (!isActive) {
+            console.log('[Incoming Debug] ⚠️ Ignoring message - component not active');
+            return;
+          }
 
           if (payload.type === 'offer' && 'sdp' in payload) {
             const currentPc = peerConnectionRef.current;
-            if (!currentPc) return;
-            console.log('[IncomingCallFromManager] Received SDP offer, current state:', currentPc.signalingState);
+            if (!currentPc) {
+              console.log('[Incoming Debug] ⚠️ No peer connection available');
+              return;
+            }
+            console.log('[Incoming Debug] 📨 Received SDP offer');
+            console.log('[Incoming Debug]   Current signaling state:', currentPc.signalingState);
+            console.log('[Incoming Debug]   Current connection state:', currentPc.connectionState);
+            console.log('[Incoming Debug]   Current ICE state:', currentPc.iceConnectionState);
+
             // Check if we're in the right state to set remote description
             if (currentPc.signalingState !== 'stable' && currentPc.signalingState !== 'have-local-offer') {
-              console.warn('[IncomingCallFromManager] Ignoring offer - wrong signaling state:', currentPc.signalingState);
+              console.warn('[Incoming Debug] ⚠️ Ignoring offer - wrong signaling state:', currentPc.signalingState);
               return;
             }
             try {
+              console.log('[Incoming Debug] Setting remote description...');
               await currentPc.setRemoteDescription({ type: 'offer', sdp: payload.sdp });
-              console.log('[IncomingCallFromManager] Remote description set, new state:', currentPc.signalingState);
+              console.log('[Incoming Debug] ✅ Remote description set, new state:', currentPc.signalingState);
 
+              const pendingCount = pendingCandidatesRef.current.length;
+              if (pendingCount > 0) {
+                console.log(`[Incoming Debug] Adding ${pendingCount} pending ICE candidates...`);
+              }
               for (const candidate of pendingCandidatesRef.current) {
                 await currentPc.addIceCandidate(candidate);
               }
               pendingCandidatesRef.current = [];
 
               // Create and send answer
+              console.log('[Incoming Debug] Creating answer...');
               const answer = await currentPc.createAnswer();
               await currentPc.setLocalDescription(answer);
+              console.log('[Incoming Debug] 📤 Sending answer to manager');
               signalingChannel.send({ type: 'answer', sdp: answer.sdp! });
               setCallStatus('connecting');
+
+              // Start debug countdown
+              startDebugCountdown(`Admin→Kiosk (attempt ${retryCountRef.current + 1})`);
 
               // Start connection timeout for retry
               if (connectionTimeoutRef.current) {
                 clearTimeout(connectionTimeoutRef.current);
               }
+              console.log(`[Incoming Debug] ⏱️ Starting ${CONNECTION_TIMEOUT_MS/1000}s connection timeout...`);
               connectionTimeoutRef.current = setTimeout(() => {
                 if (!hasSetConnected && isActive) {
                   retryCountRef.current++;
-                  console.log(`[IncomingCallFromManager] ⏰ Connection timeout, retry ${retryCountRef.current}/${MAX_CONNECTION_RETRIES}`);
+                  console.log(`[Incoming Debug] ⏰ CONNECTION TIMEOUT - Retry ${retryCountRef.current}/${MAX_CONNECTION_RETRIES}`);
 
                   if (retryCountRef.current > MAX_CONNECTION_RETRIES) {
-                    console.log('[IncomingCallFromManager] ❌ Max retries reached, ending call');
+                    console.log('[Incoming Debug] ❌ MAX RETRIES REACHED - Ending call');
+                    stopDebugCountdown();
                     setError('연결에 실패했습니다. 다시 시도해 주세요.');
                     setCallStatus('failed');
                     return;
                   }
 
                   // Resend call-answered to trigger manager to resend offer
-                  console.log('[IncomingCallFromManager] 🔄 Resending call-answered to trigger new offer');
+                  console.log('[Incoming Debug] 🔄 Resending call-answered to trigger new offer');
                   signalingChannel.send({ type: 'call-answered' });
                 }
               }, CONNECTION_TIMEOUT_MS);
             } catch (error) {
-              console.error('[IncomingCallFromManager] Error handling offer:', error);
+              console.error('[Incoming Debug] ❌ Error handling offer:', error);
             }
           } else if (payload.type === 'ice-candidate' && 'candidate' in payload) {
             const currentPc = peerConnectionRef.current;
             if (!currentPc) return;
             if (currentPc.remoteDescription) {
+              console.log('[Incoming Debug] 📥 Adding ICE candidate');
               await currentPc.addIceCandidate(payload.candidate);
             } else {
+              console.log('[Incoming Debug] 📥 Queuing ICE candidate (no remote description yet)');
               pendingCandidatesRef.current.push(payload.candidate);
             }
           } else if (payload.type === 'call-answered') {
             // Ignore - this is our own signal echoed back
-            console.log('[IncomingCallFromManager] Ignoring echoed call-answered signal');
+            console.log('[Incoming Debug] Ignoring echoed call-answered signal');
           } else if (payload.type === 'answer') {
             // Ignore - kiosk doesn't expect answer (it sends answer, not receives it)
-            console.log('[IncomingCallFromManager] Ignoring unexpected answer signal');
+            console.log('[Incoming Debug] Ignoring unexpected answer signal');
           } else if (payload.type === 'call-ended') {
-            console.log('[IncomingCallFromManager] Call ended by manager');
+            console.log('[Incoming Debug] 📥 Call ended by manager');
             callEndedIntentionally = true;
             setCallStatus('ended');
             cleanup();

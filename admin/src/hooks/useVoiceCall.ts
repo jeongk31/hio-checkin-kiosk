@@ -126,10 +126,38 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
   const isNegotiatingRef = useRef<boolean>(false);
   const makingOfferRef = useRef<boolean>(false);
   const connectionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const debugCountdownRef = useRef<NodeJS.Timeout | null>(null);
+  const connectionStartTimeRef = useRef<number>(0);
   const retryCountRef = useRef<number>(0);
   const hasConnectedRef = useRef<boolean>(false);
   const MAX_CONNECTION_RETRIES = 3;
   const CONNECTION_TIMEOUT_MS = 15000; // 15 seconds
+
+  // Debug: Log connection state every second when connecting
+  const startDebugCountdown = useCallback((label: string) => {
+    if (debugCountdownRef.current) {
+      clearInterval(debugCountdownRef.current);
+    }
+    connectionStartTimeRef.current = Date.now();
+    console.log(`[Manager Debug] 🕐 ${label} - Starting connection timer`);
+
+    debugCountdownRef.current = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - connectionStartTimeRef.current) / 1000);
+      const remaining = Math.ceil((CONNECTION_TIMEOUT_MS / 1000) - elapsed);
+      const pc = peerConnectionRef.current;
+      console.log(`[Manager Debug] ⏱️ ${label} - Elapsed: ${elapsed}s, Retry in: ${remaining}s`);
+      console.log(`[Manager Debug]   📊 Connection: ${pc?.connectionState || 'null'}, ICE: ${pc?.iceConnectionState || 'null'}, Signaling: ${pc?.signalingState || 'null'}`);
+      console.log(`[Manager Debug]   🔄 Retry count: ${retryCountRef.current}/${MAX_CONNECTION_RETRIES}`);
+    }, 1000);
+  }, []);
+
+  const stopDebugCountdown = useCallback(() => {
+    if (debugCountdownRef.current) {
+      clearInterval(debugCountdownRef.current);
+      debugCountdownRef.current = null;
+      console.log('[Manager Debug] ✅ Connection timer stopped');
+    }
+  }, []);
 
   // Request microphone access
   const requestMicrophone = useCallback(async (): Promise<MediaStream | null> => {
@@ -183,64 +211,66 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
     };
 
     pc.onconnectionstatechange = () => {
-      console.log('[Manager] Connection state changed to:', pc.connectionState);
-      console.log('[Manager] Current onStatusChangeRef:', typeof onStatusChangeRef.current);
+      console.log('[Manager Debug] 🟣 Connection state changed:', pc.connectionState);
       switch (pc.connectionState) {
         case 'connected':
-          console.log('[Manager] 🟢 Call connected! Calling onStatusChange(connected)...');
+          console.log('[Manager Debug] ✅ Call connected! Stopping timers...');
           // Clear connection timeout on successful connection
           if (connectionTimeoutRef.current) {
             clearTimeout(connectionTimeoutRef.current);
             connectionTimeoutRef.current = null;
           }
+          stopDebugCountdown();
           hasConnectedRef.current = true;
           retryCountRef.current = 0;
           onStatusChangeRef.current?.('connected');
-          console.log('[Manager] 🟢 onStatusChange(connected) called');
           break;
         case 'disconnected':
           // Don't treat disconnected as reconnecting - WebRTC connections can briefly
           // go through disconnected during normal ICE negotiation after being connected.
-          // Only truly failed connections will trigger the 'failed' state.
-          console.log('[Manager] 🟡 Connection disconnected (waiting for failed state if permanent)');
+          console.log('[Manager Debug] ⚠️ Connection disconnected (waiting for failed state if permanent)');
           break;
         case 'failed':
-          console.log('[Manager] 🔴 Connection failed');
+          console.log('[Manager Debug] ❌ Connection failed');
           onErrorRef.current?.('연결이 끊어졌습니다.');
           onStatusChangeRef.current?.('failed');
           break;
         case 'closed':
-          console.log('[Manager] ⚪ Connection closed');
+          console.log('[Manager Debug] ⚪ Connection closed');
           onStatusChangeRef.current?.('ended');
           break;
       }
     };
 
     pc.oniceconnectionstatechange = () => {
-      console.log('[Manager] ICE connection state:', pc.iceConnectionState);
+      console.log('[Manager Debug] 🔵 ICE connection state changed:', pc.iceConnectionState);
       if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
-        console.log('[Manager] ✅ ICE connection established!');
+        console.log('[Manager Debug] ✅ ICE connection established!');
         // Clear connection timeout on successful ICE connection
         if (connectionTimeoutRef.current) {
           clearTimeout(connectionTimeoutRef.current);
           connectionTimeoutRef.current = null;
         }
+        stopDebugCountdown();
         hasConnectedRef.current = true;
         retryCountRef.current = 0;
         onStatusChangeRef.current?.('connected');
       } else if (pc.iceConnectionState === 'failed') {
+        console.log('[Manager Debug] ❌ ICE connection failed');
         onErrorRef.current?.('네트워크 연결에 실패했습니다. 다시 시도해주세요.');
         onStatusChangeRef.current?.('failed');
+      } else if (pc.iceConnectionState === 'disconnected') {
+        console.log('[Manager Debug] ⚠️ ICE connection disconnected');
       }
     };
 
     pc.onicegatheringstatechange = () => {
-      console.log('[Manager] ICE gathering state:', pc.iceGatheringState);
+      console.log('[Manager Debug] ICE gathering state:', pc.iceGatheringState);
     };
 
     peerConnectionRef.current = pc;
     return pc;
-  }, []);
+  }, [stopDebugCountdown]);
 
   // Initiate a call (create offer) - manager → kiosk flow
   const initiateCall = useCallback(async (sessionId: string): Promise<boolean> => {
@@ -272,28 +302,29 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
 
       // Handle incoming messages
       channel.onMessage(async (msg: SignalingMessage) => {
-        console.log('[Manager] 📥 Received signaling message:', msg.type);
+        console.log('[Manager Debug] 📥 Received signaling message:', msg.type);
 
         if (msg.type === 'call-answered') {
           // Kiosk is ready - NOW send the offer
           if (hassentOffer && !connectionTimeoutRef.current) {
-            console.log('[Manager] Already sent offer, ignoring duplicate call-answered');
+            console.log('[Manager Debug] Already sent offer, ignoring duplicate call-answered');
             return;
           }
 
           // Function to create and send offer (can be called for retries)
           const createAndSendOffer = async (isRetry: boolean = false) => {
             if (hasConnectedRef.current) {
-              console.log('[Manager] Already connected, skipping offer creation');
+              console.log('[Manager Debug] Already connected, skipping offer creation');
               return;
             }
 
             if (isRetry) {
               retryCountRef.current++;
-              console.log(`[Manager] 🔄 Retry attempt ${retryCountRef.current}/${MAX_CONNECTION_RETRIES}`);
+              console.log(`[Manager Debug] 🔄 RETRY ${retryCountRef.current}/${MAX_CONNECTION_RETRIES} - Recreating peer connection...`);
 
               if (retryCountRef.current > MAX_CONNECTION_RETRIES) {
-                console.log('[Manager] ❌ Max retries reached, ending call');
+                console.log('[Manager Debug] ❌ MAX RETRIES REACHED - Ending call');
+                stopDebugCountdown();
                 onErrorRef.current?.('연결에 실패했습니다. 다시 시도해주세요.');
                 onStatusChangeRef.current?.('failed');
                 cleanup();
@@ -301,43 +332,55 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
               }
             }
 
-            console.log('[Manager] Kiosk is ready, creating and sending offer...');
+            console.log('[Manager Debug] Kiosk is ready, creating and sending offer...');
             hassentOffer = true;
             try {
               const currentPc = peerConnectionRef.current;
+              console.log('[Manager Debug]   Current signaling state:', currentPc?.signalingState);
+              console.log('[Manager Debug]   Current connection state:', currentPc?.connectionState);
               if (!currentPc || currentPc.signalingState !== 'stable') {
                 // Need to recreate peer connection for retry
                 if (isRetry && localStreamRef.current) {
+                  console.log('[Manager Debug] Creating new peer connection for retry...');
                   const newPc = createPeerConnection();
                   localStreamRef.current.getTracks().forEach((track) => {
                     newPc.addTrack(track, localStreamRef.current!);
                   });
                   pendingCandidatesRef.current = [];
+                  console.log('[Manager Debug] New peer connection created');
                 }
               }
 
               const pcToUse = peerConnectionRef.current;
-              if (!pcToUse) return;
+              if (!pcToUse) {
+                console.log('[Manager Debug] ⚠️ No peer connection available');
+                return;
+              }
 
+              console.log('[Manager Debug] Creating offer...');
               const offer = await pcToUse.createOffer();
               await pcToUse.setLocalDescription(offer);
-              console.log('[Manager] 📤 Sending offer to kiosk');
+              console.log('[Manager Debug] 📤 Sending offer to kiosk');
               channel.send({ type: 'offer', sdp: offer.sdp! });
               onStatusChangeRef.current?.('connecting');
+
+              // Start debug countdown
+              startDebugCountdown(`Manager→Kiosk (attempt ${retryCountRef.current + 1})`);
 
               // Start connection timeout for retry
               if (connectionTimeoutRef.current) {
                 clearTimeout(connectionTimeoutRef.current);
               }
+              console.log(`[Manager Debug] ⏱️ Starting ${CONNECTION_TIMEOUT_MS/1000}s connection timeout...`);
               connectionTimeoutRef.current = setTimeout(() => {
                 if (!hasConnectedRef.current) {
-                  console.log('[Manager] ⏰ Connection timeout, attempting retry...');
+                  console.log('[Manager Debug] ⏰ CONNECTION TIMEOUT - Will retry...');
                   hassentOffer = false;
                   createAndSendOffer(true);
                 }
               }, CONNECTION_TIMEOUT_MS);
             } catch (err) {
-              console.error('[Manager] Failed to create/send offer:', err);
+              console.error('[Manager Debug] ❌ Failed to create/send offer:', err);
               hassentOffer = false;
             }
           };
@@ -345,29 +388,37 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
           // Initial offer creation
           await createAndSendOffer(false);
         } else if (msg.type === 'answer' && 'sdp' in msg) {
-          console.log('[Manager] Received answer, current state:', pc.signalingState);
+          console.log('[Manager Debug] 📨 Received answer');
+          console.log('[Manager Debug]   Current signaling state:', pc.signalingState);
+          console.log('[Manager Debug]   Current connection state:', pc.connectionState);
+          console.log('[Manager Debug]   Current ICE state:', pc.iceConnectionState);
           // Only set remote description if we're in have-local-offer state
           if (pc.signalingState !== 'have-local-offer') {
-            console.warn('[Manager] Ignoring answer - wrong signaling state:', pc.signalingState);
+            console.warn('[Manager Debug] ⚠️ Ignoring answer - wrong signaling state:', pc.signalingState);
             return;
           }
           try {
+            console.log('[Manager Debug] Setting remote description...');
             await pc.setRemoteDescription({ type: 'answer', sdp: msg.sdp });
-            console.log('[Manager] Remote description set, new state:', pc.signalingState);
+            console.log('[Manager Debug] ✅ Remote description set, new state:', pc.signalingState);
+            const pendingCount = pendingCandidatesRef.current.length;
+            if (pendingCount > 0) {
+              console.log(`[Manager Debug] Adding ${pendingCount} pending ICE candidates...`);
+            }
             for (const candidate of pendingCandidatesRef.current) {
               await pc.addIceCandidate(candidate);
             }
             pendingCandidatesRef.current = [];
             // Don't set 'connecting' here - let pc.onconnectionstatechange handle status updates
           } catch (err) {
-            console.error('[Manager] Error setting remote description:', err);
+            console.error('[Manager Debug] ❌ Error setting remote description:', err);
           }
         } else if (msg.type === 'ice-candidate' && 'candidate' in msg) {
-          console.log('[Manager] Received ICE candidate');
           if (pc.remoteDescription) {
+            console.log('[Manager Debug] 📥 Adding ICE candidate');
             await pc.addIceCandidate(msg.candidate);
           } else {
-            console.log('[Manager] Queuing ICE candidate');
+            console.log('[Manager Debug] 📥 Queuing ICE candidate (no remote description yet)');
             pendingCandidatesRef.current.push(msg.candidate);
           }
         } else if (msg.type === 'call-ended') {
@@ -447,72 +498,86 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
 
       // Handle incoming messages
       channel.onMessage(async (msg: SignalingMessage) => {
-        console.log('[Manager] 📥 Received signaling message:', msg.type);
+        console.log('[Manager Debug] 📥 Received signaling message:', msg.type);
 
         if (msg.type === 'offer' && 'sdp' in msg) {
           try {
             const currentPc = peerConnectionRef.current;
-            if (!currentPc) return;
+            if (!currentPc) {
+              console.log('[Manager Debug] ⚠️ No peer connection available');
+              return;
+            }
 
             // Check if we can accept an offer right now
             const currentState = currentPc.signalingState;
             const connectionState = currentPc.connectionState;
-            console.log('[Manager] Current signaling state:', currentState, 'connection state:', connectionState);
+            console.log('[Manager Debug] 📨 Received SDP offer');
+            console.log('[Manager Debug]   Current signaling state:', currentState);
+            console.log('[Manager Debug]   Current connection state:', connectionState);
+            console.log('[Manager Debug]   Current ICE state:', currentPc.iceConnectionState);
 
             // Ignore offer if we're already negotiating
             if (isNegotiatingRef.current) {
-              console.log('[Manager] Already negotiating, ignoring offer');
+              console.log('[Manager Debug] ⚠️ Already negotiating, ignoring offer');
               return;
             }
 
             // Ignore offer if connection is already established
             if (connectionState === 'connected' || hasConnectedRef.current) {
-              console.log('[Manager] Already connected, ignoring offer');
+              console.log('[Manager Debug] ⚠️ Already connected, ignoring offer');
               return;
             }
 
             // Only process offer if in stable state
             if (currentState !== 'stable') {
-              console.log('[Manager] Cannot process offer in state:', currentState, '- ignoring');
+              console.log('[Manager Debug] ⚠️ Cannot process offer in state:', currentState, '- ignoring');
               return;
             }
 
-            console.log('[Manager] Processing offer from kiosk...');
+            console.log('[Manager Debug] Processing offer from kiosk...');
             isNegotiatingRef.current = true;
 
+            console.log('[Manager Debug] Setting remote description...');
             await currentPc.setRemoteDescription({ type: 'offer', sdp: msg.sdp });
-            console.log('[Manager] Remote description set');
+            console.log('[Manager Debug] ✅ Remote description set');
 
             // Add any pending ICE candidates
+            const pendingCount = pendingCandidatesRef.current.length;
+            if (pendingCount > 0) {
+              console.log(`[Manager Debug] Adding ${pendingCount} pending ICE candidates...`);
+            }
             for (const candidate of pendingCandidatesRef.current) {
-              console.log('[Manager] Adding pending ICE candidate');
               await currentPc.addIceCandidate(candidate);
             }
             pendingCandidatesRef.current = [];
 
             // Create and send answer
-            console.log('[Manager] Creating answer...');
+            console.log('[Manager Debug] Creating answer...');
             const answer = await currentPc.createAnswer();
             await currentPc.setLocalDescription(answer);
-            console.log('[Manager] Local description set, sending answer...');
+            console.log('[Manager Debug] 📤 Sending answer to kiosk');
 
             channel.send({ type: 'answer', sdp: answer.sdp! });
-            console.log('[Manager] 📤 Answer sent to kiosk');
             onStatusChangeRef.current?.('connecting');
 
             isNegotiatingRef.current = false;
+
+            // Start debug countdown
+            startDebugCountdown(`Kiosk→Manager (attempt ${retryCountRef.current + 1})`);
 
             // Start connection timeout for retry
             if (connectionTimeoutRef.current) {
               clearTimeout(connectionTimeoutRef.current);
             }
+            console.log(`[Manager Debug] ⏱️ Starting ${CONNECTION_TIMEOUT_MS/1000}s connection timeout...`);
             connectionTimeoutRef.current = setTimeout(() => {
               if (!hasConnectedRef.current) {
                 retryCountRef.current++;
-                console.log(`[Manager] ⏰ Connection timeout, retry ${retryCountRef.current}/${MAX_CONNECTION_RETRIES}`);
+                console.log(`[Manager Debug] ⏰ CONNECTION TIMEOUT - Retry ${retryCountRef.current}/${MAX_CONNECTION_RETRIES}`);
 
                 if (retryCountRef.current > MAX_CONNECTION_RETRIES) {
-                  console.log('[Manager] ❌ Max retries reached, ending call');
+                  console.log('[Manager Debug] ❌ MAX RETRIES REACHED - Ending call');
+                  stopDebugCountdown();
                   onErrorRef.current?.('연결에 실패했습니다. 다시 시도해주세요.');
                   onStatusChangeRef.current?.('failed');
                   cleanup();
@@ -520,21 +585,21 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
                 }
 
                 // Resend call-answered to trigger kiosk to resend offer
-                console.log('[Manager] 🔄 Resending call-answered to trigger new offer');
+                console.log('[Manager Debug] 🔄 Resending call-answered to trigger new offer');
                 channel.send({ type: 'call-answered' });
               }
             }, CONNECTION_TIMEOUT_MS);
           } catch (err) {
-            console.error('[Manager] Error processing offer:', err);
+            console.error('[Manager Debug] ❌ Error processing offer:', err);
             isNegotiatingRef.current = false;
             onErrorRef.current?.('통화 연결에 실패했습니다.');
           }
         } else if (msg.type === 'ice-candidate' && 'candidate' in msg) {
-          console.log('[Manager Dashboard] Received ICE candidate');
           if (pc.remoteDescription) {
+            console.log('[Manager Debug] 📥 Adding ICE candidate');
             await pc.addIceCandidate(msg.candidate);
           } else {
-            console.log('[Manager Dashboard] Queuing ICE candidate');
+            console.log('[Manager Debug] 📥 Queuing ICE candidate (no remote description yet)');
             pendingCandidatesRef.current.push(msg.candidate);
           }
         } else if (msg.type === 'call-ended') {
@@ -600,32 +665,33 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
 
   // Cleanup all resources
   const cleanup = useCallback(() => {
-    console.log('[Manager] cleanup called');
+    console.log('[Manager Debug] 🧹 Cleanup called');
 
     // Clear connection timeout
     if (connectionTimeoutRef.current) {
       clearTimeout(connectionTimeoutRef.current);
       connectionTimeoutRef.current = null;
     }
+    stopDebugCountdown();
 
     // Stop local tracks
     localStreamRef.current?.getTracks().forEach((track) => {
       track.stop();
-      console.log('[Manager] Stopped local track:', track.kind);
+      console.log('[Manager Debug] Stopped local track:', track.kind);
     });
     localStreamRef.current = null;
 
     // Close peer connection
     if (peerConnectionRef.current) {
       peerConnectionRef.current.close();
-      console.log('[Manager] Closed peer connection');
+      console.log('[Manager Debug] Closed peer connection');
       peerConnectionRef.current = null;
     }
 
     // Close channel
     if (channelRef.current) {
       channelRef.current.close();
-      console.log('[Manager] Closed signaling channel');
+      console.log('[Manager Debug] Closed signaling channel');
       channelRef.current = null;
     }
 
@@ -638,8 +704,8 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
     retryCountRef.current = 0;
     hasConnectedRef.current = false;
 
-    console.log('[Manager] cleanup complete');
-  }, []);
+    console.log('[Manager Debug] Cleanup complete');
+  }, [stopDebugCountdown]);
 
   // Cleanup on unmount
   useEffect(() => {
