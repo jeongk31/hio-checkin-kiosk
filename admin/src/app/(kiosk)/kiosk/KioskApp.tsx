@@ -1390,15 +1390,24 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
             cleanup();
           } else if (payload.type === 'call-answered') {
             console.log('[Kiosk] Manager answered the call!');
-            setCallStatus('connecting');
-            if (timeoutRef.current) {
-              clearTimeout(timeoutRef.current);
-              timeoutRef.current = null;
+
+            // IMPORTANT: Check if already connected first - don't overwrite connected status!
+            if (hasSetConnected) {
+              console.log('[Kiosk Debug] Already connected, ignoring call-answered');
+              return;
             }
+
             // Create and send offer - only once per call (unless retrying)
             if (hasCreatedOffer) {
               console.log('[Kiosk] Already created offer, ignoring duplicate call-answered');
               return;
+            }
+
+            // Only set connecting AFTER the checks pass
+            setCallStatus('connecting');
+            if (timeoutRef.current) {
+              clearTimeout(timeoutRef.current);
+              timeoutRef.current = null;
             }
 
             // Function to create and send offer (can be called for retries)
