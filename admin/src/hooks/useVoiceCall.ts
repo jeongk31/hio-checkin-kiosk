@@ -28,12 +28,14 @@ interface UseVoiceCallOptions {
 // Simple signaling using polling API (fallback for when WebSocket is not available)
 class SignalingChannel {
   private sessionId: string;
+  private sender: string;
   private pollInterval: ReturnType<typeof setInterval> | null = null;
   private messageHandler: ((msg: SignalingMessage) => void) | null = null;
   private lastMessageId: number = 0;
 
-  constructor(sessionId: string) {
+  constructor(sessionId: string, sender: string = 'admin') {
     this.sessionId = sessionId;
+    this.sender = sender;
   }
 
   onMessage(handler: (msg: SignalingMessage) => void) {
@@ -41,10 +43,10 @@ class SignalingChannel {
   }
 
   async subscribe(): Promise<void> {
-    // Start polling for messages
+    // Start polling for messages, excluding our own messages
     this.pollInterval = setInterval(async () => {
       try {
-        const response = await fetch(`/api/signaling?sessionId=${this.sessionId}&lastId=${this.lastMessageId}`);
+        const response = await fetch(`/api/signaling?sessionId=${this.sessionId}&lastId=${this.lastMessageId}&excludeSender=${this.sender}`);
         if (response.ok) {
           const data = await response.json();
           if (data.messages && Array.isArray(data.messages)) {
@@ -70,7 +72,7 @@ class SignalingChannel {
       await fetch('/api/signaling', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId: this.sessionId, payload }),
+        body: JSON.stringify({ sessionId: this.sessionId, payload, sender: this.sender }),
       });
     } catch (error) {
       console.error('[Signaling] Send error:', error);

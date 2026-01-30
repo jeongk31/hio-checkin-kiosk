@@ -47,7 +47,11 @@ sudo chmod o+x /home/ubuntu/hio-checkin-kiosk/admin
 echo "💾 Updating database schema..."
 PGPASSWORD=00oo00oo psql -U orange -h localhost -d kiosk -c \
   "ALTER TABLE room_types ADD COLUMN IF NOT EXISTS image_url TEXT;" 2>/dev/null || \
-  echo "   ℹ️  Schema already up to date"
+  echo "   ℹ️  room_types schema already up to date"
+
+PGPASSWORD=00oo00oo psql -U orange -h localhost -d kiosk -c \
+  "ALTER TABLE signaling_messages ADD COLUMN IF NOT EXISTS sender TEXT;" 2>/dev/null || \
+  echo "   ℹ️  signaling_messages schema already up to date"
 
 # Update Nginx configuration if needed
 if [ -f "nginx-kiosk.conf" ]; then

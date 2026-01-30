@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server';
 interface SignalingMessage {
   id: number;
   session_id: string;
+  sender: string | null;
   payload: Record<string, unknown>;
   created_at: string;
 }
@@ -14,19 +15,25 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const sessionId = searchParams.get('sessionId');
     const lastId = parseInt(searchParams.get('lastId') || '0', 10);
+    const excludeSender = searchParams.get('excludeSender'); // Filter out own messages
 
     if (!sessionId) {
       return NextResponse.json({ error: 'Session ID is required' }, { status: 400 });
     }
 
-    // Get messages newer than lastId
-    const messages = await query<SignalingMessage>(
-      `SELECT * FROM signaling_messages 
-       WHERE session_id = $1 AND id > $2 
-       ORDER BY id ASC 
-       LIMIT 10`,
-      [sessionId, lastId]
-    );
+    // Get messages newer than lastId, optionally excluding messages from a specific sender
+    let sql = `SELECT * FROM signaling_messages
+       WHERE session_id = $1 AND id > $2`;
+    const params: unknown[] = [sessionId, lastId];
+
+    if (excludeSender) {
+      sql += ` AND (sender IS NULL OR sender != $3)`;
+      params.push(excludeSender);
+    }
+
+    sql += ` ORDER BY id ASC LIMIT 10`;
+
+    const messages = await query<SignalingMessage>(sql, params);
 
     return NextResponse.json({ messages });
   } catch (error) {
@@ -38,18 +45,18 @@ export async function GET(request: Request) {
 // POST - Send a message
 export async function POST(request: Request) {
   try {
-    const { sessionId, payload } = await request.json();
+    const { sessionId, payload, sender } = await request.json();
 
     if (!sessionId || !payload) {
       return NextResponse.json({ error: 'Session ID and payload are required' }, { status: 400 });
     }
 
-    console.log('[Signaling API] POST - sessionId:', sessionId, 'payload type:', payload?.type);
+    console.log('[Signaling API] POST - sessionId:', sessionId, 'sender:', sender, 'payload type:', payload?.type);
 
-    // Insert message
+    // Insert message with optional sender field
     await execute(
-      `INSERT INTO signaling_messages (session_id, payload) VALUES ($1, $2)`,
-      [sessionId, JSON.stringify(payload)]
+      `INSERT INTO signaling_messages (session_id, payload, sender) VALUES ($1, $2, $3)`,
+      [sessionId, JSON.stringify(payload), sender || null]
     );
 
     console.log('[Signaling API] Message stored successfully');
