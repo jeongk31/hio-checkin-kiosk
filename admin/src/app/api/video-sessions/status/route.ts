@@ -34,7 +34,7 @@ export async function GET(request: Request) {
 
     // First, clean up stale sessions that have been "connected" for more than 10 minutes
     // These are likely zombie sessions from crashed tabs/browsers
-    const cleanupStaleSql = `
+    const cleanupStaleConnectedSql = `
       UPDATE video_sessions
       SET status = 'ended', ended_at = NOW()
       WHERE project_id = $1
@@ -43,9 +43,25 @@ export async function GET(request: Request) {
         AND ended_at IS NULL
       RETURNING id
     `;
-    const cleanedUp = await query<{ id: string }>(cleanupStaleSql, [projectId]);
-    if (cleanedUp.length > 0) {
-      console.log('[Status Check] Cleaned up stale sessions:', cleanedUp.map(s => s.id));
+    const cleanedUpConnected = await query<{ id: string }>(cleanupStaleConnectedSql, [projectId]);
+    if (cleanedUpConnected.length > 0) {
+      console.log('[Status Check] Cleaned up stale connected sessions:', cleanedUpConnected.map(s => s.id));
+    }
+
+    // Also clean up stale 'waiting' sessions older than 2 minutes
+    // If a kiosk was waiting but closed the browser, the session stays stuck
+    const cleanupStaleWaitingSql = `
+      UPDATE video_sessions
+      SET status = 'ended', ended_at = NOW()
+      WHERE project_id = $1
+        AND status = 'waiting'
+        AND started_at < NOW() - INTERVAL '2 minutes'
+        AND ended_at IS NULL
+      RETURNING id
+    `;
+    const cleanedUpWaiting = await query<{ id: string }>(cleanupStaleWaitingSql, [projectId]);
+    if (cleanedUpWaiting.length > 0) {
+      console.log('[Status Check] Cleaned up stale waiting sessions:', cleanedUpWaiting.map(s => s.id));
     }
 
     // Check for active calls (connected status) in this project

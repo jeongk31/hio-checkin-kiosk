@@ -56,3 +56,10 @@ README.md
 Dockerfile
 .dockerignore
 docker-compose*.yml
+
+# Uploads (volume mount)
+uploads/
+
+# Deploy scripts
+deploy.sh
+*.sh

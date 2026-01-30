@@ -57,8 +57,10 @@ if [ -f "nginx-kiosk.conf" ]; then
     echo "   ✅ Nginx configured to serve uploads directly"
 fi
 
-# Rebuild and restart container WITHOUT CACHE
-echo "🏗️  Building and starting container (no cache)..."
+# Rebuild and restart container WITH CACHE (using BuildKit)
+echo "🏗️  Building and starting container (with cache)..."
+export DOCKER_BUILDKIT=1
+export COMPOSE_DOCKER_CLI_BUILD=1
 docker compose -f docker-compose.prod.yml build
 docker compose -f docker-compose.prod.yml up -d
 

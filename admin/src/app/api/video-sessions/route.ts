@@ -97,8 +97,8 @@ export async function POST(request: Request) {
     }
 
     const sql = `
-      INSERT INTO video_sessions (kiosk_id, project_id, room_name, status, caller_type)
-      VALUES ($1, $2, $3, $4, $5)
+      INSERT INTO video_sessions (kiosk_id, project_id, room_name, status, caller_type, started_at)
+      VALUES ($1, $2, $3, $4, $5, NOW())
       RETURNING *
     `;
 
