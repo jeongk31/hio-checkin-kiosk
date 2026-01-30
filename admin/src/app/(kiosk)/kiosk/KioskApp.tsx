@@ -250,6 +250,21 @@ class SignalingChannel {
     }
     this.messageHandler = null;
   }
+
+  // Clear all messages for this session (useful when starting a new call)
+  async clearMessages(): Promise<void> {
+    try {
+      await fetch('/api/signaling', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: this.sessionId }),
+        credentials: 'include',
+      });
+      console.log('[Kiosk Signaling] Cleared old messages for session:', this.sessionId);
+    } catch (error) {
+      console.error('[Kiosk Signaling] Failed to clear messages:', error);
+    }
+  }
 }
 
 // Payment result from URL callback
@@ -1211,6 +1226,8 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
 
         // Track if call was intentionally ended (not a network failure)
         let callEndedIntentionally = false;
+        // Track if we've already sent an offer to prevent duplicates
+        let hasCreatedOffer = false;
 
         // Handle connection state
         pc.onconnectionstatechange = () => {
@@ -1249,12 +1266,21 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
           if (!isActive) return;
 
           if (payload.type === 'answer' && 'sdp' in payload) {
-            console.log('[Kiosk] Setting remote description from answer');
-            await pc.setRemoteDescription({ type: 'answer', sdp: payload.sdp });
-            for (const candidate of pendingCandidatesRef.current) {
-              await pc.addIceCandidate(candidate);
+            // Only process answer if we're waiting for one
+            if (pc.signalingState !== 'have-local-offer') {
+              console.log('[Kiosk] Ignoring answer - not in have-local-offer state:', pc.signalingState);
+              return;
             }
-            pendingCandidatesRef.current = [];
+            console.log('[Kiosk] Setting remote description from answer');
+            try {
+              await pc.setRemoteDescription({ type: 'answer', sdp: payload.sdp });
+              for (const candidate of pendingCandidatesRef.current) {
+                await pc.addIceCandidate(candidate);
+              }
+              pendingCandidatesRef.current = [];
+            } catch (err) {
+              console.error('[Kiosk] Error setting remote description:', err);
+            }
           } else if (payload.type === 'ice-candidate' && 'candidate' in payload) {
             if (pc.remoteDescription) {
               await pc.addIceCandidate(payload.candidate);
@@ -1284,21 +1310,30 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
               clearTimeout(timeoutRef.current);
               timeoutRef.current = null;
             }
-            // Create and send offer - check signaling state first
+            // Create and send offer - only once per call
+            if (hasCreatedOffer) {
+              console.log('[Kiosk] Already created offer, ignoring duplicate call-answered');
+              return;
+            }
             if (pc.signalingState === 'stable') {
               try {
+                hasCreatedOffer = true;
                 const offer = await pc.createOffer();
                 await pc.setLocalDescription(offer);
                 console.log('[Kiosk] 📤 Sending offer to manager');
                 signalingChannel.send({ type: 'offer', sdp: offer.sdp! });
               } catch (err) {
                 console.error('[Kiosk] Failed to create/send offer:', err);
+                hasCreatedOffer = false; // Reset on failure to allow retry
               }
             } else {
               console.warn('[Kiosk] Cannot create offer - wrong signaling state:', pc.signalingState);
             }
           }
         });
+
+        // Clear any old signaling messages before subscribing
+        await signalingChannel.clearMessages();
 
         // Subscribe and start polling
         await signalingChannel.subscribe();
@@ -1671,6 +1706,9 @@ function IncomingCallFromManager({ session, onClose, callStatus, onCallStatusCha
             cleanup();
           }
         });
+
+        // Clear any old signaling messages before subscribing
+        await signalingChannel.clearMessages();
 
         // Subscribe to channel and send call-answered signal
         await signalingChannel.subscribe();

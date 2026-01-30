@@ -86,6 +86,20 @@ class SignalingChannel {
     }
     this.messageHandler = null;
   }
+
+  // Clear all messages for this session (useful when starting a new call)
+  async clearMessages(): Promise<void> {
+    try {
+      await fetch('/api/signaling', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: this.sessionId }),
+      });
+      console.log('[Signaling] Cleared old messages for session:', this.sessionId);
+    } catch (error) {
+      console.error('[Signaling] Failed to clear messages:', error);
+    }
+  }
 }
 
 export function useVoiceCall(options: UseVoiceCallOptions = {}) {
@@ -292,6 +306,9 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
         }
       });
 
+      // Clear any old signaling messages before subscribing
+      await channel.clearMessages();
+
       // Subscribe and send offer
       await channel.subscribe();
 
@@ -351,14 +368,21 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
           try {
             // Check if we can accept an offer right now
             const currentState = pc.signalingState;
-            console.log('[Manager] Current signaling state:', currentState);
-            
-            // Ignore offer if we're already negotiating or not in a receivable state
+            const connectionState = pc.connectionState;
+            console.log('[Manager] Current signaling state:', currentState, 'connection state:', connectionState);
+
+            // Ignore offer if we're already negotiating
             if (isNegotiatingRef.current) {
               console.log('[Manager] Already negotiating, ignoring offer');
               return;
             }
-            
+
+            // Ignore offer if connection is already established
+            if (connectionState === 'connected') {
+              console.log('[Manager] Already connected, ignoring offer');
+              return;
+            }
+
             // Only process offer if in stable state
             if (currentState !== 'stable') {
               console.log('[Manager] Cannot process offer in state:', currentState, '- ignoring');
@@ -367,7 +391,7 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
 
             console.log('[Manager] Processing offer from kiosk...');
             isNegotiatingRef.current = true;
-            
+
             await pc.setRemoteDescription({ type: 'offer', sdp: msg.sdp });
             console.log('[Manager] Remote description set');
 
@@ -387,7 +411,7 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
             channel.send({ type: 'answer', sdp: answer.sdp! });
             console.log('[Manager] 📤 Answer sent to kiosk');
             onStatusChangeRef.current?.('connecting');
-            
+
             isNegotiatingRef.current = false;
           } catch (err) {
             console.error('[Manager] Error processing offer:', err);
@@ -426,6 +450,9 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
           console.log('[Manager] Cleanup complete');
         }
       });
+
+      // Clear any old signaling messages before subscribing
+      await channel.clearMessages();
 
       // Subscribe and send call-answered signal
       await channel.subscribe();
