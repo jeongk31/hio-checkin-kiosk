@@ -10,7 +10,10 @@
     "start:https": "NODE_ENV=production node server.js",
     "lint": "next lint",
     "db:setup": "psql -U orange -d kiosk -f ../database/schema.sql",
-    "db:seed": "node scripts/seed-db.js"
+    "db:seed": "node scripts/seed-db.js",
+    "test:voice-call": "npx tsx scripts/test-voice-call.ts",
+    "test:voice-call:prod": "TEST_URL=https://kiosk.hio.ai.kr npx tsx scripts/test-voice-call.ts",
+    "db:cleanup-calls": "psql -U orange -d kiosk -f scripts/cleanup-calls.sql"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

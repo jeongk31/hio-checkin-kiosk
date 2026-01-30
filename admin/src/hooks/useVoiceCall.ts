@@ -248,13 +248,31 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
       channelRef.current = channel;
       sessionIdRef.current = sessionId;
 
+      // Track if we've sent an offer
+      let hassentOffer = false;
+
       // Handle incoming messages
       channel.onMessage(async (msg: SignalingMessage) => {
         console.log('[Manager] 📥 Received signaling message:', msg.type);
 
         if (msg.type === 'call-answered') {
-          console.log('[Manager] Kiosk acknowledged call-answered - waiting for answer...');
-          // Don't re-send offer, kiosk already received it and will send answer
+          // Kiosk is ready - NOW send the offer
+          if (hassentOffer) {
+            console.log('[Manager] Already sent offer, ignoring duplicate call-answered');
+            return;
+          }
+          console.log('[Manager] Kiosk is ready, creating and sending offer...');
+          hassentOffer = true;
+          try {
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+            console.log('[Manager] 📤 Sending offer to kiosk');
+            channel.send({ type: 'offer', sdp: offer.sdp! });
+            onStatusChangeRef.current?.('connecting');
+          } catch (err) {
+            console.error('[Manager] Failed to create/send offer:', err);
+            hassentOffer = false;
+          }
         } else if (msg.type === 'answer' && 'sdp' in msg) {
           console.log('[Manager] Received answer, current state:', pc.signalingState);
           // Only set remote description if we're in have-local-offer state
@@ -309,16 +327,12 @@ export function useVoiceCall(options: UseVoiceCallOptions = {}) {
       // Clear any old signaling messages before subscribing
       await channel.clearMessages();
 
-      // Subscribe and send offer
+      // Subscribe and wait for kiosk to answer (kiosk will send 'call-answered' when ready)
       await channel.subscribe();
+      console.log('[Manager] Subscribed, waiting for kiosk to answer...');
 
-      // Create and send offer
-      console.log('[Manager Dashboard] Creating initial SDP offer...');
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-
-      console.log('[Manager Dashboard] 📤 Sending initial SDP offer to kiosk');
-      channel.send({ type: 'offer', sdp: offer.sdp! });
+      // Don't send offer yet - wait for 'call-answered' from kiosk
+      // The offer will be sent in the onMessage handler when 'call-answered' is received
 
       return true;
     } catch (error) {

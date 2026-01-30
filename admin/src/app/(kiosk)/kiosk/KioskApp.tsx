@@ -1229,19 +1229,37 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
         // Track if we've already sent an offer to prevent duplicates
         let hasCreatedOffer = false;
 
+        // Track if we've already set connected status
+        let hasSetConnected = false;
+
+        // Helper to set connected status (only once)
+        const setConnectedStatus = () => {
+          if (hasSetConnected || !isActive) return;
+          hasSetConnected = true;
+          console.log('[Kiosk] ✅ Call connected!');
+          setCallStatus('connected');
+          durationCounterRef.current = 0;
+          durationIntervalRef.current = setInterval(() => {
+            durationCounterRef.current += 1;
+            setCallDuration(durationCounterRef.current);
+          }, 1000);
+        };
+
+        // Handle ICE connection state (more reliable than connection state in some browsers)
+        pc.oniceconnectionstatechange = () => {
+          console.log('[Kiosk] ICE connection state:', pc.iceConnectionState);
+          if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+            setConnectedStatus();
+          }
+        };
+
         // Handle connection state
         pc.onconnectionstatechange = () => {
           console.log('[Kiosk] Connection state:', pc.connectionState);
           if (!isActive) return;
           switch (pc.connectionState) {
             case 'connected':
-              console.log('[Kiosk] Call connected!');
-              setCallStatus('connected');
-              durationCounterRef.current = 0;
-              durationIntervalRef.current = setInterval(() => {
-                durationCounterRef.current += 1;
-                setCallDuration(durationCounterRef.current);
-              }, 1000);
+              setConnectedStatus();
               break;
             case 'disconnected':
             case 'failed':
@@ -1629,6 +1647,29 @@ function IncomingCallFromManager({ session, onClose, callStatus, onCallStatusCha
 
         // Track if call was intentionally ended
         let callEndedIntentionally = false;
+        // Track if we've already set connected status
+        let hasSetConnected = false;
+
+        // Helper to set connected status (only once)
+        const setConnectedStatus = () => {
+          if (hasSetConnected || !isActive) return;
+          hasSetConnected = true;
+          console.log('[IncomingCallFromManager] ✅ Call connected!');
+          setCallStatus('connected');
+          durationCounterRef.current = 0;
+          durationIntervalRef.current = setInterval(() => {
+            durationCounterRef.current += 1;
+            setCallDuration(durationCounterRef.current);
+          }, 1000);
+        };
+
+        // Handle ICE connection state (more reliable than connection state in some browsers)
+        pc.oniceconnectionstatechange = () => {
+          console.log('[IncomingCallFromManager] ICE connection state:', pc.iceConnectionState);
+          if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+            setConnectedStatus();
+          }
+        };
 
         // Handle connection state
         pc.onconnectionstatechange = () => {
@@ -1636,12 +1677,7 @@ function IncomingCallFromManager({ session, onClose, callStatus, onCallStatusCha
           if (!isActive) return;
           switch (pc.connectionState) {
             case 'connected':
-              setCallStatus('connected');
-              durationCounterRef.current = 0;
-              durationIntervalRef.current = setInterval(() => {
-                durationCounterRef.current += 1;
-                setCallDuration(durationCounterRef.current);
-              }, 1000);
+              setConnectedStatus();
               break;
             case 'disconnected':
             case 'failed':
@@ -1710,18 +1746,15 @@ function IncomingCallFromManager({ session, onClose, callStatus, onCallStatusCha
         // Clear any old signaling messages before subscribing
         await signalingChannel.clearMessages();
 
-        // Subscribe to channel and send call-answered signal
+        // Subscribe to channel
         await signalingChannel.subscribe();
         console.log('[IncomingCallFromManager] Signaling channel subscribed');
-        
-        // Send call-answered signal after short delay
-        setTimeout(() => {
-          if (!isActive) return;
-          console.log('[IncomingCallFromManager] 📤 Sending call-answered signal');
-          signalingChannel.send({ type: 'call-answered' });
-          updateVideoSession(session.id, { status: 'connected' });
-          setCallStatus('connecting');
-        }, 100);
+
+        // Send call-answered signal immediately - admin is waiting for this
+        console.log('[IncomingCallFromManager] 📤 Sending call-answered signal');
+        signalingChannel.send({ type: 'call-answered' });
+        updateVideoSession(session.id, { status: 'connected' });
+        setCallStatus('connecting');
       } catch (err) {
         console.error('[IncomingCallFromManager] Failed to answer call:', err);
         setCallStatus('failed');
