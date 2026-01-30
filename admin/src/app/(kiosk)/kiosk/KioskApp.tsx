@@ -1127,9 +1127,22 @@ interface StaffCallModalProps {
 // Staff Call Modal with WebRTC
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusChange, callDuration, onCallDurationChange, signalingChannelRef, t }: StaffCallModalProps) {
-  const setCallStatus = onCallStatusChange;
-  const setCallDuration = onCallDurationChange;
   const [error, setError] = useState<string | null>(null);
+
+  // Use refs to avoid stale closure issues with callbacks
+  const onCallStatusChangeRef = useRef(onCallStatusChange);
+  const onCallDurationChangeRef = useRef(onCallDurationChange);
+  onCallStatusChangeRef.current = onCallStatusChange;
+  onCallDurationChangeRef.current = onCallDurationChange;
+
+  // Stable setters that always use latest callback
+  const setCallStatus = useCallback((status: CallStatus) => {
+    console.log('[Kiosk Debug] 📢 setCallStatus called with:', status);
+    onCallStatusChangeRef.current(status);
+  }, []);
+  const setCallDuration = useCallback((duration: number) => {
+    onCallDurationChangeRef.current(duration);
+  }, []);
 
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
@@ -1713,12 +1726,25 @@ interface IncomingCallFromManagerProps {
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 function IncomingCallFromManager({ session, onClose, callStatus, onCallStatusChange, callDuration, onCallDurationChange, signalingChannelRef }: IncomingCallFromManagerProps) {
-  const setCallStatus = onCallStatusChange;
-  const setCallDuration = onCallDurationChange;
   // Error state for logging purposes (errors are handled by parent component)
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [_error, setError] = useState<string | null>(null);
   const durationCounterRef = useRef(0);
+
+  // Use refs to avoid stale closure issues with callbacks
+  const onCallStatusChangeRef = useRef(onCallStatusChange);
+  const onCallDurationChangeRef = useRef(onCallDurationChange);
+  onCallStatusChangeRef.current = onCallStatusChange;
+  onCallDurationChangeRef.current = onCallDurationChange;
+
+  // Stable setters that always use latest callback
+  const setCallStatus = useCallback((status: CallStatus) => {
+    console.log('[Incoming Debug] 📢 setCallStatus called with:', status);
+    onCallStatusChangeRef.current(status);
+  }, []);
+  const setCallDuration = useCallback((duration: number) => {
+    onCallDurationChangeRef.current(duration);
+  }, []);
 
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
