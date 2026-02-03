@@ -95,17 +95,37 @@ export function VoiceCallProvider({ children, profile }: VoiceCallProviderProps)
     onError: (error) => {
       setState((prev) => ({ ...prev, error }));
     },
-    onCallEnded: (reason) => {
+    onCallEnded: async (reason) => {
       console.log('[Manager Dashboard Context] onCallEnded callback invoked with reason:', reason);
       console.log('[Manager Dashboard Context] isEndingCallRef.current:', isEndingCallRef.current);
-      
+
       // If we're already ending the call from our side, don't reset again
       if (isEndingCallRef.current) {
         console.log('[Manager Dashboard Context] Already ending call, skipping resetState');
         return;
       }
-      
-      console.log('[Manager Dashboard Context] Kiosk ended call, calling resetState');
+
+      console.log('[Manager Dashboard Context] Kiosk ended call');
+
+      // Update database to ensure session is marked as ended
+      const session = currentSessionRef.current;
+      if (session) {
+        console.log('[Manager Dashboard Context] Updating session to ended in DB:', session.id);
+        try {
+          await fetch('/api/video-sessions', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              id: session.id,
+              status: 'ended',
+              ended_at: new Date().toISOString(),
+            }),
+          });
+        } catch (error) {
+          console.error('[Manager Dashboard Context] Failed to update session:', error);
+        }
+      }
+
       resetState();
     },
     onRemoteStream: (stream) => {
@@ -328,7 +348,11 @@ export function VoiceCallProvider({ children, profile }: VoiceCallProviderProps)
         await fetch('/api/video-sessions', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: session.id, status: 'ended' }),
+          body: JSON.stringify({
+            id: session.id,
+            status: 'ended',
+            ended_at: new Date().toISOString(),
+          }),
         });
         resetState();
       }

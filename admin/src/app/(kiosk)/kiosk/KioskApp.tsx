@@ -1074,6 +1074,12 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
       if (reason === 'declined') {
         setError('관리자가 통화를 거절했습니다.');
         onCallStatusChange('failed');
+      } else if (reason === 'ended') {
+        // Admin ended the call normally
+        onCallStatusChange('ended');
+      } else if (reason === 'timeout' || reason === 'error') {
+        setError('연결이 끊어졌습니다.');
+        onCallStatusChange('failed');
       }
     },
   });
@@ -1134,6 +1140,51 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
       }
     }
   }, [callStatus]);
+
+  // Handle call end/fail - cleanup and close
+  // When the OTHER party ends the call, the hook triggers onCallEnded which sets status
+  // We need to update the database and close the modal
+  const hasEndedRef = useRef(false);
+  useEffect(() => {
+    if ((callStatus === 'ended' || callStatus === 'failed') && sessionId && !hasEndedRef.current) {
+      hasEndedRef.current = true; // Prevent duplicate handling
+
+      const handleEnd = async () => {
+        console.log(`[StaffCallModal] 📞 Call ended/failed: status=${callStatus}, sessionId: ${sessionId}`);
+
+        // Update database - this is always needed
+        console.log(`[StaffCallModal]    Updating DB: status=ended, ended_at=${new Date().toISOString()}`);
+        try {
+          await fetch('/api/video-sessions', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              id: sessionId,
+              status: 'ended',
+              ended_at: new Date().toISOString(),
+            }),
+          });
+        } catch (err) {
+          console.error('[StaffCallModal] Failed to update session status:', err);
+        }
+
+        // Cleanup the hook (safe to call even if already cleaned up)
+        voiceCall.cleanup();
+
+        console.log(`[StaffCallModal] ✅ Call cleanup complete, closing modal`);
+        // Don't call onClose here - let the user see the ended/failed state
+        // The user can click the close button to dismiss
+      };
+      handleEnd();
+    }
+  }, [callStatus, sessionId, voiceCall]);
+
+  // Reset hasEndedRef when modal reopens with new session
+  useEffect(() => {
+    if (isOpen && sessionId) {
+      hasEndedRef.current = false;
+    }
+  }, [isOpen, sessionId]);
 
   // Poll for admin status when waiting for answer
   useEffect(() => {
@@ -1199,16 +1250,23 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
   const handleClose = async () => {
     console.log('[StaffCallModal] handleClose called, callStatus:', callStatus);
 
-    // Update database session status to cancelled if still waiting
-    if (sessionId && (callStatus === 'calling' || callStatus === 'ringing')) {
+    // Update database session status
+    if (sessionId) {
       try {
+        // Always include ended_at to ensure the session is properly marked as finished
+        const updateData = {
+          id: sessionId,
+          status: (callStatus === 'calling' || callStatus === 'ringing') ? 'cancelled' : 'ended',
+          ended_at: new Date().toISOString(),
+        };
+        console.log('[StaffCallModal] Updating session:', updateData);
         await fetch('/api/video-sessions', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: sessionId, status: 'cancelled' })
+          body: JSON.stringify(updateData),
         });
       } catch (err) {
-        console.error('[StaffCallModal] Failed to cancel session:', err);
+        console.error('[StaffCallModal] Failed to update session:', err);
       }
     }
 
@@ -1321,6 +1379,9 @@ function IncomingCallFromManager({ session, onClose, callStatus, onCallStatusCha
     },
     onCallEnded: (reason) => {
       console.log(`[IncomingCallFromManager] 📞 Call ended by manager: reason=${reason}, session: ${session.id}`);
+      // When the OTHER party (admin) ends the call, we need to update our status
+      // This will trigger the cleanup effect
+      onCallStatusChange('ended');
     },
   });
 
@@ -1355,24 +1416,27 @@ function IncomingCallFromManager({ session, onClose, callStatus, onCallStatusCha
   }, [session.id, voiceCall, onCallStatusChange]);
 
   // Handle call end/fail - cleanup and close
+  // Note: When the OTHER party ends the call, the hook already cleans up via onCallEnded
+  // We just need to update the database and close the modal
+  const hasEndedRef = useRef(false);
   useEffect(() => {
-    if (callStatus === 'ended' || callStatus === 'failed') {
+    if ((callStatus === 'ended' || callStatus === 'failed') && !hasEndedRef.current) {
+      hasEndedRef.current = true; // Prevent duplicate handling
+
       const handleEnd = async () => {
-        console.log(`[IncomingCallFromManager] 📞 Ending call: status=${callStatus}, session: ${session.id}`);
+        console.log(`[IncomingCallFromManager] 📞 Call ended/failed: status=${callStatus}, session: ${session.id}`);
 
-        // End call using the hook
-        const reason = callStatus === 'ended' ? 'ended' : 'error';
-        console.log(`[IncomingCallFromManager]    Calling voiceCall.endCall(${reason})`);
-        voiceCall.endCall(reason);
-
-        // Update database
+        // Update database - this is always needed
         console.log(`[IncomingCallFromManager]    Updating DB: status=ended, ended_at=${new Date().toISOString()}`);
         await updateVideoSession(session.id, {
           status: 'ended',
           ended_at: new Date().toISOString(),
         });
 
-        console.log(`[IncomingCallFromManager] ✅ Call ended, closing modal`);
+        // Cleanup the hook (safe to call even if already cleaned up)
+        voiceCall.cleanup();
+
+        console.log(`[IncomingCallFromManager] ✅ Call cleanup complete, closing modal`);
         onClose();
       };
       handleEnd();
