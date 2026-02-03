@@ -1119,16 +1119,22 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
     };
   }, [isOpen, sessionId, voiceCall, onCallStatusChange]);
 
-  // Reset state when modal closes
+  // Reset state and cleanup when modal closes (e.g., when parent calls closeStaffModal)
   useEffect(() => {
     if (!isOpen) {
-      console.log(`[StaffCallModal] 🔄 Modal closed, resetting state`);
+      console.log(`[StaffCallModal] 🔄 Modal closed, cleaning up voice call and resetting state`);
+
+      // IMPORTANT: End and cleanup the voice call when modal is closed
+      // This handles the case when closeStaffModal is called from TopButtonRow
+      voiceCall.endCall('ended');
+      voiceCall.cleanup();
+
       hasInitiatedRef.current = false;
       onCallStatusChange('calling');
       onCallDurationChange(0);
       setError(null);
     }
-  }, [isOpen, onCallStatusChange, onCallDurationChange]);
+  }, [isOpen, onCallStatusChange, onCallDurationChange, voiceCall]);
 
   // Clear timeout when call connects
   useEffect(() => {
