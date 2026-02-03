@@ -6,7 +6,8 @@
 // AWS Seoul TURN server configuration
 // This improves call reliability from ~80-90% (STUN-only) to ~100%
 const TURN_SERVER = {
-  url: 'turn:43.201.28.4:3478',
+  host: '43.201.28.4',
+  port: 3478,
   username: 'hio_turn',
   credential: 'Kiosk2024SecureTurn',
 };
@@ -18,15 +19,19 @@ function buildIceServers(): RTCIceServer[] {
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
     // AWS Seoul TURN server (for relay when P2P fails - cellular, firewalls, etc.)
+    // Include both UDP and TCP for maximum compatibility
     {
-      urls: TURN_SERVER.url,
+      urls: [
+        `turn:${TURN_SERVER.host}:${TURN_SERVER.port}?transport=udp`,
+        `turn:${TURN_SERVER.host}:${TURN_SERVER.port}?transport=tcp`,
+      ],
       username: TURN_SERVER.username,
       credential: TURN_SERVER.credential,
     },
   ];
 
   console.log('[VoiceCall] ICE servers configured:', servers.length, '(including TURN relay)');
-  console.log('[VoiceCall] TURN server:', TURN_SERVER.url);
+  console.log('[VoiceCall] TURN server:', TURN_SERVER.host, '(UDP + TCP)');
 
   return servers;
 }

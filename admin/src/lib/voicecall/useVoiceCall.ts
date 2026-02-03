@@ -243,7 +243,10 @@ export function useVoiceCall(options: UseVoiceCallOptions): UseVoiceCallReturn {
         case 'failed':
           log('❌ Connection failed');
           onErrorRef.current?.('연결이 끊어졌습니다.');
+          // Notify other party that connection failed
+          channelRef.current?.send({ type: 'call-ended', reason: 'error' }).catch(() => {});
           setStatus('failed');
+          cleanup();
           break;
         case 'closed':
           log('⚪ Connection closed');
@@ -260,7 +263,10 @@ export function useVoiceCall(options: UseVoiceCallOptions): UseVoiceCallReturn {
       } else if (pc.iceConnectionState === 'failed') {
         log('❌ ICE connection failed');
         onErrorRef.current?.('네트워크 연결에 실패했습니다.');
+        // Notify other party that connection failed
+        channelRef.current?.send({ type: 'call-ended', reason: 'error' }).catch(() => {});
         setStatus('failed');
+        cleanup();
       }
     };
 
@@ -329,6 +335,8 @@ export function useVoiceCall(options: UseVoiceCallOptions): UseVoiceCallReturn {
               log('❌ MAX RETRIES REACHED');
               stopDebugCountdown();
               onErrorRef.current?.('연결에 실패했습니다. 다시 시도해주세요.');
+              // Notify other party that call failed due to timeout
+              channelRef.current?.send({ type: 'call-ended', reason: 'timeout' }).catch(() => {});
               setStatus('failed');
               cleanup();
               return;
@@ -419,6 +427,8 @@ export function useVoiceCall(options: UseVoiceCallOptions): UseVoiceCallReturn {
               log('❌ MAX RETRIES REACHED');
               stopDebugCountdown();
               onErrorRef.current?.('연결에 실패했습니다. 다시 시도해주세요.');
+              // Notify other party that call failed due to timeout
+              channelRef.current?.send({ type: 'call-ended', reason: 'timeout' }).catch(() => {});
               setStatus('failed');
               cleanup();
               return;
