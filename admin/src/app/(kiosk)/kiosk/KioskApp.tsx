@@ -4,7 +4,8 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { Kiosk } from '@/types/database';
-import { processPayment } from '@/lib/payment/payment-agent';
+import { processPayment, cancelCreditCard } from '@/lib/payment/payment-agent';
+import { CancelReason } from '@/lib/payment/payment-types';
 import { KeyboardInput } from './VirtualKeyboard';
 import * as faceapi from 'face-api.js';
 import { useVoiceCall, SignalingChannel, type CallStatus } from '@/lib/voicecall';
@@ -876,7 +877,7 @@ export default function KioskApp({ kiosk, content, paymentResult, userRole }: Ki
       case 'checkin-amenity-selection':
         return <AmenitySelectionScreen goToScreen={goToScreen} flowType="checkin" t={t} projectId={kiosk?.project_id} openStaffModal={openStaffModal} callProps={callProps} selectedAmenities={selectedAmenities} setSelectedAmenities={setSelectedAmenities} amenityTotal={amenityTotal} setAmenityTotal={setAmenityTotal} reservationId={inputData.reservation?.id} setAmenityScreenShown={setAmenityScreenShown} />;
       case 'checkin-info':
-        return <HotelInfoScreen goToScreen={goToScreen} flowType="checkin" t={t} projectId={kiosk?.project_id} syncInputData={syncInputData} inputData={inputData} openStaffModal={openStaffModal} callProps={callProps} amenityTotal={amenityTotal} selectedAmenities={selectedAmenities} resetAmenities={resetAmenities} />;
+        return <HotelInfoScreen goToScreen={goToScreen} flowType="checkin" t={t} projectId={kiosk?.project_id} syncInputData={syncInputData} inputData={inputData} openStaffModal={openStaffModal} callProps={callProps} amenityTotal={amenityTotal} selectedAmenities={selectedAmenities} resetAmenities={resetAmenities} kiosk={kiosk} />;
       case 'room-selection':
         return <RoomSelectionScreen goToScreen={goToScreen} setSelectedRoom={setSelectedRoom} syncInputData={syncInputData} t={t} projectId={kiosk?.project_id} openStaffModal={openStaffModal} callProps={callProps} />;
       case 'walkin-consent':
@@ -891,7 +892,7 @@ export default function KioskApp({ kiosk, content, paymentResult, userRole }: Ki
         // Use key prop to force remount on each new payment attempt, resetting hasStartedPayment ref
         return <PaymentProcessScreen key={`payment-${paymentSessionKey}`} goToScreen={goToScreen} selectedRoom={selectedRoom} t={t} openStaffModal={openStaffModal} paymentState={paymentState} paymentError={paymentError} setPaymentState={setPaymentState} setPaymentError={setPaymentError} callProps={callProps} amenityTotal={amenityTotal} inputData={inputData} syncInputData={syncInputData} kiosk={kiosk} />;
       case 'walkin-info':
-        return <HotelInfoScreen goToScreen={goToScreen} flowType="walkin" t={t} projectId={kiosk?.project_id} selectedRoomTypeId={selectedRoom?.id} syncInputData={syncInputData} inputData={inputData} openStaffModal={openStaffModal} callProps={callProps} amenityTotal={amenityTotal} selectedAmenities={selectedAmenities} selectedRoom={selectedRoom} resetAmenities={resetAmenities} />;
+        return <HotelInfoScreen goToScreen={goToScreen} flowType="walkin" t={t} projectId={kiosk?.project_id} selectedRoomTypeId={selectedRoom?.id} syncInputData={syncInputData} inputData={inputData} openStaffModal={openStaffModal} callProps={callProps} amenityTotal={amenityTotal} selectedAmenities={selectedAmenities} selectedRoom={selectedRoom} resetAmenities={resetAmenities} kiosk={kiosk} />;
       case 'checkout':
         return <CheckoutScreen goToScreen={goToScreen} t={t} openStaffModal={openStaffModal} callProps={callProps} />;
       default:
@@ -3196,6 +3197,216 @@ function IDVerificationScreen({
 }
 
 // Hotel Info Screen
+// Cancel Payment Modal Component
+interface CancelPaymentModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  paymentData?: InputData['paymentData'];
+  onConfirm: () => void;
+  cancelStatus: 'idle' | 'processing' | 'success' | 'error';
+  cancelError: string | null;
+}
+
+function CancelPaymentModal({
+  isOpen,
+  onClose,
+  paymentData,
+  onConfirm,
+  cancelStatus,
+  cancelError,
+}: CancelPaymentModalProps) {
+  if (!isOpen || !paymentData) return null;
+
+  return (
+    <div className="modal active" style={{ zIndex: 1000 }}>
+      <div className="modal-content" style={{ maxWidth: '500px' }}>
+        <div className="modal-header" style={{ backgroundColor: '#ea580c', padding: '20px', borderRadius: '16px 16px 0 0' }}>
+          <h3 style={{ color: 'white', margin: 0, fontSize: '20px' }}>직전결제취소</h3>
+        </div>
+
+        <div style={{ padding: '24px' }}>
+          {cancelStatus === 'idle' && (
+            <>
+              <div style={{ textAlign: 'center', marginBottom: '24px' }}>
+                <p style={{ color: '#666', marginBottom: '16px' }}>
+                  아래 결제를 취소하시겠습니까?
+                </p>
+                <div style={{ backgroundColor: '#f9fafb', borderRadius: '12px', padding: '16px', textAlign: 'left' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                    <span style={{ color: '#6b7280' }}>결제금액</span>
+                    <span style={{ fontWeight: 600 }}>{paymentData.amount?.toLocaleString('ko-KR')}원</span>
+                  </div>
+                  {paymentData.card_name && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                      <span style={{ color: '#6b7280' }}>카드사</span>
+                      <span>{paymentData.card_name}</span>
+                    </div>
+                  )}
+                  {paymentData.card_no && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                      <span style={{ color: '#6b7280' }}>카드번호</span>
+                      <span style={{ fontFamily: 'monospace' }}>{paymentData.card_no}</span>
+                    </div>
+                  )}
+                  {paymentData.approval_no && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: '#6b7280' }}>승인번호</span>
+                      <span style={{ fontFamily: 'monospace' }}>{paymentData.approval_no}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
+                <button
+                  onClick={onConfirm}
+                  style={{
+                    padding: '14px 28px',
+                    backgroundColor: '#ea580c',
+                    color: 'white',
+                    fontWeight: 600,
+                    borderRadius: '12px',
+                    border: 'none',
+                    cursor: 'pointer',
+                    fontSize: '16px',
+                  }}
+                >
+                  결제 취소
+                </button>
+                <button
+                  onClick={onClose}
+                  style={{
+                    padding: '14px 28px',
+                    backgroundColor: '#e5e7eb',
+                    color: '#374151',
+                    fontWeight: 600,
+                    borderRadius: '12px',
+                    border: 'none',
+                    cursor: 'pointer',
+                    fontSize: '16px',
+                  }}
+                >
+                  닫기
+                </button>
+              </div>
+            </>
+          )}
+
+          {cancelStatus === 'processing' && (
+            <div style={{ textAlign: 'center', padding: '32px 0' }}>
+              <div style={{
+                width: '80px',
+                height: '80px',
+                margin: '0 auto 24px',
+                border: '4px solid #fed7aa',
+                borderTop: '4px solid #ea580c',
+                borderRadius: '50%',
+                animation: 'spin 1s linear infinite',
+              }} />
+              <p style={{ fontSize: '18px', fontWeight: 600, color: '#374151' }}>취소 처리 중...</p>
+              <style jsx>{`
+                @keyframes spin {
+                  0% { transform: rotate(0deg); }
+                  100% { transform: rotate(360deg); }
+                }
+              `}</style>
+            </div>
+          )}
+
+          {cancelStatus === 'success' && (
+            <div style={{ textAlign: 'center', padding: '32px 0' }}>
+              <div style={{
+                width: '80px',
+                height: '80px',
+                margin: '0 auto 24px',
+                backgroundColor: '#dcfce7',
+                borderRadius: '50%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}>
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M20 6L9 17l-5-5" />
+                </svg>
+              </div>
+              <p style={{ fontSize: '22px', fontWeight: 700, color: '#16a34a', marginBottom: '8px' }}>취소 완료</p>
+              <p style={{ color: '#6b7280', marginBottom: '24px' }}>결제가 정상적으로 취소되었습니다.</p>
+              <button
+                onClick={onClose}
+                style={{
+                  padding: '14px 40px',
+                  backgroundColor: '#16a34a',
+                  color: 'white',
+                  fontWeight: 600,
+                  borderRadius: '12px',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontSize: '16px',
+                }}
+              >
+                확인
+              </button>
+            </div>
+          )}
+
+          {cancelStatus === 'error' && (
+            <div style={{ textAlign: 'center', padding: '32px 0' }}>
+              <div style={{
+                width: '80px',
+                height: '80px',
+                margin: '0 auto 24px',
+                backgroundColor: '#fee2e2',
+                borderRadius: '50%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}>
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#dc2626" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </div>
+              <p style={{ fontSize: '22px', fontWeight: 700, color: '#dc2626', marginBottom: '8px' }}>취소 실패</p>
+              <p style={{ color: '#6b7280', marginBottom: '24px' }}>{cancelError || '취소 처리 중 오류가 발생했습니다.'}</p>
+              <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
+                <button
+                  onClick={onConfirm}
+                  style={{
+                    padding: '14px 28px',
+                    backgroundColor: '#ea580c',
+                    color: 'white',
+                    fontWeight: 600,
+                    borderRadius: '12px',
+                    border: 'none',
+                    cursor: 'pointer',
+                    fontSize: '16px',
+                  }}
+                >
+                  다시 시도
+                </button>
+                <button
+                  onClick={onClose}
+                  style={{
+                    padding: '14px 28px',
+                    backgroundColor: '#e5e7eb',
+                    color: '#374151',
+                    fontWeight: 600,
+                    borderRadius: '12px',
+                    border: 'none',
+                    cursor: 'pointer',
+                    fontSize: '16px',
+                  }}
+                >
+                  닫기
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function HotelInfoScreen({
   goToScreen,
   flowType,
@@ -3210,6 +3421,7 @@ function HotelInfoScreen({
   selectedAmenities,
   selectedRoom,
   resetAmenities,
+  kiosk,
 }: {
   goToScreen: (screen: ScreenName) => void;
   flowType: 'checkin' | 'walkin';
@@ -3224,11 +3436,96 @@ function HotelInfoScreen({
   inputData?: InputData;
   openStaffModal: () => void;
   callProps: CallProps;
+  kiosk?: Kiosk | null;
 }) {
   const [assignedRoom, setAssignedRoom] = useState<AssignedRoom | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const hasAssignedRef = useRef(false);
+
+  // State for cancel payment modal
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const [cancelStatus, setCancelStatus] = useState<'idle' | 'processing' | 'success' | 'error'>('idle');
+  const [cancelError, setCancelError] = useState<string | null>(null);
+
+  // Check if payment data exists and is eligible for cancellation
+  const canCancelPayment = flowType === 'walkin' &&
+    inputData?.paymentData &&
+    inputData.paymentData.approval_no &&
+    inputData.paymentData.auth_date &&
+    inputData.paymentData.amount > 0;
+
+  // Handle cancel payment
+  const handleCancelPayment = async () => {
+    if (!inputData?.paymentData) return;
+
+    const { amount, approval_no, auth_date, transaction_id } = inputData.paymentData;
+
+    if (!approval_no || !auth_date) {
+      setCancelError('결제 정보가 올바르지 않습니다.');
+      setCancelStatus('error');
+      return;
+    }
+
+    setCancelStatus('processing');
+    setCancelError(null);
+
+    try {
+      const result = await cancelCreditCard(
+        amount,
+        approval_no,
+        auth_date,
+        transaction_id || `CANCEL-${Date.now()}`,
+        CancelReason.CUSTOMER_REQUEST,
+        kiosk?.payment_agent_url || undefined
+      );
+
+      // Check success
+      const isSuccess = result.result === 0 || result.Result === '0000';
+      if (isSuccess) {
+        setCancelStatus('success');
+
+        // Update the payment status in database
+        try {
+          await fetch('/api/payment', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              transaction_id: transaction_id,
+              status: 'cancelled',
+            }),
+            credentials: 'include',
+          });
+        } catch (dbError) {
+          console.error('Failed to update payment status in DB:', dbError);
+        }
+
+        // Clear payment data from inputData
+        if (syncInputData) {
+          syncInputData({ paymentData: undefined });
+        }
+      } else {
+        setCancelStatus('error');
+        setCancelError(result.message || result.Message || '취소 처리 중 오류가 발생했습니다.');
+      }
+    } catch (err) {
+      console.error('Cancel payment error:', err);
+      setCancelStatus('error');
+      setCancelError(err instanceof Error ? err.message : '취소 처리 중 오류가 발생했습니다.');
+    }
+  };
+
+  const handleCloseCancelModal = () => {
+    setShowCancelModal(false);
+    // If cancellation was successful, go to start screen
+    if (cancelStatus === 'success') {
+      if (resetAmenities) resetAmenities();
+      goToScreen('start');
+    }
+    // Reset modal state
+    setCancelStatus('idle');
+    setCancelError(null);
+  };
 
   // Assign a room when component mounts (only once)
   useEffect(() => {
@@ -3440,7 +3737,7 @@ function HotelInfoScreen({
           </div>
 
           {/* Complete button at bottom */}
-          <div style={{ marginTop: '32px', textAlign: 'center' }}>
+          <div style={{ marginTop: '32px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
             <button
               onClick={handleComplete}
               className="primary-button"
@@ -3458,9 +3755,39 @@ function HotelInfoScreen({
             >
               완료
             </button>
+
+            {/* Cancel payment button - only show for walkin flow with valid payment */}
+            {canCancelPayment && (
+              <button
+                onClick={() => setShowCancelModal(true)}
+                style={{
+                  padding: '12px 32px',
+                  fontSize: '14px',
+                  fontWeight: 500,
+                  backgroundColor: '#fff7ed',
+                  color: '#ea580c',
+                  border: '2px solid #fdba74',
+                  borderRadius: '12px',
+                  cursor: 'pointer',
+                  minWidth: '200px',
+                }}
+              >
+                직전결제취소
+              </button>
+            )}
           </div>
         </div>
       </div>
+
+      {/* Cancel Payment Modal */}
+      <CancelPaymentModal
+        isOpen={showCancelModal}
+        onClose={handleCloseCancelModal}
+        paymentData={inputData?.paymentData}
+        onConfirm={handleCancelPayment}
+        cancelStatus={cancelStatus}
+        cancelError={cancelError}
+      />
     </div>
   );
 }

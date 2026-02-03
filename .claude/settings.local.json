@@ -2,6 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(nc:*)"
+    ],
+    "additionalDirectories": [
+      "d:\\Github\\Hotel\\hio-checkin-kiosk"
     ]
   }
 }
