@@ -3,30 +3,30 @@
  * Shared configuration for WebRTC voice calls between admin and kiosk
  */
 
-// Build ICE servers list from environment variables
+// AWS Seoul TURN server configuration
+// This improves call reliability from ~80-90% (STUN-only) to ~100%
+const TURN_SERVER = {
+  url: 'turn:43.201.28.4:3478',
+  username: 'hio_turn',
+  credential: 'Kiosk2024SecureTurn',
+};
+
+// Build ICE servers list
 function buildIceServers(): RTCIceServer[] {
   const servers: RTCIceServer[] = [
-    // Google STUN servers (always included, free)
+    // Google STUN servers (for direct P2P when possible)
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
-    { urls: 'stun:stun2.l.google.com:19302' },
+    // AWS Seoul TURN server (for relay when P2P fails - cellular, firewalls, etc.)
+    {
+      urls: TURN_SERVER.url,
+      username: TURN_SERVER.username,
+      credential: TURN_SERVER.credential,
+    },
   ];
 
-  // Add TURN server if configured (optional, improves reliability)
-  const turnUrl = process.env.NEXT_PUBLIC_TURN_SERVER_URL;
-  const turnUsername = process.env.NEXT_PUBLIC_TURN_SERVER_USERNAME;
-  const turnCredential = process.env.NEXT_PUBLIC_TURN_SERVER_CREDENTIAL;
-
-  if (turnUrl && turnUsername && turnCredential) {
-    console.log('[VoiceCall] TURN server configured:', turnUrl);
-    servers.push({
-      urls: turnUrl,
-      username: turnUsername,
-      credential: turnCredential,
-    });
-  } else {
-    console.log('[VoiceCall] No TURN server configured, using STUN only (80-90% success rate)');
-  }
+  console.log('[VoiceCall] ICE servers configured:', servers.length, '(including TURN relay)');
+  console.log('[VoiceCall] TURN server:', TURN_SERVER.url);
 
   return servers;
 }
