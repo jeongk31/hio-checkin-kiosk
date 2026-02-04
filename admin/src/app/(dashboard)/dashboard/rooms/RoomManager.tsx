@@ -669,8 +669,9 @@ export default function RoomManager({
         }),
       });
 
+      const data = await res.json();
+
       if (res.ok) {
-        const data = await res.json();
         alert(`결제가 취소되었습니다.\n취소 승인번호: ${data.cancelApprovalNo || payment.approval_no}`);
 
         // Refresh rooms to update payment status
@@ -678,8 +679,12 @@ export default function RoomManager({
         const roomsData = await roomsRes.json();
         setRooms(roomsData.rooms || []);
       } else {
-        const data = await res.json();
-        alert(data.error || '결제 취소에 실패했습니다.');
+        // Check for network error (payment agent not reachable)
+        if (data.networkError) {
+          alert(`결제 단말기에 연결할 수 없습니다.\n\n키오스크에서 직접 취소하거나,\n결제 단말기가 켜져 있는지 확인해주세요.\n\n(${data.details || ''})`);
+        } else {
+          alert(data.error || '결제 취소에 실패했습니다.');
+        }
       }
     } catch (error) {
       console.error('Error canceling payment:', error);

@@ -26,9 +26,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Only super_admin or project_admin can cancel payments
-    if (profile.role !== 'super_admin' && profile.role !== 'project_admin') {
-      return NextResponse.json({ error: 'Forbidden - admin only' }, { status: 403 });
+    // super_admin, project_admin, or manager can cancel payments
+    const allowedRoles = ['super_admin', 'project_admin', 'manager'];
+    if (!allowedRoles.includes(profile.role)) {
+      return NextResponse.json({ error: 'Forbidden - admin/manager only' }, { status: 403 });
     }
 
     const body = await request.json();
@@ -40,6 +41,7 @@ export async function POST(request: Request) {
       amount,
       reservationId,
       projectId,
+      paymentAgentUrl: providedAgentUrl,
     } = body;
 
     // Validate required fields
@@ -77,6 +79,16 @@ export async function POST(request: Request) {
       }
     }
 
+    // Get payment_agent_url from kiosk if not provided
+    let paymentAgentUrl = providedAgentUrl;
+    if (!paymentAgentUrl && projectId) {
+      const kiosk = await queryOne<{ payment_agent_url: string }>(
+        'SELECT payment_agent_url FROM kiosks WHERE project_id = $1 LIMIT 1',
+        [projectId]
+      );
+      paymentAgentUrl = kiosk?.payment_agent_url;
+    }
+
     // Generate new transaction ID for the cancellation
     const cancelTransactionId = generateTransactionId(reservationId || 'ADMIN-CANCEL');
 
@@ -85,6 +97,7 @@ export async function POST(request: Request) {
       originalAuthDate: authDate,
       amount,
       cancelTransactionId,
+      paymentAgentUrl,
     });
 
     // Check if this is a test/mock payment (skip VAN call)
@@ -109,7 +122,8 @@ export async function POST(request: Request) {
           approvalNo,
           authDate,
           cancelTransactionId,
-          CancelReason.CUSTOMER_REQUEST
+          CancelReason.CUSTOMER_REQUEST,
+          paymentAgentUrl
         );
 
         console.log('[Payment Cancel] VAN response:', cancelResult);
@@ -122,6 +136,24 @@ export async function POST(request: Request) {
         // PaymentError from VAN API
         const errorMessage = vanError instanceof Error ? vanError.message : '결제 취소에 실패했습니다';
         console.error('[Payment Cancel] VAN error:', vanError);
+
+        // Check if it's a network error (payment agent not reachable)
+        const isNetworkError = errorMessage.includes('fetch failed') ||
+                               errorMessage.includes('ECONNREFUSED') ||
+                               errorMessage.includes('ETIMEDOUT') ||
+                               errorMessage.includes('network');
+
+        if (isNetworkError) {
+          return NextResponse.json(
+            {
+              error: '결제 단말기에 연결할 수 없습니다. 키오스크에서 직접 취소하거나 단말기 연결을 확인해주세요.',
+              details: `Payment agent URL: ${paymentAgentUrl || 'not configured'}`,
+              networkError: true,
+            },
+            { status: 503 }
+          );
+        }
+
         return NextResponse.json(
           { error: errorMessage },
           { status: 500 }
