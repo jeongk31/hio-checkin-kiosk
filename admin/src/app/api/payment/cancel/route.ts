@@ -102,29 +102,31 @@ export async function POST(request: Request) {
       cancelAuthTime = now.toTimeString().slice(0, 8).replace(/:/g, '');
     } else {
       // Real payment - call VAN to cancel
-      const cancelResult = await cancelCreditCard(
-        amount,
-        approvalNo,
-        authDate,
-        cancelTransactionId,
-        CancelReason.CUSTOMER_REQUEST
-      );
+      // cancelCreditCard throws PaymentError on failure, returns ApprovalResponse on success
+      try {
+        const cancelResult = await cancelCreditCard(
+          amount,
+          approvalNo,
+          authDate,
+          cancelTransactionId,
+          CancelReason.CUSTOMER_REQUEST
+        );
 
-      console.log('[Payment Cancel] VAN response:', cancelResult);
+        console.log('[Payment Cancel] VAN response:', cancelResult);
 
-      if (!cancelResult.success) {
+        // Use correct property names from ApprovalResponse (capital letters)
+        cancelApprovalNo = cancelResult.Approval_no || approvalNo;
+        cancelAuthDate = cancelResult.Auth_date || authDate;
+        cancelAuthTime = cancelResult.Auth_time || '';
+      } catch (vanError) {
+        // PaymentError from VAN API
+        const errorMessage = vanError instanceof Error ? vanError.message : '결제 취소에 실패했습니다';
+        console.error('[Payment Cancel] VAN error:', vanError);
         return NextResponse.json(
-          {
-            error: cancelResult.message || '결제 취소에 실패했습니다',
-            errorCode: cancelResult.error_code,
-          },
+          { error: errorMessage },
           { status: 500 }
         );
       }
-
-      cancelApprovalNo = cancelResult.approval_no;
-      cancelAuthDate = cancelResult.auth_date;
-      cancelAuthTime = cancelResult.auth_time;
     }
 
     // Update payment_transactions record to cancelled

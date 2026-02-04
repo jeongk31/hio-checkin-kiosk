@@ -3130,7 +3130,7 @@ function IDVerificationScreen({
                */}
 
               {/* DEBUG: Skip button for both ID and face capture */}
-              <button
+              {/* <button
                 onClick={handleSkipVerification}
                 style={{
                   position: 'absolute',
@@ -3147,7 +3147,7 @@ function IDVerificationScreen({
                 }}
               >
                 건너뛰기 (DEBUG)
-              </button>
+              </button> */}
             </div>
             {/* Camera capture button - positioned below camera */}
             <button
@@ -3449,11 +3449,12 @@ function HotelInfoScreen({
   const [cancelError, setCancelError] = useState<string | null>(null);
 
   // Check if payment data exists and is eligible for cancellation
-  const canCancelPayment = flowType === 'walkin' &&
-    inputData?.paymentData &&
-    inputData.paymentData.approval_no &&
-    inputData.paymentData.auth_date &&
-    inputData.paymentData.amount > 0;
+  // Note: Uncomment canCancelPayment when re-enabling the cancel button in UI
+  // const canCancelPayment = flowType === 'walkin' &&
+  //   inputData?.paymentData &&
+  //   inputData.paymentData.approval_no &&
+  //   inputData.paymentData.auth_date &&
+  //   inputData.paymentData.amount > 0;
 
   // Handle cancel payment
   const handleCancelPayment = async () => {
@@ -4638,7 +4639,7 @@ function PaymentConfirmScreen({
           </button>
           
           {/* DEBUG: Skip payment button */}
-          <button
+          {/* <button
             onClick={handleSkipPayment}
             style={{
               position: 'absolute',
@@ -4655,7 +4656,7 @@ function PaymentConfirmScreen({
             }}
           >
             결제 건너뛰기
-          </button>
+          </button> */}
           
           <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
         </div>
