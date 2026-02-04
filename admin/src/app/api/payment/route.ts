@@ -153,6 +153,7 @@ export async function PATCH(request: Request) {
     const {
       id,
       transaction_id,
+      reservation_id,
       status,
       approval_no,
       auth_date,
@@ -173,7 +174,11 @@ export async function PATCH(request: Request) {
     const updates: string[] = [];
     const params: (string | number)[] = [];
     let paramIndex = 1;
-    
+
+    if (reservation_id) {
+      updates.push(`reservation_id = $${paramIndex++}`);
+      params.push(reservation_id);
+    }
     if (status) {
       updates.push(`status = $${paramIndex++}`);
       params.push(status);

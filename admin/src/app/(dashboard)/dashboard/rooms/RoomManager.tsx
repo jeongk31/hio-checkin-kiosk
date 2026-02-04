@@ -38,6 +38,44 @@ interface Room {
   notes: string | null;
   is_active: boolean;
   room_type?: RoomType;
+  // Embedded reservation from /api/rooms (from PMS sync)
+  reservation?: {
+    id: string;
+    reservation_number: string;
+    guest_name: string | null;
+    guest_phone: string | null;
+    guest_email: string | null;
+    guest_count: number;
+    check_in_date: string;
+    check_out_date: string;
+    status: string;
+    source: string | null;
+    notes: string | null;
+    total_price: number | null;
+    amenity_total: number | null;
+    paid_amount: number | null;
+    payment_status: string | null;
+    data?: {
+      adults?: number;
+      children?: number;
+      channel_name?: string;
+      has_checked_in?: boolean;
+      payment_method?: string;
+      [key: string]: unknown;
+    };
+    // Payment info for refund (kiosk payments only)
+    payment?: {
+      id: string;
+      transaction_id: string;
+      approval_no: string;
+      auth_date: string;
+      auth_time: string;
+      amount: number;
+      card_no: string;
+      card_name: string;
+      status: string;
+    } | null;
+  } | null;
 }
 
 interface VerifiedGuest {
@@ -595,14 +633,84 @@ export default function RoomManager({
     }
   };
 
+  // Cancel/refund payment for kiosk check-in
+  const handleCancelPayment = async (room: Room) => {
+    // Get payment info from embedded reservation
+    const payment = room.reservation?.payment;
+    if (!payment) {
+      alert('환불 가능한 결제 정보가 없습니다.');
+      return;
+    }
+
+    const confirmMessage = `${room.reservation?.guest_name || '게스트'}님의 결제를 취소하시겠습니까?\n\n` +
+      `카드: ${payment.card_name} (${payment.card_no})\n` +
+      `금액: ${payment.amount.toLocaleString()}원\n` +
+      `승인번호: ${payment.approval_no}\n\n` +
+      `취소 후에는 되돌릴 수 없습니다.`;
+
+    if (!confirm(confirmMessage)) {
+      return;
+    }
+
+    setLoading(true);
+    try {
+      // Call admin payment cancel API
+      const res = await fetch('/api/payment/cancel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          paymentId: payment.id,
+          transactionId: payment.transaction_id,
+          approvalNo: payment.approval_no,
+          authDate: payment.auth_date,
+          amount: payment.amount,
+          reservationId: room.reservation?.id,
+          projectId: room.project_id,
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        alert(`결제가 취소되었습니다.\n취소 승인번호: ${data.cancelApprovalNo || payment.approval_no}`);
+
+        // Refresh rooms to update payment status
+        const roomsRes = await fetch(`/api/rooms?projectId=${selectedProjectId}`);
+        const roomsData = await roomsRes.json();
+        setRooms(roomsData.rooms || []);
+      } else {
+        const data = await res.json();
+        alert(data.error || '결제 취소에 실패했습니다.');
+      }
+    } catch (error) {
+      console.error('Error canceling payment:', error);
+      alert('결제 취소 중 오류가 발생했습니다.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleEditRoom = (room: Room) => {
     setEditingRoom(room);
-    // Find if there's an existing reservation for this room (any active status)
+    // Prefer embedded reservation from room, fallback to separate reservations lookup
     const activeStatuses = ['pending', 'confirmed', 'reserved', 'checked_in'];
-    const existingReservation = reservations.find(
-      (r) => r.room_number === room.room_number && activeStatuses.includes(r.status)
-    );
-    setEditingReservation(existingReservation || null);
+    let existingReservation: Reservation | null = null;
+
+    // Check embedded reservation first (from PMS sync)
+    if (room.reservation && activeStatuses.includes(room.reservation.status)) {
+      existingReservation = {
+        ...room.reservation,
+        project_id: room.project_id,
+        room_type_id: room.room_type_id,
+        room_number: room.room_number,
+        verified_guests: [],
+      } as Reservation;
+    } else {
+      // Fallback to separate reservations
+      existingReservation = reservations.find(
+        (r) => r.room_number === room.room_number && activeStatuses.includes(r.status)
+      ) || null;
+    }
+    setEditingReservation(existingReservation);
 
     // Show reservation info if there's an existing reservation
     const hasExistingReservation = !!existingReservation;
@@ -1008,7 +1116,15 @@ export default function RoomManager({
               {/* Rooms List with Reservations */}
               <div className="space-y-3">
                 {rooms.map((room) => {
-                  const reservation = reservationsByRoom[room.room_number];
+                  // Prefer embedded reservation from /api/rooms (PMS sync), fallback to separate reservations
+                  const embeddedReservation = room.reservation ? {
+                    ...room.reservation,
+                    project_id: room.project_id,
+                    room_type_id: room.room_type_id,
+                    room_number: room.room_number,
+                    verified_guests: [] as VerifiedGuest[], // embedded doesn't have this
+                  } as Reservation : null;
+                  const reservation = embeddedReservation || reservationsByRoom[room.room_number];
                   const status = roomStatusLabels[room.status] || roomStatusLabels.available;
 
                   return (
@@ -1126,13 +1242,25 @@ export default function RoomManager({
                       {/* Actions */}
                       <div className="flex items-center gap-2 ml-4">
                         {reservation && reservation.status === 'checked_in' && (
-                          <button
-                            onClick={() => handleCancelCheckIn(reservation)}
-                            className="px-3 py-1 bg-orange-500 text-white rounded hover:bg-orange-600 text-sm font-medium"
-                            title="체크인 취소"
-                          >
-                            체크인 취소
-                          </button>
+                          <>
+                            <button
+                              onClick={() => handleCancelCheckIn(reservation)}
+                              className="px-3 py-1 bg-orange-500 text-white rounded hover:bg-orange-600 text-sm font-medium"
+                              title="체크인 취소"
+                            >
+                              체크인 취소
+                            </button>
+                            {/* Show payment cancel button only if paid via kiosk (has approval_no) */}
+                            {room.reservation?.payment?.approval_no && (
+                              <button
+                                onClick={() => handleCancelPayment(room)}
+                                className="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700 text-sm font-medium"
+                                title="직전결제취소 (환불)"
+                              >
+                                직전결제취소
+                              </button>
+                            )}
+                          </>
                         )}
                         <button
                           onClick={() => handleEditRoom(room)}

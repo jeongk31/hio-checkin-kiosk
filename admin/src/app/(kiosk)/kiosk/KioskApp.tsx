@@ -887,7 +887,7 @@ export default function KioskApp({ kiosk, content, paymentResult, userRole }: Ki
       case 'walkin-amenity-selection':
         return <AmenitySelectionScreen goToScreen={goToScreen} flowType="walkin" t={t} projectId={kiosk?.project_id} openStaffModal={openStaffModal} callProps={callProps} selectedAmenities={selectedAmenities} setSelectedAmenities={setSelectedAmenities} amenityTotal={amenityTotal} setAmenityTotal={setAmenityTotal} selectedRoom={selectedRoom} setAmenityScreenShown={setAmenityScreenShown} />;
       case 'payment-confirm':
-        return <PaymentConfirmScreen goToScreen={goToScreen} selectedRoom={selectedRoom} t={t} openStaffModal={openStaffModal} callProps={callProps} amenityTotal={amenityTotal} previousScreen={previousScreen} amenityScreenShown={amenityScreenShown} />;
+        return <PaymentConfirmScreen goToScreen={goToScreen} selectedRoom={selectedRoom} t={t} openStaffModal={openStaffModal} callProps={callProps} amenityTotal={amenityTotal} previousScreen={previousScreen} amenityScreenShown={amenityScreenShown} syncInputData={syncInputData} inputData={inputData} kiosk={kiosk} />;
       case 'payment-process':
         // Use key prop to force remount on each new payment attempt, resetting hasStartedPayment ref
         return <PaymentProcessScreen key={`payment-${paymentSessionKey}`} goToScreen={goToScreen} selectedRoom={selectedRoom} t={t} openStaffModal={openStaffModal} paymentState={paymentState} paymentError={paymentError} setPaymentState={setPaymentState} setPaymentError={setPaymentError} callProps={callProps} amenityTotal={amenityTotal} inputData={inputData} syncInputData={syncInputData} kiosk={kiosk} />;
@@ -3130,7 +3130,7 @@ function IDVerificationScreen({
                */}
 
               {/* DEBUG: Skip button for both ID and face capture */}
-              {/* <button
+              <button
                 onClick={handleSkipVerification}
                 style={{
                   position: 'absolute',
@@ -3147,7 +3147,7 @@ function IDVerificationScreen({
                 }}
               >
                 건너뛰기 (DEBUG)
-              </button> */}
+              </button>
             </div>
             {/* Camera capture button - positioned below camera */}
             <button
@@ -3574,6 +3574,25 @@ function HotelInfoScreen({
             syncInputData({ assignedRoom: data.room });
           }
 
+          // Update payment record with reservation_id (for refund capability)
+          if (data.reservation && inputData?.paymentData?.transaction_id) {
+            try {
+              await fetch('/api/payment', {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  transaction_id: inputData.paymentData.transaction_id,
+                  reservation_id: data.reservation.id,
+                }),
+                credentials: 'include',
+              });
+              console.log('💾 Payment linked to reservation:', data.reservation.id);
+            } catch (paymentLinkErr) {
+              console.error('Error linking payment to reservation:', paymentLinkErr);
+              // Don't fail the whole process
+            }
+          }
+
           // Save selected amenities to reservation if any
           if (data.reservation && selectedAmenities && selectedAmenities.length > 0) {
             try {
@@ -3757,7 +3776,7 @@ function HotelInfoScreen({
             </button>
 
             {/* Cancel payment button - only show for walkin flow with valid payment */}
-            {canCancelPayment && (
+            {/* {canCancelPayment && (
               <button
                 onClick={() => setShowCancelModal(true)}
                 style={{
@@ -3774,7 +3793,7 @@ function HotelInfoScreen({
               >
                 직전결제취소
               </button>
-            )}
+            )} */}
           </div>
         </div>
       </div>
@@ -4423,6 +4442,9 @@ function PaymentConfirmScreen({
   amenityTotal = 0,
   previousScreen,
   amenityScreenShown = false,
+  syncInputData,
+  inputData,
+  kiosk,
 }: {
   goToScreen: (screen: ScreenName) => void;
   selectedRoom: Room | null;
@@ -4432,6 +4454,9 @@ function PaymentConfirmScreen({
   amenityTotal?: number;
   previousScreen: ScreenName | null;
   amenityScreenShown?: boolean;
+  syncInputData?: (data: Partial<InputData>) => void;
+  inputData?: InputData;
+  kiosk?: Kiosk | null;
 }) {
   const roomPrice = selectedRoom?.price || 65000;
   const totalPrice = roomPrice + amenityTotal;
@@ -4441,9 +4466,70 @@ function PaymentConfirmScreen({
     console.log('[PaymentConfirm] selectedRoom:', selectedRoom);
     console.log('[PaymentConfirm] amenityTotal:', amenityTotal);
     console.log('[PaymentConfirm] totalPrice:', totalPrice);
-    
+
     // Navigate to payment processing screen
     goToScreen('payment-process');
+  };
+
+  // DEBUG: Skip payment and go directly to hotel info (simulates real payment)
+  const handleSkipPayment = async () => {
+    console.log('[PaymentConfirm] DEBUG: 결제 건너뛰기 (mock payment)');
+
+    // Generate mock payment data
+    const now = new Date();
+    const authDate = now.toISOString().slice(2, 10).replace(/-/g, ''); // YYMMDD
+    const authTime = now.toTimeString().slice(0, 8).replace(/:/g, ''); // HHMMSS
+    const mockTransactionId = `MOCK_${Date.now()}`;
+    const mockApprovalNo = `TEST${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
+
+    const mockPaymentData = {
+      transaction_id: mockTransactionId,
+      amount: totalPrice,
+      approval_no: mockApprovalNo,
+      auth_date: authDate,
+      auth_time: authTime,
+      card_no: '****-****-****-0000',
+      card_name: 'TEST CARD',
+    };
+
+    console.log('[PaymentConfirm] Mock payment data:', mockPaymentData);
+
+    // Store payment data in inputData
+    if (syncInputData) {
+      syncInputData({
+        paymentData: mockPaymentData,
+      });
+    }
+
+    // Save to database
+    try {
+      const reservationId = inputData?.reservation?.id || null;
+      const projectId = kiosk?.project_id || null;
+      const response = await fetch('/api/payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          reservation_id: reservationId,
+          project_id: projectId,
+          transaction_id: mockTransactionId,
+          amount: totalPrice,
+          payment_type: 'credit',
+          status: 'approved',
+          approval_no: mockApprovalNo,
+          auth_date: authDate,
+          auth_time: authTime,
+          card_no: '****-****-****-0000',
+          card_name: 'TEST CARD',
+        }),
+      });
+      const data = await response.json();
+      console.log('💾 Mock payment saved to database:', data);
+    } catch (error) {
+      console.error('❌ Mock payment database save failed:', error);
+      // Continue anyway
+    }
+
+    goToScreen('walkin-info');
   };
 
   // Determine which screen to go back to
@@ -4552,7 +4638,7 @@ function PaymentConfirmScreen({
           </button>
           
           {/* DEBUG: Skip payment button */}
-          {/* <button
+          <button
             onClick={handleSkipPayment}
             style={{
               position: 'absolute',
@@ -4569,7 +4655,7 @@ function PaymentConfirmScreen({
             }}
           >
             결제 건너뛰기
-          </button> */}
+          </button>
           
           <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
         </div>
@@ -4670,11 +4756,13 @@ function PaymentProcessScreen({
         // Save to database
         try {
           const reservationId = inputData.reservation?.id || null;
+          const projectId = kiosk?.project_id || null;
           const response = await fetch('/api/payment', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               reservation_id: reservationId,
+              project_id: projectId,
               transaction_id: result.transaction_id,
               amount: result.amount,
               payment_type: 'credit',

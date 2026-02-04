@@ -141,6 +141,20 @@ function mapReservationStatus(pmsStatus: string): string {
 }
 
 /**
+ * Map PMS security_type to KIOSK access_type
+ */
+function mapSecurityType(securityType?: string): string {
+  if (!securityType) return 'card';
+  const typeMap: Record<string, string> = {
+    'card_key': 'card',
+    'door_password': 'password',
+    'card': 'card',
+    'password': 'password',
+  };
+  return typeMap[securityType.toLowerCase()] || 'card';
+}
+
+/**
  * POST /api/pms/room-details
  * 
  * Receives room and reservation data from PMS
@@ -266,16 +280,18 @@ export async function POST(request: Request) {
 
     // Upsert room - use project_id + room_number as unique constraint
     // This handles the case where PMS might send different IDs for the same room
+    const accessType = mapSecurityType(room.security_type);
     await execute(
       `INSERT INTO rooms (
         id, project_id, room_type_id, room_number, floor, status,
-        room_password, key_box_number, key_box_password, notes, is_active,
+        access_type, room_password, key_box_number, key_box_password, notes, is_active,
         created_at, updated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, true, NOW(), NOW())
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, true, NOW(), NOW())
       ON CONFLICT (project_id, room_number) DO UPDATE SET
         room_type_id = EXCLUDED.room_type_id,
         floor = EXCLUDED.floor,
         status = EXCLUDED.status,
+        access_type = EXCLUDED.access_type,
         room_password = EXCLUDED.room_password,
         key_box_number = EXCLUDED.key_box_number,
         key_box_password = EXCLUDED.key_box_password,
@@ -288,6 +304,7 @@ export async function POST(request: Request) {
         room.room_number,
         room.floor,
         mapRoomStatus(room.status),
+        accessType,
         room.door_password,
         room.keybox_number,
         room.keybox_password,

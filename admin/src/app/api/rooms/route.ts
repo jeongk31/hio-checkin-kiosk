@@ -21,6 +21,33 @@ interface RoomRow {
   room_type_description?: string;
   room_type_base_price?: number;
   room_type_max_guests?: number;
+  // Reservation fields (from LEFT JOIN)
+  reservation_id?: string;
+  reservation_number?: string;
+  guest_name?: string;
+  guest_phone?: string;
+  guest_email?: string;
+  guest_count?: number;
+  check_in_date?: string;
+  check_out_date?: string;
+  reservation_status?: string;
+  source?: string;
+  reservation_notes?: string;
+  total_price?: number;
+  amenity_total?: number;
+  paid_amount?: number;
+  payment_status?: string;
+  reservation_data?: object;
+  // Payment fields for refund (from LEFT JOIN with payment_transactions)
+  payment_id?: string;
+  payment_transaction_id?: string;
+  payment_approval_no?: string;
+  payment_auth_date?: string;
+  payment_auth_time?: string;
+  payment_amount?: number;
+  payment_card_no?: string;
+  payment_card_name?: string;
+  payment_tx_status?: string;
 }
 
 function transformRoom(row: RoomRow) {
@@ -45,6 +72,36 @@ function transformRoom(row: RoomRow) {
       description: row.room_type_description,
       base_price: row.room_type_base_price,
       max_guests: row.room_type_max_guests,
+    } : null,
+    reservation: row.reservation_id ? {
+      id: row.reservation_id,
+      reservation_number: row.reservation_number,
+      guest_name: row.guest_name,
+      guest_phone: row.guest_phone,
+      guest_email: row.guest_email,
+      guest_count: row.guest_count,
+      check_in_date: row.check_in_date,
+      check_out_date: row.check_out_date,
+      status: row.reservation_status,
+      source: row.source,
+      notes: row.reservation_notes,
+      total_price: row.total_price,
+      amenity_total: row.amenity_total,
+      paid_amount: row.paid_amount,
+      payment_status: row.payment_status,
+      data: row.reservation_data,
+      // Payment info for refund capability (only if paid via kiosk)
+      payment: row.payment_approval_no ? {
+        id: row.payment_id,
+        transaction_id: row.payment_transaction_id,
+        approval_no: row.payment_approval_no,
+        auth_date: row.payment_auth_date,
+        auth_time: row.payment_auth_time,
+        amount: row.payment_amount,
+        card_no: row.payment_card_no,
+        card_name: row.payment_card_name,
+        status: row.payment_tx_status,
+      } : null,
     } : null,
   };
 }
@@ -108,14 +165,68 @@ export async function GET(request: Request) {
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
+    // Subquery to get the most relevant reservation per room
+    // Priority: checked_in > confirmed > pending, then by most recent created_at
+    // Also joins with payment_transactions to get refundable payment info
     const rooms = await query<RoomRow>(
       `SELECT r.*,
               rt.name as room_type_name,
               rt.description as room_type_description,
               rt.base_price as room_type_base_price,
-              rt.max_guests as room_type_max_guests
+              rt.max_guests as room_type_max_guests,
+              res.id as reservation_id,
+              res.reservation_number,
+              res.guest_name,
+              res.guest_phone,
+              res.guest_email,
+              res.guest_count,
+              res.check_in_date,
+              res.check_out_date,
+              res.status as reservation_status,
+              res.source,
+              res.notes as reservation_notes,
+              res.total_price,
+              res.amenity_total,
+              res.paid_amount,
+              res.payment_status,
+              res.data as reservation_data,
+              pt.id as payment_id,
+              pt.transaction_id as payment_transaction_id,
+              pt.approval_no as payment_approval_no,
+              pt.auth_date as payment_auth_date,
+              pt.auth_time as payment_auth_time,
+              pt.amount as payment_amount,
+              pt.card_no as payment_card_no,
+              pt.card_name as payment_card_name,
+              pt.status as payment_tx_status
        FROM rooms r
        LEFT JOIN room_types rt ON r.room_type_id = rt.id
+       LEFT JOIN LATERAL (
+         SELECT *
+         FROM reservations
+         WHERE reservations.project_id = r.project_id
+           AND reservations.room_number = r.room_number
+           AND reservations.check_in_date <= CURRENT_DATE
+           AND reservations.check_out_date >= CURRENT_DATE
+           AND reservations.status NOT IN ('cancelled', 'checked_out', 'no_show')
+         ORDER BY
+           CASE reservations.status
+             WHEN 'checked_in' THEN 1
+             WHEN 'confirmed' THEN 2
+             WHEN 'pending' THEN 3
+             ELSE 4
+           END,
+           reservations.created_at DESC
+         LIMIT 1
+       ) res ON true
+       LEFT JOIN LATERAL (
+         SELECT *
+         FROM payment_transactions
+         WHERE payment_transactions.reservation_id = res.id
+           AND payment_transactions.status = 'approved'
+         ORDER BY payment_transactions.created_at DESC
+         LIMIT 1
+       ) pt ON res.id IS NOT NULL
        ${whereClause}
        ORDER BY r.room_number ASC`,
       params
