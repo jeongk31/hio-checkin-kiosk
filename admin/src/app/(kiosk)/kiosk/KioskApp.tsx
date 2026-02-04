@@ -4638,8 +4638,8 @@ function PaymentConfirmScreen({
             결제
           </button>
           
-          {/* DEBUG: Skip payment button */}
-          {/* <button
+          {/* DEBUG: Skip payment button - creates mock payment for testing */}
+          <button
             onClick={handleSkipPayment}
             style={{
               position: 'absolute',
@@ -4653,10 +4653,11 @@ function PaymentConfirmScreen({
               fontSize: '12px',
               cursor: 'pointer',
               zIndex: 10,
+              display:'none',
             }}
           >
             결제 건너뛰기
-          </button> */}
+          </button>
           
           <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
         </div>
