@@ -80,14 +80,18 @@ export async function POST(request: Request) {
     }
 
     // Get payment_agent_url from kiosk if not provided
-    let paymentAgentUrl = providedAgentUrl;
+    let paymentAgentUrl = providedAgentUrl || null;
     if (!paymentAgentUrl && projectId) {
       const kiosk = await queryOne<{ payment_agent_url: string }>(
         'SELECT payment_agent_url FROM kiosks WHERE project_id = $1 LIMIT 1',
         [projectId]
       );
-      paymentAgentUrl = kiosk?.payment_agent_url;
+      paymentAgentUrl = kiosk?.payment_agent_url || null;
     }
+
+    // Use default if still null (important: pass undefined to use function default, not null)
+    // Default is http://localhost:8085 from NEXT_PUBLIC_PAYMENT_AGENT_URL or hardcoded
+    const effectiveAgentUrl = paymentAgentUrl || undefined;
 
     // Generate new transaction ID for the cancellation
     const cancelTransactionId = generateTransactionId(reservationId || 'ADMIN-CANCEL');
@@ -97,7 +101,7 @@ export async function POST(request: Request) {
       originalAuthDate: authDate,
       amount,
       cancelTransactionId,
-      paymentAgentUrl,
+      paymentAgentUrl: effectiveAgentUrl || 'using default (localhost:8085)',
     });
 
     // Check if this is a test/mock payment (skip VAN call)
@@ -123,7 +127,7 @@ export async function POST(request: Request) {
           authDate,
           cancelTransactionId,
           CancelReason.CUSTOMER_REQUEST,
-          paymentAgentUrl
+          effectiveAgentUrl
         );
 
         console.log('[Payment Cancel] VAN response:', cancelResult);
@@ -141,13 +145,14 @@ export async function POST(request: Request) {
         const isNetworkError = errorMessage.includes('fetch failed') ||
                                errorMessage.includes('ECONNREFUSED') ||
                                errorMessage.includes('ETIMEDOUT') ||
-                               errorMessage.includes('network');
+                               errorMessage.includes('network') ||
+                               errorMessage.includes('Failed to parse URL');
 
         if (isNetworkError) {
           return NextResponse.json(
             {
               error: '결제 단말기에 연결할 수 없습니다. 키오스크에서 직접 취소하거나 단말기 연결을 확인해주세요.',
-              details: `Payment agent URL: ${paymentAgentUrl || 'not configured'}`,
+              details: `Payment agent URL: ${effectiveAgentUrl || 'localhost:8085 (default)'}`,
               networkError: true,
             },
             { status: 503 }
