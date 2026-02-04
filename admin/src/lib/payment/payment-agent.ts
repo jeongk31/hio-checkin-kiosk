@@ -116,16 +116,16 @@ export async function getCreditToken(amount: number, paymentAgentUrl?: string): 
     Van_index: '0',
     Amount: amount.toString(),
   };
-  
+
   const response = await agentRequest<TokenResponse>(
-    'VTR_APP_GetCreditToken', 
-    request, 
+    'VTR_APP_GetCreditToken',
+    request,
     90000,
     paymentAgentUrl
   );
-  
+
   console.log('[getCreditToken] Raw response:', JSON.stringify(response, null, 2));
-  
+
   // Check success - handle both API formats
   const isSuccess = response.result === 0 || response.Result === '0000';
   if (!isSuccess) {
@@ -133,7 +133,7 @@ export async function getCreditToken(amount: number, paymentAgentUrl?: string): 
     const errorMsg = response.message || response.Message || getErrorMessage(errorCode);
     throw new PaymentError(errorCode, errorMsg);
   }
-  
+
   // Extract data from nested structure if present (actual API format)
   if (response.data && typeof response.data === 'object') {
     const data = response.data as Record<string, unknown>;
@@ -158,13 +158,78 @@ export async function getCreditToken(amount: number, paymentAgentUrl?: string): 
     console.log('[getCreditToken] Track_data:', result.Track_data);
     return result;
   }
-  
+
   // Legacy flat structure - return as-is but ensure Track_data exists
   const legacyResult = {
     ...response,
     Track_data: response.Track_data || response.Vt_data,
   };
   console.log('[getCreditToken] Legacy result Track_data:', legacyResult.Track_data);
+  return legacyResult;
+}
+
+/**
+ * Get credit card cancel token (read card from terminal for cancellation)
+ * This will display the cancel UI on the terminal
+ * Similar to getCreditToken but uses VTR_APP_GetCreditCancelToken endpoint
+ */
+export async function getCreditCancelToken(amount: number, paymentAgentUrl?: string): Promise<TokenResponse> {
+  const request: TokenRequest = {
+    Term_div: 'P',
+    Term_id: '',
+    Trade_serial_no: '',
+    m_Certify_no: '',
+    Van_index: '0',
+    Amount: amount.toString(),
+  };
+
+  const response = await agentRequest<TokenResponse>(
+    'VTR_APP_GetCreditCancelToken',
+    request,
+    90000,
+    paymentAgentUrl
+  );
+
+  console.log('[getCreditCancelToken] Raw response:', JSON.stringify(response, null, 2));
+
+  // Check success - handle both API formats
+  const isSuccess = response.result === 0 || response.Result === '0000';
+  if (!isSuccess) {
+    const errorCode = response.result?.toString() || response.Result || 'UNKNOWN';
+    const errorMsg = response.message || response.Message || getErrorMessage(errorCode);
+    throw new PaymentError(errorCode, errorMsg);
+  }
+
+  // Extract data from nested structure if present (actual API format)
+  if (response.data && typeof response.data === 'object') {
+    const data = response.data as Record<string, unknown>;
+    const result = {
+      Result: response.Result || '0000',
+      result: response.result ?? 0,
+      Message: response.Message || response.message || '성공',
+      message: response.message || response.Message || '성공',
+      Track_data: (data.Vt_data as string) || response.Track_data,
+      Vt_data: data.Vt_data as string,
+      Vt_length: data.Vt_length as string,
+      Resp_div: data.Resp_div as string,
+      Keyin: data.Keyin as string,
+      Fallback_div: data.Fallback_div as string,
+      Msg1: data.Msg1 as string,
+      Msg2: data.Msg2 as string,
+      Emv_data: (data.Emv_data as string) || response.Emv_data,
+      Card_no: (data.Card_no as string) || response.Card_no,
+      Card_name: (data.Card_name as string) || response.Card_name,
+    };
+    console.log('[getCreditCancelToken] Extracted result:', JSON.stringify(result, null, 2));
+    return result;
+  }
+
+  // Legacy flat structure - return as-is but ensure Track_data exists
+  const legacyResult = {
+    ...response,
+    Track_data: response.Track_data || response.Vt_data,
+  };
+  console.log('[getCreditCancelToken] Legacy result Track_data:', legacyResult.Track_data);
   return legacyResult;
 }
 
@@ -273,6 +338,8 @@ export async function approveCreditCard(
 
 /**
  * Cancel a previous credit card transaction
+ * For proper cancellation, you should first call getCreditCancelToken() to read the card,
+ * then pass the track data and keyin here.
  */
 export async function cancelCreditCard(
   amount: number,
@@ -280,16 +347,28 @@ export async function cancelCreditCard(
   originalAuthDate: string,
   transactionId: string,
   cancelReason: CancelReason = CancelReason.CUSTOMER_REQUEST,
-  paymentAgentUrl?: string
+  paymentAgentUrl?: string,
+  trackData: string = '',
+  emvData: string = '',
+  keyin: string = ''
 ): Promise<ApprovalResponse> {
   const tax = Math.round(amount / 11);
-  
+
+  console.log('[cancelCreditCard] Input params:', {
+    amount,
+    originalApprovalNo,
+    originalAuthDate,
+    transactionId,
+    trackData: trackData ? `${trackData.substring(0, 20)}...` : '(empty)',
+    keyin: keyin ? `${keyin.substring(0, 10)}...` : '(empty)',
+  });
+
   const request: ApprovalRequest = {
     sbuffer: {
       Msg_type: PaymentMessageType.CREDIT_CANCEL,
       Cancel_reason: cancelReason,
-      Keyin: '',
-      Track_data: '',
+      Keyin: keyin,
+      Track_data: trackData,
       Halbu: '00',
       Pay_amount: amount.toString(),
       Tax: tax.toString(),
@@ -303,19 +382,23 @@ export async function cancelCreditCard(
       Esign_div: '0',
     },
     perbuffer: { bufferdata: '' },
-    emvbuffer: { bufferdata: '' },
+    emvbuffer: { bufferdata: emvData },
     subbuffer: {},
     signbuffer: { bufferdata: '' },
     resbuffer: { bufferdata: '' },
   };
-  
+
+  console.log('[cancelCreditCard] Request body:', JSON.stringify(request, null, 2));
+
   const response = await agentRequest<ApprovalResponse>(
-    'ApprovalServerSec', 
+    'ApprovalServerSec',
     request,
     DEFAULT_TIMEOUT,
     paymentAgentUrl
   );
-  
+
+  console.log('[cancelCreditCard] Response:', JSON.stringify(response, null, 2));
+
   // Check success - handle both API formats
   const isSuccess = response.result === 0 || response.Result === '0000';
   if (!isSuccess) {
@@ -323,7 +406,7 @@ export async function cancelCreditCard(
     const errorMsg = response.message || response.Message || getErrorMessage(errorCode);
     throw new PaymentError(errorCode, errorMsg);
   }
-  
+
   // Extract data from nested structure if present (actual API format)
   if (response.data && typeof response.data === 'object') {
     const data = response.data as Record<string, unknown>;
@@ -339,7 +422,7 @@ export async function cancelCreditCard(
       Card_name: (data.Card_name as string) || response.Card_name,
     };
   }
-  
+
   // Legacy flat structure - return as-is
   return response;
 }
@@ -471,6 +554,9 @@ export async function processPayment(
 
 /**
  * High-level function: Cancel/refund a payment
+ * This follows the same flow as payment approval:
+ * 1. First reads card using getCreditCancelToken (shows terminal UI)
+ * 2. Then processes cancellation with the card data
  */
 export async function cancelPayment(
   amount: number,
@@ -478,30 +564,56 @@ export async function cancelPayment(
   originalAuthDate: string,
   reservationId: string,
   cancelReason: CancelReason = CancelReason.CUSTOMER_REQUEST,
-  paymentAgentUrl?: string
+  paymentAgentUrl?: string,
+  onStatusChange?: (status: string) => void
 ): Promise<PaymentResult> {
   const transactionId = generateTransactionId(reservationId);
-  
+
   try {
+    // Step 1: Read card for cancellation (shows terminal UI)
+    onStatusChange?.('reading_card');
+    console.log('[cancelPayment] Step 1: Getting cancel token...');
+    const tokenResponse = await getCreditCancelToken(amount, paymentAgentUrl);
+
+    // Step 2: Process cancellation with the card data
+    onStatusChange?.('processing');
+    console.log('[cancelPayment] Step 2: Processing cancellation...');
     const response = await cancelCreditCard(
       amount,
       originalApprovalNo,
       originalAuthDate,
       transactionId,
       cancelReason,
-      paymentAgentUrl
+      paymentAgentUrl,
+      tokenResponse.Track_data || '',
+      tokenResponse.Emv_data || '',
+      tokenResponse.Keyin || ''
     );
-    
+
+    // Step 3: Print receipt (optional)
+    onStatusChange?.('printing');
+    try {
+      await printReceipt(paymentAgentUrl);
+    } catch (e) {
+      console.warn('[cancelPayment] Receipt print failed, continuing:', e);
+    }
+
+    onStatusChange?.('success');
+
     return {
       success: true,
       approval_no: response.Approval_no,
       auth_date: response.Auth_date,
       auth_time: response.Auth_time,
+      card_no: response.Card_no,
+      card_name: response.Card_name,
       amount,
       message: response.Message || '결제가 취소되었습니다',
       transaction_id: transactionId,
     };
   } catch (error) {
+    onStatusChange?.('error');
+
     if (error instanceof PaymentError) {
       return {
         success: false,
@@ -511,7 +623,7 @@ export async function cancelPayment(
         transaction_id: transactionId,
       };
     }
-    
+
     return {
       success: false,
       amount,
