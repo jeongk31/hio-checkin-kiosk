@@ -503,6 +503,66 @@ export default function KioskApp({ kiosk, content, paymentResult, userRole }: Ki
           console.log('Remote cancel checkout signal received');
           goToScreen('start');
         }
+        if (cmd.command === 'cancel_payment') {
+          console.log('[Kiosk] Cancel payment command received:', cmd.payload);
+          // Execute payment cancel from kiosk (can reach localhost:8085)
+          const payload = cmd.payload as {
+            paymentId?: string;
+            transactionId?: string;
+            approvalNo: string;
+            authDate: string;
+            amount: number;
+            reservationId?: string;
+            commandId?: string;
+          };
+
+          try {
+            // Import and call cancelPayment from payment-agent
+            const { cancelPayment } = await import('@/lib/payment');
+            const result = await cancelPayment(
+              payload.amount,
+              payload.approvalNo,
+              payload.authDate,
+              payload.reservationId || 'ADMIN-CANCEL',
+              undefined, // cancelReason - use default
+              kiosk?.payment_agent_url || undefined
+            );
+
+            console.log('[Kiosk] Cancel payment result:', result);
+
+            // Report result back to server
+            await fetch('/api/payment/cancel-result', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify({
+                paymentId: payload.paymentId,
+                transactionId: payload.transactionId,
+                success: result.success,
+                cancelApprovalNo: result.approval_no,
+                cancelAuthDate: result.auth_date,
+                cancelAuthTime: result.auth_time,
+                errorMessage: result.message,
+                commandId: payload.commandId,
+              }),
+            });
+          } catch (error) {
+            console.error('[Kiosk] Cancel payment error:', error);
+            // Report error back to server
+            await fetch('/api/payment/cancel-result', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify({
+                paymentId: payload.paymentId,
+                transactionId: payload.transactionId,
+                success: false,
+                errorMessage: error instanceof Error ? error.message : '결제 취소 실패',
+                commandId: payload.commandId,
+              }),
+            });
+          }
+        }
       }
     };
 

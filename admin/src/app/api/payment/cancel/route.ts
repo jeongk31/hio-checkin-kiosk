@@ -79,14 +79,24 @@ export async function POST(request: Request) {
       }
     }
 
-    // Get payment_agent_url from kiosk if not provided
+    // Get payment_agent_url from kiosk or project settings if not provided
     let paymentAgentUrl = providedAgentUrl || null;
     if (!paymentAgentUrl && projectId) {
+      // First try kiosks table
       const kiosk = await queryOne<{ payment_agent_url: string }>(
-        'SELECT payment_agent_url FROM kiosks WHERE project_id = $1 LIMIT 1',
+        'SELECT payment_agent_url FROM kiosks WHERE project_id = $1 AND payment_agent_url IS NOT NULL LIMIT 1',
         [projectId]
       );
       paymentAgentUrl = kiosk?.payment_agent_url || null;
+
+      // If not found, try project settings
+      if (!paymentAgentUrl) {
+        const project = await queryOne<{ settings: { payment_agent_url?: string } }>(
+          "SELECT settings FROM projects WHERE id = $1",
+          [projectId]
+        );
+        paymentAgentUrl = project?.settings?.payment_agent_url || null;
+      }
     }
 
     // Use default if still null (important: pass undefined to use function default, not null)

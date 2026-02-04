@@ -15,7 +15,9 @@ interface KioskControlRow {
 export async function POST(request: NextRequest) {
   try {
     const profile = await getCurrentProfile();
-    if (!profile || (profile.role !== 'super_admin' && profile.role !== 'project_admin')) {
+    // Allow super_admin, project_admin, and manager to send commands
+    const allowedRoles = ['super_admin', 'project_admin', 'manager'];
+    if (!profile || !allowedRoles.includes(profile.role)) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
