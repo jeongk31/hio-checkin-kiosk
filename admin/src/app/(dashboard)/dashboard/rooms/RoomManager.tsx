@@ -634,6 +634,7 @@ export default function RoomManager({
   };
 
   // Cancel/refund payment for kiosk check-in
+  // Calls localhost:8085 directly from browser (works when accessed from kiosk machine)
   const handleCancelPayment = async (room: Room) => {
     // Get payment info from embedded reservation
     const payment = room.reservation?.payment;
@@ -658,79 +659,65 @@ export default function RoomManager({
       const isTestPayment = payment.approval_no?.startsWith('TEST') ||
                             payment.transaction_id?.startsWith('MOCK_');
 
+      let cancelSuccess = false;
+      let cancelApprovalNo = payment.approval_no;
+
       if (isTestPayment) {
-        // Test payment - use direct API (no VAN call needed)
-        const res = await fetch('/api/payment/cancel', {
+        // Test payment - skip VAN call
+        console.log('[Payment Cancel] Test payment, skipping VAN call');
+        cancelSuccess = true;
+      } else {
+        // Real payment - call localhost:8085 directly from browser
+        console.log('[Payment Cancel] Calling VAN API from browser (localhost:8085)...');
+
+        try {
+          // Import cancelPayment from payment lib (calls localhost:8085)
+          const { cancelPayment } = await import('@/lib/payment');
+          const result = await cancelPayment(
+            payment.amount,
+            payment.approval_no,
+            payment.auth_date,
+            room.reservation?.id || 'ADMIN-CANCEL'
+          );
+
+          console.log('[Payment Cancel] VAN result:', result);
+
+          if (result.success) {
+            cancelSuccess = true;
+            cancelApprovalNo = result.approval_no || payment.approval_no;
+          } else {
+            alert(`결제 취소 실패: ${result.message || '알 수 없는 오류'}`);
+            return;
+          }
+        } catch (vanError) {
+          console.error('[Payment Cancel] VAN error:', vanError);
+          alert(`결제 단말기 연결 실패.\n\n이 기능은 키오스크에서만 사용 가능합니다.\n(localhost:8085에 연결할 수 없음)`);
+          return;
+        }
+      }
+
+      if (cancelSuccess) {
+        // Update database via API
+        const res = await fetch('/api/payment/cancel-result', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             paymentId: payment.id,
             transactionId: payment.transaction_id,
-            approvalNo: payment.approval_no,
-            authDate: payment.auth_date,
-            amount: payment.amount,
-            reservationId: room.reservation?.id,
-            projectId: room.project_id,
+            success: true,
+            cancelApprovalNo,
           }),
         });
 
-        const data = await res.json();
-
         if (res.ok) {
-          alert(`테스트 결제가 취소되었습니다.\n취소 승인번호: ${data.cancelApprovalNo || payment.approval_no}`);
+          alert(`결제가 취소되었습니다.\n취소 승인번호: ${cancelApprovalNo}`);
           // Refresh rooms
           const roomsRes = await fetch(`/api/rooms?projectId=${selectedProjectId}`);
           const roomsData = await roomsRes.json();
           setRooms(roomsData.rooms || []);
         } else {
-          alert(data.error || '결제 취소에 실패했습니다.');
-        }
-      } else {
-        // Real payment - send command to kiosk (kiosk can reach localhost:8085)
-        // First, find the kiosk for this project
-        const kioskRes = await fetch(`/api/kiosks?projectId=${room.project_id}`);
-        const kioskData = await kioskRes.json();
-        const kiosks = kioskData.kiosks || [];
-
-        // Find an online kiosk
-        const onlineKiosk = kiosks.find((k: { status: string }) => k.status === 'online');
-
-        if (!onlineKiosk) {
-          alert('온라인 키오스크가 없습니다.\n\n키오스크가 켜져 있는지 확인하고 다시 시도해주세요.\n\n(결제 취소는 키오스크를 통해 처리됩니다)');
-          return;
-        }
-
-        // Send cancel_payment command to kiosk
-        const commandRes = await fetch('/api/kiosk-control', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            kioskId: onlineKiosk.id,
-            command: 'cancel_payment',
-            payload: {
-              paymentId: payment.id,
-              transactionId: payment.transaction_id,
-              approvalNo: payment.approval_no,
-              authDate: payment.auth_date,
-              amount: payment.amount,
-              reservationId: room.reservation?.id,
-              commandId: `cancel_${Date.now()}`,
-            },
-          }),
-        });
-
-        if (commandRes.ok) {
-          alert('결제 취소 요청이 키오스크로 전송되었습니다.\n\n잠시 후 새로고침하여 결과를 확인해주세요.');
-
-          // Wait a bit and refresh
-          setTimeout(async () => {
-            const roomsRes = await fetch(`/api/rooms?projectId=${selectedProjectId}`);
-            const roomsData = await roomsRes.json();
-            setRooms(roomsData.rooms || []);
-          }, 5000);
-        } else {
-          const data = await commandRes.json();
-          alert(data.error || '결제 취소 요청 전송에 실패했습니다.');
+          const data = await res.json();
+          alert(`VAN 취소는 성공했으나 DB 업데이트 실패: ${data.error}`);
         }
       }
     } catch (error) {
