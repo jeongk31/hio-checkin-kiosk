@@ -363,6 +363,23 @@ export async function cancelCreditCard(
     keyin: keyin ? `${keyin.substring(0, 10)}...` : '(empty)',
   });
 
+  // Build subbuffer with ALL 12 Remark fields (VTR API requires complete structure)
+  const subbuffer = {
+    Remark_Count: '',
+    Remark_01: '',
+    Remark_02: '',
+    Remark_03: '',
+    Remark_04: '',
+    Remark_05: '',
+    Remark_06: '',
+    Remark_07: '',
+    Remark_08: '',
+    Remark_09: '',
+    Remark_10: '',
+    Remark_11: '',
+    Remark_12: '',
+  };
+
   const request: ApprovalRequest = {
     sbuffer: {
       Msg_type: PaymentMessageType.CREDIT_CANCEL,
@@ -383,7 +400,7 @@ export async function cancelCreditCard(
     },
     perbuffer: { bufferdata: '' },
     emvbuffer: { bufferdata: emvData },
-    subbuffer: {},
+    subbuffer: subbuffer,
     signbuffer: { bufferdata: '' },
     resbuffer: { bufferdata: '' },
   };

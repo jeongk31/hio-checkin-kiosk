@@ -655,45 +655,35 @@ export default function RoomManager({
 
     setLoading(true);
     try {
-      // Check if this is a test/mock payment
-      const isTestPayment = payment.approval_no?.startsWith('TEST') ||
-                            payment.transaction_id?.startsWith('MOCK_');
-
       let cancelSuccess = false;
       let cancelApprovalNo = payment.approval_no;
 
-      if (isTestPayment) {
-        // Test payment - skip VAN call
-        console.log('[Payment Cancel] Test payment, skipping VAN call');
-        cancelSuccess = true;
-      } else {
-        // Real payment - call localhost:8085 directly from browser
-        console.log('[Payment Cancel] Calling VAN API from browser (localhost:8085)...');
+      // Always call localhost:8085 directly from browser
+      console.log('[Payment Cancel] Calling VAN API from browser (localhost:8085)...');
 
-        try {
-          // Import cancelPayment from payment lib (calls localhost:8085)
-          const { cancelPayment } = await import('@/lib/payment');
-          const result = await cancelPayment(
-            payment.amount,
-            payment.approval_no,
-            payment.auth_date,
-            room.reservation?.id || 'ADMIN-CANCEL'
-          );
+      try {
+        // Import cancelPayment from payment lib (calls localhost:8085)
+        const { cancelPayment } = await import('@/lib/payment');
+        const result = await cancelPayment(
+          payment.amount,
+          payment.approval_no,
+          payment.auth_date,
+          room.reservation?.id || 'ADMIN-CANCEL'
+        );
 
-          console.log('[Payment Cancel] VAN result:', result);
+        console.log('[Payment Cancel] VAN result:', result);
 
-          if (result.success) {
-            cancelSuccess = true;
-            cancelApprovalNo = result.approval_no || payment.approval_no;
-          } else {
-            alert(`결제 취소 실패: ${result.message || '알 수 없는 오류'}`);
-            return;
-          }
-        } catch (vanError) {
-          console.error('[Payment Cancel] VAN error:', vanError);
-          alert(`결제 단말기 연결 실패.\n\n이 기능은 키오스크에서만 사용 가능합니다.\n(localhost:8085에 연결할 수 없음)`);
+        if (result.success) {
+          cancelSuccess = true;
+          cancelApprovalNo = result.approval_no || payment.approval_no;
+        } else {
+          alert(`결제 취소 실패: ${result.message || '알 수 없는 오류'}`);
           return;
         }
+      } catch (vanError) {
+        console.error('[Payment Cancel] VAN error:', vanError);
+        alert(`결제 단말기 연결 실패.\n\n이 기능은 키오스크에서만 사용 가능합니다.\n(localhost:8085에 연결할 수 없음)`);
+        return;
       }
 
       if (cancelSuccess) {

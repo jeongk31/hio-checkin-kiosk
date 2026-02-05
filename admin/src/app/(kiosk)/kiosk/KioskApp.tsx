@@ -3190,7 +3190,7 @@ function IDVerificationScreen({
                */}
 
               {/* DEBUG: Skip button for both ID and face capture */}
-              {/* <button
+              <button
                 onClick={handleSkipVerification}
                 style={{
                   position: 'absolute',
@@ -3207,7 +3207,7 @@ function IDVerificationScreen({
                 }}
               >
                 건너뛰기 (DEBUG)
-              </button> */}
+              </button>
             </div>
             {/* Camera capture button - positioned below camera */}
             <button
