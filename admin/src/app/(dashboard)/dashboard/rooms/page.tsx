@@ -220,6 +220,7 @@ export default async function RoomsPage() {
         initialRooms={rooms || []}
         isSuperAdmin={profile.role === 'super_admin'}
         initialProject={currentProject}
+        profileName={profile.full_name || profile.email || 'admin'}
       />
     </div>
   );

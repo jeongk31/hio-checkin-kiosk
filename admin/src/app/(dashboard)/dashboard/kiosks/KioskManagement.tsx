@@ -68,7 +68,16 @@ export default function KioskManagement({
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
   const [fullscreenKiosk, setFullscreenKiosk] = useState<FullscreenKiosk | null>(null);
-  const [gridSize, setGridSize] = useState<GridSize>(2);
+  const [gridSize, setGridSize] = useState<GridSize>(4);
+
+  // Room stats per project (Task 15)
+  const [roomStats, setRoomStats] = useState<Record<string, { total: number; sold: number; available: number }>>({});
+
+  // Missed calls count (Task 20)
+  const [missedCalls, setMissedCalls] = useState<{ session_id: string; kiosk_id: string; kiosk_name: string; project_name: string; time: string }[]>([]);
+
+  // Track which kiosks are actively being used (Task 21)
+  const [activeKioskIds, setActiveKioskIds] = useState<Set<string>>(new Set());
 
   // Update fullscreen image when receiving new frames
   const handleImageUpdate = useCallback((kioskId: string, imageData: string) => {
@@ -100,12 +109,86 @@ export default function KioskManagement({
     setIsRefreshing(false);
   }, [selectedProjectId]);
 
+  // Fetch room stats per project (Task 15)
+  const refreshRoomStats = useCallback(async () => {
+    try {
+      const response = await fetch('/api/room-stats');
+      if (response.ok) {
+        const data = await response.json();
+        if (data.stats) setRoomStats(data.stats);
+      }
+    } catch (error) {
+      console.error('Error fetching room stats:', error);
+    }
+  }, []);
+
+  // Fetch missed calls (Task 20) - ended sessions with no staff_user_id
+  const refreshMissedCalls = useCallback(async () => {
+    try {
+      const response = await fetch('/api/video-sessions?status=ended&caller_type=kiosk');
+      if (response.ok) {
+        const data = await response.json();
+        const sessions = data.sessions || [];
+        // Filter missed calls: ended by kiosk, no staff answered, within last 24h, not acknowledged
+        const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+        const missed = sessions
+          .filter((s: { staff_user_id: string | null; started_at: string; notes: string | null }) =>
+            !s.staff_user_id && new Date(s.started_at).getTime() > cutoff && s.notes !== 'acknowledged'
+          )
+          .map((s: { id: string; kiosk_id: string; project_id: string; started_at: string }) => {
+            const kiosk = kiosks.find(k => k.id === s.kiosk_id);
+            const project = projects.find(p => p.id === s.project_id);
+            return {
+              session_id: s.id,
+              kiosk_id: s.kiosk_id,
+              kiosk_name: kiosk?.name || '알 수 없음',
+              project_name: project?.name || kiosk?.project?.name || '알 수 없음',
+              time: new Date(s.started_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }),
+            };
+          });
+        setMissedCalls(missed);
+      }
+    } catch (error) {
+      console.error('Error fetching missed calls:', error);
+    }
+  }, [kiosks, projects]);
+
+  // Mark all missed calls as acknowledged in DB
+  const acknowledgeMissedCalls = useCallback(async () => {
+    const current = missedCalls;
+    setMissedCalls([]); // Clear UI immediately
+    try {
+      await Promise.all(
+        current.map(call =>
+          fetch('/api/video-sessions', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: call.session_id, notes: 'acknowledged' }),
+          })
+        )
+      );
+    } catch (error) {
+      console.error('Error acknowledging missed calls:', error);
+    }
+  }, [missedCalls]);
+
   // Polling for kiosk updates (replaces postgres_changes subscription)
   // Reduced frequency to prevent database connection exhaustion
   useEffect(() => {
     const interval = setInterval(refreshKiosks, 10000); // Every 10 seconds instead of 3
     return () => clearInterval(interval);
   }, [refreshKiosks]);
+
+  // Poll room stats and missed calls
+  useEffect(() => {
+    refreshRoomStats();
+    refreshMissedCalls();
+    const interval = setInterval(() => {
+      refreshRoomStats();
+      refreshMissedCalls();
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [refreshRoomStats, refreshMissedCalls]);
 
   const getProjectKiosks = (projectId: string) => {
     if (projectId === 'all') {
@@ -114,8 +197,33 @@ export default function KioskManagement({
     return kiosks.filter((k) => k.project_id === projectId);
   };
 
+  // Track active kiosk (Task 21)
+  const handleKioskActive = useCallback((kioskId: string, isActive: boolean) => {
+    setActiveKioskIds(prev => {
+      const next = new Set(prev);
+      if (isActive) next.add(kioskId);
+      else next.delete(kioskId);
+      return next;
+    });
+  }, []);
+
   const selectedProject = projects.find((p) => p.id === selectedProjectId);
-  const projectKiosks = selectedProjectId === 'all' ? kiosks : (selectedProject ? getProjectKiosks(selectedProjectId) : []);
+  const filteredKiosks = selectedProjectId === 'all' ? kiosks : (selectedProject ? getProjectKiosks(selectedProjectId) : []);
+
+  // Sort: active kiosks (customer using) first, then online, then offline (Task 21)
+  const projectKiosks = [...filteredKiosks].sort((a, b) => {
+    const aActive = activeKioskIds.has(a.id) ? 2 : (a.current_screen && a.current_screen !== 'start' ? 1 : 0);
+    const bActive = activeKioskIds.has(b.id) ? 2 : (b.current_screen && b.current_screen !== 'start' ? 1 : 0);
+    if (aActive !== bActive) return bActive - aActive;
+    // Then by online status
+    const aOnline = a.status === 'online' ? 1 : 0;
+    const bOnline = b.status === 'online' ? 1 : 0;
+    return bOnline - aOnline;
+  });
+
+  // Count active kiosks (Task 19)
+  const onlineKioskCount = kiosks.filter(k => k.status === 'online').length;
+  const activeKioskCount = activeKioskIds.size;
 
   return (
     <div className="h-full flex flex-col">
@@ -178,6 +286,56 @@ export default function KioskManagement({
       </div>
 
       <div className="flex-1 p-6 overflow-auto">
+        {/* Status bar: active kiosks (gray) + missed calls (orange) */}
+        <div className="flex items-stretch gap-4 mb-6">
+          {/* Gray box: active kiosk count (Task 19) */}
+          <div className="flex items-center gap-3 px-4 py-3 bg-gray-100 rounded-lg">
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-green-500 animate-pulse" />
+              <span className="text-sm font-medium text-gray-700">
+                실시간 운영: <span className="text-green-600 font-bold">{onlineKioskCount}</span>대
+              </span>
+            </div>
+            {activeKioskCount > 0 && (
+              <div className="flex items-center gap-2 ml-2 pl-3 border-l border-gray-300">
+                <span className="w-2.5 h-2.5 rounded-full bg-blue-500" />
+                <span className="text-sm font-medium text-gray-700">
+                  이용 중: <span className="text-blue-600 font-bold">{activeKioskCount}</span>대
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* Orange box: missed calls (Task 20) */}
+          {missedCalls.length > 0 && (
+            <div className="flex items-center gap-3 px-4 py-3 bg-orange-50 border border-orange-200 rounded-lg">
+              <svg className="w-5 h-5 text-orange-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+              </svg>
+              <span className="text-sm font-medium text-orange-700">
+                부재중 호출: <span className="font-bold">{missedCalls.length}</span>건
+              </span>
+              <div className="flex flex-wrap gap-1 ml-1">
+                {missedCalls.slice(0, 5).map((call, i) => (
+                  <span key={i} className="text-xs bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full">
+                    {call.project_name} ({call.time})
+                  </span>
+                ))}
+                {missedCalls.length > 5 && (
+                  <span className="text-xs text-orange-500">+{missedCalls.length - 5}건</span>
+                )}
+              </div>
+              <button
+                onClick={acknowledgeMissedCalls}
+                className="ml-auto flex-shrink-0 text-xs px-2 py-1 rounded bg-orange-100 hover:bg-orange-200 text-orange-600 hover:text-orange-700 transition-colors"
+                title="부재중 호출 확인 처리"
+              >
+                확인
+              </button>
+            </div>
+          )}
+        </div>
+
         {projectKiosks.length === 0 ? (
           <div className="h-full flex items-center justify-center text-gray-500">
             등록된 키오스크가 없습니다
@@ -200,7 +358,9 @@ export default function KioskManagement({
                 kiosk={kiosk}
                 onFullscreen={(imageData) => setFullscreenKiosk({ kiosk, imageData })}
                 onImageUpdate={handleImageUpdate}
+                onActiveChange={handleKioskActive}
                 isSuperAdmin={isSuperAdmin}
+                roomStats={roomStats[kiosk.project_id]}
               />
             ))}
           </div>
@@ -254,12 +414,16 @@ function KioskLivePreview({
   kiosk,
   onFullscreen,
   onImageUpdate,
+  onActiveChange,
   isSuperAdmin,
+  roomStats,
 }: {
   kiosk: Kiosk;
   onFullscreen: (imageData: string) => void;
   onImageUpdate?: (kioskId: string, imageData: string) => void;
+  onActiveChange?: (kioskId: string, isActive: boolean) => void;
   isSuperAdmin: boolean;
+  roomStats?: { total: number; sold: number; available: number };
 }) {
   const isOnline = kiosk.status === 'online';
   const lastSeenTime = kiosk.last_seen ? new Date(kiosk.last_seen).getTime() : 0;
@@ -341,18 +505,20 @@ function KioskLivePreview({
     }
   };
 
-  // Poll for screen frames from API instead of Supabase broadcast
+  // Poll for screen frames from API (Task 18: improved stability with retry logic)
   useEffect(() => {
     let isActive = true;
     let lastFrameId: string | null = null;
+    let consecutiveErrors = 0;
 
     const pollScreenFrame = async () => {
       if (!isActive) return;
-      
+
       try {
         const response = await fetch(`/api/kiosk-screen?kioskId=${kiosk.id}`);
         if (response.ok) {
           const data = await response.json();
+          consecutiveErrors = 0; // Reset error count on success
           if (data.frame && data.frame.id !== lastFrameId) {
             lastFrameId = data.frame.id;
             setScreenImage(data.frame.image_data);
@@ -361,19 +527,25 @@ function KioskLivePreview({
             // Report new image to parent for fullscreen updates
             onImageUpdate?.(kiosk.id, data.frame.image_data);
           }
+        } else {
+          consecutiveErrors++;
         }
-      } catch (error) {
-        console.error(`[${kiosk.name}] Error polling screen frame:`, error);
+      } catch {
+        consecutiveErrors++;
+        // Don't log on every poll failure to reduce noise
+        if (consecutiveErrors === 1 || consecutiveErrors % 10 === 0) {
+          console.warn(`[${kiosk.name}] Screen poll error (${consecutiveErrors} consecutive)`);
+        }
       }
     };
 
-    // Poll every 3 seconds for screen updates (reduced from 1s to prevent DB exhaustion)
+    // Poll every 3 seconds for screen updates
     const pollInterval = setInterval(pollScreenFrame, 3000);
     pollScreenFrame(); // Initial poll
 
-    // Reset receiving state if no frames for 10 seconds
+    // Extended timeout before marking as not receiving (Task 18: reduce flicker)
     const checkInterval = setInterval(() => {
-      if (isActive && lastFrameTimeRef.current > 0 && Date.now() - lastFrameTimeRef.current > 10000) {
+      if (isActive && lastFrameTimeRef.current > 0 && Date.now() - lastFrameTimeRef.current > 15000) {
         setIsReceiving(false);
       }
     }, 5000);
@@ -386,6 +558,12 @@ function KioskLivePreview({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kiosk.id, kiosk.name]);
 
+  // Report active status to parent (Task 21)
+  useEffect(() => {
+    const isCustomerActive = kiosk.current_screen !== 'start' && kiosk.current_screen !== '' && kiosk.status === 'online';
+    onActiveChange?.(kiosk.id, isCustomerActive);
+  }, [kiosk.id, kiosk.current_screen, kiosk.status, onActiveChange]);
+
   // Determine actual online status: prefer stream data, fall back to DB
   const hasStream = isReceiving && screenImage;
   const isActuallyOnline = hasStream || isDbOnline;
@@ -394,10 +572,8 @@ function KioskLivePreview({
     <div className="bg-white rounded-xl shadow-lg border overflow-hidden">
       <div className="px-4 py-3 border-b bg-gray-50 flex items-center justify-between">
         <div>
-          <h3 className="font-semibold text-gray-900">{kiosk.name}</h3>
-          {kiosk.location && (
-            <p className="text-xs text-gray-500">{kiosk.location}</p>
-          )}
+          <h3 className="font-semibold text-gray-900">{kiosk.project?.name || kiosk.name}</h3>
+          <p className="text-xs text-gray-500">{kiosk.name}{kiosk.location ? ` · ${kiosk.location}` : ''}</p>
         </div>
         <div className="flex items-center gap-2">
           {isActuallyOnline && (
@@ -453,6 +629,21 @@ function KioskLivePreview({
           </span>
         </div>
       </div>
+
+      {/* Room stats bar (Task 15) */}
+      {roomStats && roomStats.total > 0 && (
+        <div className="px-4 py-1.5 bg-gray-50 border-b flex items-center justify-between text-xs">
+          <div className="flex items-center gap-3">
+            <span className="text-gray-500">
+              판매 <span className="font-semibold text-blue-600">{roomStats.sold}</span>
+            </span>
+            <span className="text-gray-500">
+              잔여 <span className="font-semibold text-green-600">{roomStats.available}</span>
+            </span>
+          </div>
+          <span className="text-gray-400">총 {roomStats.total}실</span>
+        </div>
+      )}
 
       {/* Tablet ratio container (4:3) */}
       <div

@@ -9,6 +9,12 @@ interface KioskInfo {
   name: string;
   location: string | null;
   project_id: string;
+  project_name?: string;
+}
+
+interface PendingCall {
+  session: VideoSession;
+  kioskInfo: KioskInfo;
 }
 
 interface VoiceCallState {
@@ -17,12 +23,13 @@ interface VoiceCallState {
   kioskInfo: KioskInfo | null;
   callDuration: number;
   error: string | null;
+  pendingCalls: PendingCall[];
 }
 
 interface VoiceCallContextValue extends VoiceCallState {
   callKiosk: (kioskId: string) => Promise<void>;
-  answerCall: () => Promise<void>;
-  declineCall: () => Promise<void>;
+  answerCall: (sessionId?: string) => Promise<void>;
+  declineCall: (sessionId?: string) => Promise<void>;
   endCall: () => void;
   remoteAudioRef: React.RefObject<HTMLAudioElement | null>;
 }
@@ -41,6 +48,7 @@ export function VoiceCallProvider({ children, profile }: VoiceCallProviderProps)
     kioskInfo: null,
     callDuration: 0,
     error: null,
+    pendingCalls: [],
   });
 
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -160,13 +168,14 @@ export function VoiceCallProvider({ children, profile }: VoiceCallProviderProps)
     // Update ref FIRST before setState to prevent race conditions
     statusRef.current = 'idle';
     
-    setState({
+    setState(prev => ({
       status: 'idle',
       currentSession: null,
       kioskInfo: null,
       callDuration: 0,
       error: null,
-    });
+      pendingCalls: prev.pendingCalls, // Keep pending calls even when resetting current call
+    }));
     
     // Reset the ending flag
     isEndingCallRef.current = false;
@@ -174,13 +183,13 @@ export function VoiceCallProvider({ children, profile }: VoiceCallProviderProps)
     console.log('[Manager Dashboard] State reset to idle, statusRef.current:', statusRef.current);
   }, []);
 
-  // Fetch kiosk info via API
+  // Fetch kiosk info via API (includes project_name for Task 17)
   const fetchKioskInfo = useCallback(async (kioskId: string): Promise<KioskInfo | null> => {
     try {
       const response = await fetch(`/api/kiosks/${kioskId}`);
       if (response.ok) {
         const data = await response.json();
-        return { id: data.id, name: data.name, location: data.location, project_id: data.project_id };
+        return { id: data.id, name: data.name, location: data.location, project_id: data.project_id, project_name: data.project_name };
       }
       return null;
     } catch (error) {
@@ -263,21 +272,41 @@ export function VoiceCallProvider({ children, profile }: VoiceCallProviderProps)
             }
           }
           
-          // Find first waiting session that we haven't already processed
-          if (waitingSessions.length > 0 && statusRef.current === 'idle') {
-            const session = waitingSessions[0];
-            console.log('[Manager] Incoming call from kiosk:', session);
-            const kioskInfo = await fetchKioskInfo(session.kiosk_id);
+          // Build pending calls list for ALL waiting sessions (Task 16)
+          if (waitingSessions.length > 0) {
+            const pendingCalls: PendingCall[] = [];
+            for (const session of waitingSessions) {
+              const info = await fetchKioskInfo(session.kiosk_id);
+              if (info) {
+                pendingCalls.push({ session, kioskInfo: info });
+              }
+            }
 
             setState((prev) => ({
               ...prev,
-              status: 'incoming',
-              currentSession: session,
-              kioskInfo,
-              error: null,
+              pendingCalls,
             }));
-          } else if (waitingSessions.length > 0) {
-            console.log('[Manager Dashboard Poll] Waiting sessions exist but status is not idle:', statusRef.current);
+
+            // If idle and we have waiting sessions, set the first one as current incoming
+            if (statusRef.current === 'idle' && pendingCalls.length > 0) {
+              const first = pendingCalls[0];
+              console.log('[Manager] Incoming call from kiosk:', first.session);
+
+              setState((prev) => ({
+                ...prev,
+                status: 'incoming',
+                currentSession: first.session,
+                kioskInfo: first.kioskInfo,
+                error: null,
+                pendingCalls,
+              }));
+            }
+          } else {
+            // No waiting sessions, clear pending calls
+            setState((prev) => ({
+              ...prev,
+              pendingCalls: [],
+            }));
           }
         }
       } catch (error) {

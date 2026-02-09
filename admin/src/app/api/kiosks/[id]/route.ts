@@ -22,15 +22,15 @@ export async function GET(
     const { id } = await params;
 
     // Super admins can access any kiosk, others only their project's kiosks
-    let kiosk: KioskRow | null;
+    let kiosk: (KioskRow & { project_name?: string }) | null;
     if (profile.role === 'super_admin') {
-      kiosk = await queryOne<KioskRow>(
-        'SELECT id, name, location, project_id FROM kiosks WHERE id = $1',
+      kiosk = await queryOne<KioskRow & { project_name?: string }>(
+        'SELECT k.id, k.name, k.location, k.project_id, p.name as project_name FROM kiosks k LEFT JOIN projects p ON k.project_id = p.id WHERE k.id = $1',
         [id]
       );
     } else {
-      kiosk = await queryOne<KioskRow>(
-        'SELECT id, name, location, project_id FROM kiosks WHERE id = $1 AND project_id = $2',
+      kiosk = await queryOne<KioskRow & { project_name?: string }>(
+        'SELECT k.id, k.name, k.location, k.project_id, p.name as project_name FROM kiosks k LEFT JOIN projects p ON k.project_id = p.id WHERE k.id = $1 AND k.project_id = $2',
         [id, profile.project_id]
       );
     }

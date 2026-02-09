@@ -6,7 +6,7 @@
  * Supports both initiator (caller) and responder (answerer) roles
  */
 
-import { useRef, useCallback, useEffect } from 'react';
+import { useRef, useCallback, useEffect, useMemo } from 'react';
 import {
   ICE_SERVERS,
   CONNECTION_TIMEOUT_MS,
@@ -607,13 +607,22 @@ export function useVoiceCall(options: UseVoiceCallOptions): UseVoiceCallReturn {
     };
   }, [cleanup]);
 
-  return {
+  // Stable getter functions
+  const getLocalStream = useCallback(() => localStreamRef.current, []);
+  const getRemoteStream = useCallback(() => remoteStreamRef.current, []);
+  const getSessionId = useCallback(() => sessionIdRef.current, []);
+
+  // Memoize return value to prevent new object reference on every render.
+  // Without this, useEffect dependencies on `voiceCall` re-trigger on every render,
+  // which causes the auto-answer timer in IncomingCallFromManager to be cleared
+  // before it fires, so incoming calls from admin never get answered.
+  return useMemo(() => ({
     initiateCall,
     answerCall,
     endCall,
     cleanup,
-    getLocalStream: () => localStreamRef.current,
-    getRemoteStream: () => remoteStreamRef.current,
-    getSessionId: () => sessionIdRef.current,
-  };
+    getLocalStream,
+    getRemoteStream,
+    getSessionId,
+  }), [initiateCall, answerCall, endCall, cleanup, getLocalStream, getRemoteStream, getSessionId]);
 }

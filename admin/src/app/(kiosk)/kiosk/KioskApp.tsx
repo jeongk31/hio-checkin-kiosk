@@ -149,12 +149,48 @@ async function pollIncomingCalls(kioskId: string): Promise<{ id: string; room_na
     if (response.ok) {
       const data = await response.json();
       const sessions = data.sessions || [];
-      return sessions[0] || null;
+      // Only consider sessions created within the last 2 minutes
+      // Older sessions are stale (admin disconnected, page refreshed, etc.)
+      const now = Date.now();
+      const recentSessions = sessions.filter((s: { started_at: string }) => {
+        const startedAt = new Date(s.started_at).getTime();
+        return now - startedAt < 120000; // 2 minutes
+      });
+      return recentSessions[0] || null;
     }
     return null;
   } catch (error) {
     console.error('Error polling incoming calls:', error);
     return null;
+  }
+}
+
+// Clean up stale waiting sessions for a kiosk (called on startup)
+async function cleanupStaleSessions(kioskId: string): Promise<void> {
+  if (isUnauthorized) return;
+  try {
+    const response = await fetch(`/api/video-sessions?status=waiting&kiosk_id=${kioskId}`, {
+      credentials: 'include',
+    });
+    if (response.ok) {
+      const data = await response.json();
+      const sessions = data.sessions || [];
+      for (const session of sessions) {
+        await fetch('/api/video-sessions', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: session.id,
+            status: 'ended',
+            ended_at: new Date().toISOString(),
+          }),
+          credentials: 'include',
+        });
+        console.log(`[Kiosk] Cleaned up stale session: ${session.id}`);
+      }
+    }
+  } catch (error) {
+    console.error('[Kiosk] Error cleaning up stale sessions:', error);
   }
 }
 
@@ -576,6 +612,12 @@ export default function KioskApp({ kiosk, content, paymentResult, userRole }: Ki
     };
   }, [kiosk, router]);
 
+  // Clean up stale waiting sessions on startup
+  useEffect(() => {
+    if (!kiosk) return;
+    cleanupStaleSessions(kiosk.id);
+  }, [kiosk]);
+
   // Poll for incoming calls from manager
   useEffect(() => {
     if (!kiosk) return;
@@ -585,7 +627,9 @@ export default function KioskApp({ kiosk, content, paymentResult, userRole }: Ki
 
     const pollCalls = async () => {
       if (!isActive) return;
-      
+      // Don't detect new calls if already handling one
+      if (showIncomingCall) return;
+
       const session = await pollIncomingCalls(kiosk.id);
       if (session && session.id !== lastSeenSessionId) {
         console.log('[Kiosk] Incoming call from manager:', session);
@@ -595,15 +639,21 @@ export default function KioskApp({ kiosk, content, paymentResult, userRole }: Ki
       }
     };
 
+    // Delay initial poll to let stale session cleanup finish first
+    const initialDelay = setTimeout(() => {
+      if (!isActive) return;
+      pollCalls();
+    }, 2000);
+
     // Poll every 3 seconds for call detection (reduced to prevent DB exhaustion)
     const interval = setInterval(pollCalls, 3000);
-    pollCalls(); // Initial poll
 
     return () => {
       isActive = false;
+      clearTimeout(initialDelay);
       clearInterval(interval);
     };
-  }, [kiosk]);
+  }, [kiosk, showIncomingCall]);
 
   // Screen capture and upload for live preview
   const captureIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -1182,7 +1232,7 @@ function StaffCallModal({ isOpen, onClose, sessionId, callStatus, onCallStatusCh
 
   // Reset state and cleanup when modal closes (e.g., when parent calls closeStaffModal)
   useEffect(() => {
-    if (!isOpen) {
+    if (!isOpen && hasInitiatedRef.current) {
       console.log(`[StaffCallModal] 🔄 Modal closed, cleaning up voice call and resetting state`);
 
       // IMPORTANT: End and cleanup the voice call when modal is closed
@@ -1453,31 +1503,32 @@ function IncomingCallFromManager({ session, onClose, callStatus, onCallStatusCha
   });
 
   // Auto-answer the incoming call
+  // Guard is inside the timer callback (not at effect entry) so that React Strict Mode
+  // double-invocation works correctly: cleanup clears the old timer, re-run starts a new one,
+  // and answerCall is only called once when the final timer fires.
   useEffect(() => {
-    if (hasAnsweredRef.current) {
-      console.log(`[IncomingCallFromManager] ⚠️ Already answered, skipping. session: ${session.id}`);
-      return;
-    }
-    hasAnsweredRef.current = true;
+    console.log(`[IncomingCallFromManager] 📞 Scheduling auto-answer for session: ${session.id}, room: ${session.room_name}`);
 
-    console.log(`[IncomingCallFromManager] 📞 Auto-answering incoming call, session: ${session.id}, room: ${session.room_name}`);
-
-    // Small delay before answering
     const timer = setTimeout(async () => {
+      if (hasAnsweredRef.current) {
+        console.log(`[IncomingCallFromManager] ⚠️ Already answered, skipping. session: ${session.id}`);
+        return;
+      }
+      hasAnsweredRef.current = true;
+
       console.log(`[IncomingCallFromManager] 🔄 Calling voiceCall.answerCall(), session: ${session.id}`);
       const success = await voiceCall.answerCall(session.id);
       if (success) {
         console.log(`[IncomingCallFromManager] ✅ Answer successful, updating DB status to connected`);
-        // Update database session status
         updateVideoSession(session.id, { status: 'connected' });
       } else {
         console.error(`[IncomingCallFromManager] ❌ Failed to answer call, session: ${session.id}`);
+        hasAnsweredRef.current = false; // Allow retry on failure
         onCallStatusChange('failed');
       }
     }, 500);
 
     return () => {
-      console.log(`[IncomingCallFromManager] 🧹 Cleanup: clearing answer timer`);
       clearTimeout(timer);
     };
   }, [session.id, voiceCall, onCallStatusChange]);
@@ -1500,8 +1551,8 @@ function IncomingCallFromManager({ session, onClose, callStatus, onCallStatusCha
           ended_at: new Date().toISOString(),
         });
 
-        // Cleanup the hook (safe to call even if already cleaned up)
-        voiceCall.cleanup();
+        // End the call (sends call-ended signal to admin, then cleans up)
+        voiceCall.endCall('ended');
 
         console.log(`[IncomingCallFromManager] ✅ Call cleanup complete, closing modal`);
         onClose();
@@ -2075,6 +2126,8 @@ function IDVerificationScreen({
   const [currentGuest, setCurrentGuest] = useState(0);
   const [verificationStep, setVerificationStep] = useState<'idle' | 'capturing-id' | 'id-preview' | 'ocr-confirm' | 'capturing-face' | 'verifying' | 'success' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState('');
+  // Track which step the error originated from for smart retry
+  const [errorSource, setErrorSource] = useState<'id' | 'face' | 'duplicate-id' | null>(null);
   const [idCardImage, setIdCardImage] = useState<string | null>(null);
   const [editedOcrData, setEditedOcrData] = useState<{
     name: string;
@@ -2084,6 +2137,8 @@ function IDVerificationScreen({
     idType: string;
     driverNo?: string;
   } | null>(null);
+  // Track verified guest IDs to prevent same ID being used for multiple guests
+  const [verifiedJuminNos, setVerifiedJuminNos] = useState<string[]>([]);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -2506,6 +2561,16 @@ function IDVerificationScreen({
   // Step 3: OCR confirmation - user can edit or proceed
   const handleOcrConfirm = async () => {
     if (!editedOcrData) return;
+
+    // Check for duplicate ID (same person verifying twice for multi-guest)
+    const juminKey = `${editedOcrData.juminNo1}-${editedOcrData.juminNo2}`;
+    if (verifiedJuminNos.includes(juminKey)) {
+      setErrorMessage('이미 인증된 신분증입니다.\n다른 투숙객의 신분증을 사용해주세요.');
+      setErrorSource('duplicate-id');
+      setVerificationStep('error');
+      return;
+    }
+
     setVerificationStep('capturing-face');
     await startCamera();
     // Start face detection for auto-capture
@@ -2597,6 +2662,12 @@ function IDVerificationScreen({
       const result = await response.json();
 
       if (result.success) {
+        // Store verified ID to prevent duplicate usage
+        if (editedOcrData) {
+          const juminKey = `${editedOcrData.juminNo1}-${editedOcrData.juminNo2}`;
+          setVerifiedJuminNos(prev => [...prev, juminKey]);
+        }
+
         if (currentGuest >= guestCount) {
           setVerificationStep('success');
           setTimeout(() => {
@@ -2610,6 +2681,7 @@ function IDVerificationScreen({
           const nextGuest = currentGuest + 1;
           setCurrentGuest(nextGuest);
           setIdCardImage(null);
+          setEditedOcrData(null);
           setVerificationStep('capturing-id');
           syncInputData({ currentGuest: nextGuest });
           await startCamera();
@@ -2617,34 +2689,59 @@ function IDVerificationScreen({
       } else {
         // Parse error message for better user experience
         let errorMsg = result.error || '인증에 실패했습니다';
-        
+        let source: 'id' | 'face' = 'id';
+
         // Check for specific error types
         if (result.data?.ocrResult?.errorCode === 'O003' || errorMsg.includes('주민등록번호 없음')) {
           errorMsg = '주민등록증 또는 운전면허증만 인증 가능합니다.\n여권이나 외국인등록증은 지원하지 않습니다.\n다른 신분증을 사용해주세요.';
+          source = 'id';
         } else if (errorMsg.includes('지원하지 않는 신분증')) {
           errorMsg = '주민등록증 또는 운전면허증을 사용해주세요.';
+          source = 'id';
         } else if (errorMsg.includes('안면인증 실패') || errorMsg.includes('얼굴이 일치하지')) {
           errorMsg = '얼굴이 신분증과 일치하지 않습니다.\n다시 시도해주세요.';
+          source = 'face';
         } else if (errorMsg.includes('미성년자')) {
           errorMsg = '만 19세 미만은 체크인이 불가합니다.';
+          source = 'id';
         }
-        
+
         setErrorMessage(errorMsg);
+        setErrorSource(source);
         setVerificationStep('error');
       }
     } catch (error) {
       console.error('Verification API error:', error);
       setErrorMessage('서버 연결에 실패했습니다. 다시 시도해주세요.');
+      setErrorSource('face');
       setVerificationStep('error');
     }
   };
 
   const handleRetry = async () => {
     setErrorMessage('');
-    setIdCardImage(null);
-    setEditedOcrData(null);
-    setVerificationStep('capturing-id');
-    await startCamera();
+
+    if (errorSource === 'face' && idCardImage && editedOcrData) {
+      // Face recognition failed: restart from face capture step (keep ID card + OCR data)
+      setErrorSource(null);
+      setVerificationStep('capturing-face');
+      await startCamera();
+      startFaceDetection();
+    } else if (errorSource === 'duplicate-id') {
+      // Duplicate ID: restart from ID capture (need a different ID)
+      setIdCardImage(null);
+      setEditedOcrData(null);
+      setErrorSource(null);
+      setVerificationStep('capturing-id');
+      await startCamera();
+    } else {
+      // ID-related error or unknown: restart from ID capture
+      setIdCardImage(null);
+      setEditedOcrData(null);
+      setErrorSource(null);
+      setVerificationStep('capturing-id');
+      await startCamera();
+    }
   };
 
   const handleBack = () => {
@@ -2727,7 +2824,7 @@ function IDVerificationScreen({
           <TopButtonRow onStaffCall={openStaffModal} callStatus={callProps.callStatus} callDuration={callProps.callDuration} onEndCall={callProps.onEndCall} isCallActive={callProps.isCallActive} />
           <div className="container">
             <NavArrow direction="left" label="이전" onClick={handleBack} />
-            <NavArrow direction="right" label="다시 시도" onClick={handleRetry} />
+            <NavArrow direction="right" label={errorSource === 'face' ? '얼굴 재촬영' : '다시 시도'} onClick={handleRetry} />
             <div className="logo"><Image src="/logo.png" alt="HiO" width={200} height={80} className="logo-image" /></div>
             <h2 className="screen-title">인증 실패</h2>
             <div style={{ textAlign: 'center', padding: '20px' }}>
@@ -2737,6 +2834,9 @@ function IDVerificationScreen({
                 <line x1="9" y1="9" x2="15" y2="15" />
               </svg>
               <p style={{ color: '#dc2626', fontSize: '14px' }}>{errorMessage}</p>
+              {errorSource === 'face' && (
+                <p style={{ color: '#6b7280', fontSize: '12px', marginTop: '8px' }}>신분증 인증은 완료되었습니다. 얼굴 촬영만 다시 진행합니다.</p>
+              )}
             </div>
           </div>
         </div>
@@ -4519,7 +4619,9 @@ function PaymentConfirmScreen({
   inputData?: InputData;
   kiosk?: Kiosk | null;
 }) {
-  const roomPrice = selectedRoom?.price || 65000;
+  // Reserved guests (checkin flow) already paid for the room - only charge amenities
+  const isReservedGuest = !!inputData?.reservation;
+  const roomPrice = isReservedGuest ? 0 : (selectedRoom?.price || 65000);
   const totalPrice = roomPrice + amenityTotal;
 
   const handlePayment = () => {
@@ -4527,6 +4629,7 @@ function PaymentConfirmScreen({
     console.log('[PaymentConfirm] selectedRoom:', selectedRoom);
     console.log('[PaymentConfirm] amenityTotal:', amenityTotal);
     console.log('[PaymentConfirm] totalPrice:', totalPrice);
+    console.log('[PaymentConfirm] isReservedGuest:', isReservedGuest);
 
     // Navigate to payment processing screen
     goToScreen('payment-process');
@@ -4590,7 +4693,8 @@ function PaymentConfirmScreen({
       // Continue anyway
     }
 
-    goToScreen('walkin-info');
+    // Reserved guests go to checkin-info, walk-ins go to walkin-info
+    goToScreen(isReservedGuest ? 'checkin-info' : 'walkin-info');
   };
 
   // Determine which screen to go back to
@@ -4642,27 +4746,33 @@ function PaymentConfirmScreen({
           <div className="logo">
             <Image src="/logo.png" alt="HiO" width={200} height={80} className="logo-image" />
           </div>
-          <h2 className="screen-title">{t('walkin_title')}</h2>
+          <h2 className="screen-title">{isReservedGuest ? t('checkin_title') : t('walkin_title')}</h2>
           <p className="screen-description">
-            선택하신 객실을 확인하시고 결제를 진행해 주세요
+            {isReservedGuest
+              ? '추가 어메니티 결제를 진행해 주세요'
+              : '선택하신 객실을 확인하시고 결제를 진행해 주세요'}
           </p>
           <div className="payment-summary">
-            <div className="selected-room-card">
-              <h3>{selectedRoom?.name || '스탠다드'}</h3>
-              <p>{selectedRoom?.description || '깔끔하고 편안한 기본 객실'}</p>
-              <p className="room-capacity">{selectedRoom?.capacity || '기준 2인 / 최대 2인'}</p>
-            </div>
-            <div className="payment-total">
-              <span className="total-label">객실 요금</span>
-              <span className="total-price">
-                {Math.round(roomPrice).toLocaleString('ko-KR')}원
-              </span>
-            </div>
+            {!isReservedGuest && (
+              <div className="selected-room-card">
+                <h3>{selectedRoom?.name || '스탠다드'}</h3>
+                <p>{selectedRoom?.description || '깔끔하고 편안한 기본 객실'}</p>
+                <p className="room-capacity">{selectedRoom?.capacity || '기준 2인 / 최대 2인'}</p>
+              </div>
+            )}
+            {!isReservedGuest && (
+              <div className="payment-total">
+                <span className="total-label">객실 요금</span>
+                <span className="total-price">
+                  {Math.round(roomPrice).toLocaleString('ko-KR')}원
+                </span>
+              </div>
+            )}
             {amenityTotal > 0 && (
-              <div className="payment-total" style={{ marginTop: '8px' }}>
+              <div className="payment-total" style={{ marginTop: isReservedGuest ? '0' : '8px' }}>
                 <span className="total-label">어메니티</span>
                 <span className="total-price" style={{ color: '#2563eb' }}>
-                  +{amenityTotal.toLocaleString('ko-KR')}원
+                  {isReservedGuest ? '' : '+'}{amenityTotal.toLocaleString('ko-KR')}원
                 </span>
               </div>
             )}
@@ -4771,10 +4881,12 @@ function PaymentProcessScreen({
     if (paymentInProgress || hasStartedPayment.current) return;
     
     hasStartedPayment.current = true;
-    const roomPrice = selectedRoom?.price || 65000;
+    // Reserved guests already paid for the room - only charge amenities
+    const isReservedGuest = !!inputData?.reservation;
+    const roomPrice = isReservedGuest ? 0 : (selectedRoom?.price || 65000);
     const amount = roomPrice + (amenityTotal || 0);
 
-    console.log('[PaymentProcess] Starting VTR payment:', { amount, roomPrice, amenityTotal });
+    console.log('[PaymentProcess] Starting VTR payment:', { amount, roomPrice, amenityTotal, isReservedGuest });
     
     setPaymentInProgress(true);
     setPaymentState('processing');
@@ -4846,7 +4958,9 @@ function PaymentProcessScreen({
         // Auto-advance to room assignment after 2 seconds
         setTimeout(() => {
           setPaymentInProgress(false);
-          goToScreen('walkin-info');
+          // Reserved guests go to checkin-info, walk-ins go to walkin-info
+          const isReserved = !!inputData?.reservation;
+          goToScreen(isReserved ? 'checkin-info' : 'walkin-info');
         }, 2000);
       } else {
         // Payment failed

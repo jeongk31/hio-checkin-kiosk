@@ -126,7 +126,7 @@ export async function PUT(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { id, status, staffUserId, endedAt, started_at, ended_at } = await request.json();
+    const { id, status, staffUserId, endedAt, started_at, ended_at, notes } = await request.json();
 
     if (!id) {
       return NextResponse.json({ error: 'Session ID is required' }, { status: 400 });
@@ -156,6 +156,11 @@ export async function PUT(request: Request) {
     if (started_at !== undefined) {
       setClauses.push(`started_at = $${paramIndex++}`);
       params.push(started_at);
+    }
+
+    if (notes !== undefined) {
+      setClauses.push(`notes = $${paramIndex++}`);
+      params.push(notes);
     }
 
     if (setClauses.length === 0) {

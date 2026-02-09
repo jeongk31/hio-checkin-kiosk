@@ -104,6 +104,7 @@ interface Reservation {
   amenity_total?: number | null;
   room_type?: RoomType;
   created_at?: string;
+  updated_at?: string;
   verified_guests?: VerifiedGuest[];
 }
 
@@ -125,6 +126,7 @@ interface RoomManagerProps {
   initialRooms: Room[];
   isSuperAdmin: boolean;
   initialProject?: Project | null;
+  profileName: string;
 }
 
 type Tab = 'today' | 'roomTypes' | 'amenities' | 'history';
@@ -137,6 +139,7 @@ export default function RoomManager({
   initialRooms,
   isSuperAdmin,
   initialProject,
+  profileName,
 }: RoomManagerProps) {
   const [activeTab, setActiveTab] = useState<Tab>('today');
   // For super admin, start with the first project selected (not 'all') to match initial data
@@ -194,6 +197,11 @@ export default function RoomManager({
     price: '',
     description: '',
   });
+
+  // Room change state (Task 23)
+  const [showRoomChangeModal, setShowRoomChangeModal] = useState(false);
+  const [changingRoom, setChangingRoom] = useState<Room | null>(null);
+  const [changingReservation, setChangingReservation] = useState<Reservation | null>(null);
 
   const today = new Date().toISOString().split('T')[0];
 
@@ -256,12 +264,16 @@ export default function RoomManager({
   const fetchHistory = async () => {
     setLoading(true);
     try {
-      // Show all checked-in reservations (including today's check-ins)
+      // Fetch all reservation statuses for history (checked_in, checked_out, cancelled, etc.)
       const res = await fetch(
-        `/api/reservations?projectId=${selectedProjectId}&status=checked_in&limit=200`
+        `/api/reservations?projectId=${selectedProjectId}&limit=200`
       );
       const data = await res.json();
-      setHistoryReservations(data.reservations || []);
+      // Filter to only show actionable statuses (not pending/confirmed which are just bookings)
+      const history = (data.reservations || []).filter(
+        (r: Reservation) => ['checked_in', 'checked_out', 'cancelled', 'no_show'].includes(r.status)
+      );
+      setHistoryReservations(history);
     } catch (error) {
       console.error('Error fetching history:', error);
     } finally {
@@ -520,13 +532,52 @@ export default function RoomManager({
     }
   };
 
+  // Room change handler (Task 23)
+  const handleStartRoomChange = (room: Room, reservation: Reservation) => {
+    setChangingRoom(room);
+    setChangingReservation(reservation);
+    setShowRoomChangeModal(true);
+  };
+
+  const handleRoomChange = async (newRoomId: string) => {
+    if (!changingRoom) return;
+    setLoading(true);
+    try {
+      const response = await fetch('/api/rooms/change', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          currentRoomId: changingRoom.id,
+          newRoomId,
+        }),
+      });
+      if (response.ok) {
+        const data = await response.json();
+        alert(`객실이 ${data.fromRoom}에서 ${data.toRoom}(으)로 변경되었습니다.`);
+        setShowRoomChangeModal(false);
+        setChangingRoom(null);
+        setChangingReservation(null);
+        // Refresh rooms list
+        const projectId = selectedProjectId || defaultProjectId;
+        if (projectId) {
+          const roomsRes = await fetch(`/api/rooms?projectId=${projectId}`);
+          const roomsData = await roomsRes.json();
+          setRooms(roomsData.rooms || []);
+        }
+      } else {
+        const data = await response.json();
+        alert(`객실 변경 실패: ${data.error}`);
+      }
+    } catch (error) {
+      console.error('Error changing room:', error);
+      alert('객실 변경 중 오류가 발생했습니다.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleCancelCheckIn = async (reservation: Reservation) => {
-    // Check if this is a walk-in reservation (created via kiosk)
-    const isWalkIn = reservation.source === 'kiosk_walkin';
-    
-    const confirmMessage = isWalkIn
-      ? `${reservation.guest_name || '게스트'}님의 체크인을 취소하시겠습니까?\n\n워크인 예약이므로 예약 정보가 완전히 삭제됩니다.`
-      : `${reservation.guest_name || '게스트'}님의 체크인을 취소하시겠습니까?\n\n예약 상태로 롤백되고, 객실은 예약 상태로 유지됩니다.`;
+    const confirmMessage = `${reservation.guest_name || '게스트'}님의 체크인을 취소하시겠습니까?\n\n체크인이 취소되고 객실이 해제됩니다.`;
 
     if (!confirm(confirmMessage)) {
       return;
@@ -537,93 +588,48 @@ export default function RoomManager({
       // Find the room associated with this reservation
       const room = rooms.find(r => r.room_number === reservation.room_number);
 
-      if (isWalkIn) {
-        // For walk-in reservations: DELETE the reservation completely
-        const res = await fetch('/api/reservations', {
-          method: 'DELETE',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            id: reservation.id,
-            projectId: reservation.project_id,
-          }),
-        });
+      // Mark reservation as cancelled with actor info (both walk-in and regular)
+      const res = await fetch('/api/reservations', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: reservation.id,
+          projectId: reservation.project_id,
+          status: 'cancelled',
+          notes: `체크인 취소 (${profileName})`,
+        }),
+      });
 
-        if (res.ok) {
-          // Remove the reservation from state
-          setReservations(reservations.filter((r) => r.id !== reservation.id));
-          
-          // Update room status to available
-          if (room) {
-            const roomRes = await fetch('/api/rooms', {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                id: room.id,
-                projectId: room.project_id,
-                status: 'available',
-              }),
-            });
-            
-            if (roomRes.ok) {
-              const roomData = await roomRes.json();
-              setRooms(rooms.map((r) =>
-                r.id === roomData.room.id ? roomData.room : r
-              ));
-            }
+      if (res.ok) {
+        // Remove from today's reservations state
+        setReservations(reservations.filter((r) => r.id !== reservation.id));
+        // Clear history so it re-fetches with the cancelled entry
+        setHistoryReservations([]);
+
+        // Update room status to available
+        if (room) {
+          const roomRes = await fetch('/api/rooms', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              id: room.id,
+              projectId: room.project_id,
+              status: 'available',
+            }),
+          });
+
+          if (roomRes.ok) {
+            const roomData = await roomRes.json();
+            setRooms(rooms.map((r) =>
+              r.id === roomData.room.id ? roomData.room : r
+            ));
           }
-          
-          alert('워크인 체크인이 취소되고 예약이 삭제되었습니다.');
-        } else {
-          const data = await res.json();
-          alert(data.error || '체크인 취소에 실패했습니다.');
         }
+
+        alert('체크인이 취소되었습니다.');
       } else {
-        // For regular reservations: Roll back to 'reserved' status, keep room assignment
-        const res = await fetch('/api/reservations', {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            id: reservation.id,
-            projectId: reservation.project_id,
-            status: 'reserved', // Roll back to reserved status
-            // Keep room assignment (roomNumber) - don't clear it
-            // Clear verified guests
-            verified_guests: [],
-          }),
-        });
-
-        if (res.ok) {
-          const data = await res.json();
-          // Update the reservation in state
-          setReservations(reservations.map((r) =>
-            r.id === data.reservation.id ? data.reservation : r
-          ));
-          
-          // Update room status back to reserved
-          if (room) {
-            const roomRes = await fetch('/api/rooms', {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                id: room.id,
-                projectId: room.project_id,
-                status: 'reserved', // Room goes back to reserved status
-              }),
-            });
-            
-            if (roomRes.ok) {
-              const roomData = await roomRes.json();
-              setRooms(rooms.map((r) =>
-                r.id === roomData.room.id ? roomData.room : r
-              ));
-            }
-          }
-          
-          alert('체크인이 취소되었습니다. 예약 상태로 롤백됩니다.');
-        } else {
-          const data = await res.json();
-          alert(data.error || '체크인 취소에 실패했습니다.');
-        }
+        const data = await res.json();
+        alert(data.error || '체크인 취소에 실패했습니다.');
       }
     } catch (error) {
       console.error('Error canceling check-in:', error);
@@ -700,7 +706,21 @@ export default function RoomManager({
         });
 
         if (res.ok) {
+          // Record actor info in reservation notes (Task 26)
+          if (room.reservation?.id) {
+            await fetch('/api/reservations', {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                id: room.reservation.id,
+                projectId: room.project_id,
+                notes: `결제 취소 (${profileName})`,
+              }),
+            });
+          }
           alert(`결제가 취소되었습니다.\n취소 승인번호: ${cancelApprovalNo}`);
+          // Clear history so it re-fetches with updated notes
+          setHistoryReservations([]);
           // Refresh rooms
           const roomsRes = await fetch(`/api/rooms?projectId=${selectedProjectId}`);
           const roomsData = await roomsRes.json();
@@ -1201,9 +1221,30 @@ export default function RoomManager({
                                   </span>
                                 ) : null;
                               })()}
-                              <span className="font-medium text-gray-900">
-                                {reservation.guest_name || '(이름 없음)'}
-                              </span>
+                              {(() => {
+                                const checkedInNames = reservation.verified_guests?.map(g => g.name) || [];
+                                const reserverName = reservation.guest_name;
+                                const hasCheckedIn = reservation.status === 'checked_in' && checkedInNames.length > 0;
+                                const namesDiffer = hasCheckedIn && reserverName && !checkedInNames.includes(reserverName);
+
+                                if (namesDiffer) {
+                                  return (
+                                    <div className="flex flex-col">
+                                      <span className="font-medium text-gray-900">
+                                        {checkedInNames.join(', ')}
+                                      </span>
+                                      <span className="text-xs text-gray-400">
+                                        예약자: {reserverName}
+                                      </span>
+                                    </div>
+                                  );
+                                }
+                                return (
+                                  <span className="font-medium text-gray-900">
+                                    {hasCheckedIn ? checkedInNames.join(', ') : (reserverName || '(이름 없음)')}
+                                  </span>
+                                );
+                              })()}
                             </div>
                             <div className="text-sm text-gray-500 mt-1">
                               {reservation.guest_phone && <span>{reservation.guest_phone}</span>}
@@ -1272,6 +1313,13 @@ export default function RoomManager({
                       <div className="flex items-center gap-2 ml-4">
                         {reservation && reservation.status === 'checked_in' && (
                           <>
+                            <button
+                              onClick={() => handleStartRoomChange(room, reservation)}
+                              className="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 text-sm font-medium"
+                              title="객실 변경"
+                            >
+                              방 변경
+                            </button>
                             <button
                               onClick={() => handleCancelCheckIn(reservation)}
                               className="px-3 py-1 bg-orange-500 text-white rounded hover:bg-orange-600 text-sm font-medium"
@@ -1524,12 +1572,22 @@ export default function RoomManager({
                               <div className="text-xs text-gray-500">{reservation.room_type.name}</div>
                             )}
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-gray-900">
-                            {typeof reservation.check_in_date === 'string'
-                              ? reservation.check_in_date
-                              : reservation.check_in_date instanceof Date
-                                ? reservation.check_in_date.toISOString().split('T')[0]
-                                : '-'}
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            {(() => {
+                              const dt = reservation.updated_at || reservation.created_at;
+                              if (dt) {
+                                const d = new Date(dt);
+                                const date = d.toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' });
+                                const time = d.toLocaleTimeString('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false });
+                                return (
+                                  <div>
+                                    <div className="text-gray-900">{date}</div>
+                                    <div className="text-xs text-gray-500">{time}</div>
+                                  </div>
+                                );
+                              }
+                              return <span className="text-gray-900">{typeof reservation.check_in_date === 'string' ? reservation.check_in_date : '-'}</span>;
+                            })()}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
                             <span className={`px-2 py-1 text-xs rounded-full ${status.class}`}>
@@ -1558,15 +1616,18 @@ export default function RoomManager({
                               );
                             })()}
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-gray-500">
-                            {reservation.source || '-'}
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="text-gray-500">{reservation.source || '-'}</div>
+                            {reservation.notes && (
+                              <div className="text-xs text-gray-400">{reservation.notes}</div>
+                            )}
                           </td>
                         </tr>
                       );
                     })}
                     {historyReservations.length === 0 && (
                       <tr>
-                        <td colSpan={7} className="px-6 py-12 text-center text-gray-500">
+                        <td colSpan={8} className="px-6 py-12 text-center text-gray-500">
                           이전 예약 기록이 없습니다
                         </td>
                       </tr>
@@ -1960,6 +2021,76 @@ export default function RoomManager({
       )}
 
       {/* Amenity Form Modal */}
+      {/* Room Change Modal (Task 23) */}
+      {showRoomChangeModal && changingRoom && changingReservation && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-lg max-h-[80vh] overflow-auto">
+            <h3 className="text-lg font-semibold mb-4">
+              객실 변경 - {changingRoom.room_number}호
+            </h3>
+            <div className="mb-4 p-3 bg-gray-50 rounded text-sm">
+              <div>
+                <span className="text-gray-500">현재 객실:</span>{' '}
+                <span className="font-medium">{changingRoom.room_number}호</span>
+                {changingRoom.room_type && (
+                  <span className="text-gray-400 ml-1">({changingRoom.room_type.name})</span>
+                )}
+              </div>
+              <div>
+                <span className="text-gray-500">투숙객:</span>{' '}
+                <span className="font-medium">{changingReservation.guest_name || '(이름 없음)'}</span>
+              </div>
+            </div>
+            <div className="mb-3 text-sm font-medium text-gray-700">이동할 객실 선택:</div>
+            <div className="space-y-2 max-h-60 overflow-auto">
+              {rooms
+                .filter(r => r.status === 'available' && r.id !== changingRoom.id)
+                .sort((a, b) => a.room_number.localeCompare(b.room_number, undefined, { numeric: true }))
+                .map(r => (
+                  <button
+                    key={r.id}
+                    onClick={() => {
+                      if (confirm(`${changingRoom.room_number}호에서 ${r.room_number}호로 변경하시겠습니까?`)) {
+                        handleRoomChange(r.id);
+                      }
+                    }}
+                    disabled={loading}
+                    className="w-full text-left p-3 border rounded-lg hover:bg-blue-50 hover:border-blue-300 transition-colors flex items-center justify-between"
+                  >
+                    <div>
+                      <span className="font-medium">{r.room_number}호</span>
+                      {r.room_type && (
+                        <span className="text-gray-500 text-sm ml-2">{r.room_type.name}</span>
+                      )}
+                      {r.floor && (
+                        <span className="text-gray-400 text-sm ml-2">{r.floor}층</span>
+                      )}
+                    </div>
+                    <span className="px-2 py-0.5 text-xs bg-green-100 text-green-700 rounded-full">사용가능</span>
+                  </button>
+                ))}
+              {rooms.filter(r => r.status === 'available' && r.id !== changingRoom.id).length === 0 && (
+                <div className="text-center py-8 text-gray-500">
+                  사용 가능한 객실이 없습니다.
+                </div>
+              )}
+            </div>
+            <div className="flex justify-end mt-4">
+              <button
+                onClick={() => {
+                  setShowRoomChangeModal(false);
+                  setChangingRoom(null);
+                  setChangingReservation(null);
+                }}
+                className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg"
+              >
+                취소
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showAmenityForm && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 max-w-lg w-full mx-4">
