@@ -20,10 +20,13 @@ Self-service check-in kiosk for hotel guests with multi-property admin dashboard
 ### Admin Dashboard
 - **Multi-Project Management**: Support for multiple properties
 - **Kiosk Monitoring**: Real-time kiosk status and control
-- **Room Management**: Room types, availability, and assignments
+- **Room Management**: Room types, availability, assignments, room change, daily reset
+- **Reservation History**: Date+time display, status tracking, actor audit trail
 - **Content Management**: Customize kiosk UI per project
-- **Video Call Handling**: Respond to guest video calls
-- **User Management**: Admin, project admin, and staff accounts
+- **Amenity Management**: Per-project amenity catalog with pricing
+- **Bidirectional Voice Calls**: Admin↔Kiosk calls with missed call notifications
+- **Payment Management**: Cancel/refund kiosk payments with actor tracking
+- **User Management**: Admin, project admin, staff, and kiosk accounts
 
 ## Technology
 

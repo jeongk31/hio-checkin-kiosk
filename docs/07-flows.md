@@ -513,6 +513,163 @@ sequenceDiagram
 
 ---
 
+## Admin → Kiosk Voice Call Flow
+
+### Staff-Initiated Call (Bidirectional)
+
+```mermaid
+sequenceDiagram
+    participant Staff
+    participant Admin as Admin Dashboard
+    participant A_API as Kiosk API
+    participant DB as Database
+    participant K_Poll as Kiosk Polling
+    participant Kiosk as Kiosk UI
+
+    Note over Staff,Kiosk: Staff Initiates Call to Kiosk
+
+    Staff->>Admin: Click "Call" on kiosk card
+    Admin->>Admin: Initialize WebRTC
+    Admin->>Admin: Get local media (mic)
+    Admin->>A_API: POST /api/video-sessions
+    A_API->>DB: INSERT video_sessions<br/>(kiosk_id, status='waiting',<br/>staff_user_id, initiator='admin')
+    A_API-->>Admin: {session_id}
+
+    Admin->>Admin: Create WebRTC offer
+    Admin->>A_API: POST /api/signaling<br/>(session_id, type='offer', sdp)
+    A_API->>DB: INSERT signaling_messages
+    A_API-->>Admin: Offer saved
+
+    Note over DB,Kiosk: Kiosk Detects Incoming Call
+
+    loop Poll every 2 seconds
+        K_Poll->>A_API: GET /api/video-sessions<br/>?kioskId=X&status=waiting
+        A_API->>DB: SELECT * FROM video_sessions<br/>WHERE kiosk_id=X AND status='waiting'<br/>AND age < 2 minutes
+        DB-->>A_API: Session list (filtered by age)
+        A_API-->>K_Poll: [session with initiator='admin']
+    end
+
+    K_Poll->>Kiosk: Incoming call detected
+    Kiosk->>Kiosk: Show IncomingCallFromManager
+
+    Note over Kiosk: Auto-answer after 500ms
+    Kiosk->>Kiosk: setTimeout(500ms) with<br/>hasAnsweredRef guard inside callback
+    Kiosk->>A_API: PUT /api/video-sessions<br/>(id, status='connected')
+
+    Kiosk->>A_API: GET /api/signaling/{session_id}
+    A_API-->>Kiosk: {type: 'offer', sdp: '...'}
+    Kiosk->>Kiosk: Create WebRTC answer
+    Kiosk->>A_API: POST /api/signaling<br/>(session_id, type='answer', sdp)
+
+    Admin->>A_API: GET /api/signaling/{session_id}
+    A_API-->>Admin: {type: 'answer', sdp: '...'}
+    Admin->>Admin: Set remote description
+
+    Note over Kiosk,Admin: ICE Candidate Exchange
+    Kiosk->>Admin: Peer connection established
+
+    Note over Staff,Kiosk: Active Call
+    Staff->>Kiosk: Voice communication
+
+    Note over Kiosk,Admin: End Call
+    alt Kiosk Ends Call
+        Kiosk->>A_API: endCall('ended')<br/>POST call-ended signal
+        A_API->>DB: UPDATE video_sessions<br/>SET status='ended'
+        Admin->>Admin: Detects call-ended signal<br/>(immediate, no 20s timeout)
+    else Staff Ends Call
+        Staff->>Admin: Click "End Call"
+        Admin->>A_API: endCall('ended')
+        A_API->>DB: UPDATE video_sessions<br/>SET status='ended'
+    end
+```
+
+**Key Points**:
+- Admin initiates call, kiosk auto-answers (no guest interaction needed)
+- 500ms delay before auto-answer for React Strict Mode safety
+- `hasAnsweredRef` guard prevents double-answer in Strict Mode
+- Stale sessions (>2 min) filtered out during polling
+- `cleanupStaleSessions()` runs on kiosk startup
+- `endCall('ended')` sends signal immediately (not `cleanup()` which has no signal)
+
+---
+
+## Room Change Flow
+
+### Move Checked-in Guest to Different Room
+
+```mermaid
+sequenceDiagram
+    actor Admin as Admin Staff
+    participant Frontend as Admin Dashboard
+    participant API as Kiosk API
+    participant DB as Database
+
+    Admin->>Frontend: Click "방 변경" on occupied room
+    Frontend->>Frontend: Show room change modal<br/>(list available rooms)
+
+    Admin->>Frontend: Select target room
+    Frontend->>API: POST /api/rooms/change<br/>{currentRoomId, newRoomId}
+
+    API->>DB: SELECT current room<br/>(verify status='occupied')
+    API->>DB: SELECT new room<br/>(verify status='available',<br/>same project)
+
+    API->>DB: UPDATE reservations<br/>SET room_number = new_room<br/>WHERE room_number = current_room<br/>AND status = 'checked_in'
+
+    API->>DB: UPDATE rooms<br/>SET status='available'<br/>WHERE id = currentRoomId
+
+    API->>DB: UPDATE rooms<br/>SET status='occupied'<br/>WHERE id = newRoomId
+
+    API-->>Frontend: {success, fromRoom, toRoom}
+    Frontend->>Frontend: Refresh room grid
+    Frontend-->>Admin: "Room changed successfully"
+```
+
+**Key Points**:
+- Current room must be `occupied`, new room must be `available`
+- Both rooms must belong to the same project
+- Reservation's `room_number` updated atomically
+- Old room → available, new room → occupied
+
+---
+
+## Check-in Cancellation Flow
+
+### Cancel Check-in (Walk-in and Regular)
+
+```mermaid
+sequenceDiagram
+    actor Admin as Admin Staff
+    participant Frontend as Admin Dashboard
+    participant API as Kiosk API
+    participant DB as Database
+
+    Admin->>Frontend: Click "체크인 취소" on room card
+    Frontend->>Frontend: Confirm dialog<br/>"Cancel check-in?"
+
+    Admin->>Frontend: Confirm
+    Frontend->>API: PUT /api/reservations<br/>{id, status='cancelled',<br/>notes='체크인 취소 (admin@hotel.com)'}
+
+    API->>DB: UPDATE reservations<br/>SET status='cancelled',<br/>notes='체크인 취소 (admin)',<br/>updated_at=NOW()
+    API-->>Frontend: Reservation updated
+
+    Frontend->>API: PUT /api/rooms<br/>{id, status='available'}
+    API->>DB: UPDATE rooms SET status='available'
+    API-->>Frontend: Room updated
+
+    Frontend->>Frontend: Remove from today's view
+    Frontend->>Frontend: Clear history cache<br/>(re-fetches with cancelled entry)
+    Frontend-->>Admin: "Check-in cancelled"
+```
+
+**Key Points**:
+- Both walk-in and regular reservations set to `cancelled` status
+- Actor name recorded in `notes` field for audit trail
+- Room released back to `available`
+- History tab re-fetches to show the cancelled entry with actor info
+- Cancelled reservations appear in history with red "취소" badge
+
+---
+
 ## Related Documentation
 
 - [00 - Overview](00-overview.md) - System overview

@@ -5,12 +5,14 @@ A self-service hotel check-in kiosk system built with Next.js and PostgreSQL.
 ## Features
 
 - **Multi-tenant Support**: Multiple hotels/projects with separate data
-- **Role-based Access Control**: Super Admin, Project Admin, and Kiosk users
-- **Room Management**: Room types, individual rooms, daily availability
-- **Reservation System**: Reservation validation and check-in tracking
-- **Identity Verification**: Integration with ID verification services
-- **Payment Integration**: Support for payment processing
-- **Voice/Video Calls**: WebRTC-based communication between kiosk and staff
+- **Role-based Access Control**: Super Admin, Project Admin, Staff, and Kiosk users
+- **Room Management**: Room types, individual rooms, room change, daily availability with reset
+- **Reservation System**: Reservation validation, check-in tracking, history with actor audit trail
+- **Identity Verification**: Korean ID card OCR + face authentication (useB API)
+- **Payment Integration**: VTR payment terminal with cancel/refund support
+- **Voice/Video Calls**: Bidirectional WebRTC calls (kiosk↔admin) with missed call tracking
+- **Amenity Management**: Per-project amenity catalog with pricing
+- **Kiosk Monitoring**: Real-time kiosk status, remote commands, screen streaming
 
 ## Tech Stack
 
@@ -132,14 +134,23 @@ admin/
 
 | Route | Method | Description |
 |-------|--------|-------------|
-| `/api/auth/login` | POST | User login |
+| `/api/auth/login` | POST | User login (via PMS) |
 | `/api/auth/logout` | POST | User logout |
 | `/api/projects` | GET | List projects |
+| `/api/projects/[id]` | GET | Get project details |
 | `/api/rooms` | GET/POST/PUT/DELETE | Manage rooms |
+| `/api/rooms/assign` | POST | Assign available room to guest (kiosk check-in) |
+| `/api/rooms/change` | POST | Change checked-in guest to different room |
 | `/api/room-types` | GET/POST/PUT/DELETE | Manage room types |
 | `/api/reservations` | GET/POST/PUT/DELETE | Manage reservations |
+| `/api/amenities` | GET/POST/PUT/DELETE | Manage amenities |
 | `/api/profiles` | GET | List user profiles |
 | `/api/accounts/create` | POST | Create user account |
+| `/api/kiosks` | GET/POST | List and create kiosks |
+| `/api/kiosks/[id]` | GET/PUT/DELETE | Manage individual kiosk |
+| `/api/video-sessions` | GET/POST/PUT | Manage video call sessions |
+| `/api/signaling` | GET/POST | WebRTC signaling messages |
+| `/api/payment/cancel-result` | POST | Receive payment cancel result from VAN |
 | `/api/sync` | POST | Sync projects/users from PMS |
 | `/api/cron/daily-reset` | POST/GET | Daily room reset cron |
 
