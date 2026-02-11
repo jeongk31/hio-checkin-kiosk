@@ -123,12 +123,12 @@ graph LR
 ```mermaid
 graph TB
     subgraph API["Next.js API Routes"]
-        Auth[/api/auth]
-        Projects[/api/projects]
-        Kiosks[/api/kiosks]
-        Rooms[/api/rooms]
-        Video[/api/video]
-        PMS_Sync[/api/pms/project-sync]
+        Auth["api/auth"]
+        Projects["api/projects"]
+        Kiosks["api/kiosks"]
+        Rooms["api/rooms"]
+        Video["api/video"]
+        PMS_Sync["api/pms/project-sync"]
     end
 
     subgraph Database["PostgreSQL"]
