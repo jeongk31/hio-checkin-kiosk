@@ -307,8 +307,7 @@ sequenceDiagram
 
     Kiosk->>API: POST /api/payments/process
     API->>API: Generate transaction_id (kiosk_tx_TIMESTAMP)
-    API->>VTR: POST /payment
-    Note right of API: {<br/>  amount: 100000,<br/>  currency: "KRW",<br/>  transaction_id: "kiosk_tx_12345",<br/>  description: "Room 101 - 1 night"<br/>}
+    API->>VTR: POST /payment<br/>(amount, currency, transaction_id)
 
     VTR->>Terminal: Send payment request (serial/USB)
     Terminal->>Terminal: Read card data
@@ -381,8 +380,7 @@ sequenceDiagram
         API->>API: Cache token (1 hour)
     end
 
-    API->>useB_OCR: POST /ocr/id-card
-    Note right of API: Headers: Authorization: Bearer {token}<br/>Body: {image: "data:image/jpeg;base64,...", type: "korean_id"}
+    API->>useB_OCR: POST /ocr/id-card<br/>(image base64, Bearer token)
 
     useB_OCR->>useB_OCR: Perform OCR
 
@@ -468,8 +466,7 @@ sequenceDiagram
     Note over PMS_API,Kiosk_API: Webhook Trigger
 
     PMS_API->>PMS_API: Prepare sync payload
-    PMS_API->>Kiosk_API: POST /api/pms/project-sync
-    Note right of PMS_API: {<br/>  secret: "pms-kiosk-sync-2026",<br/>  project: {id, name, type, ...},<br/>  room_types: [...],<br/>  rooms: [...]<br/>}
+    PMS_API->>Kiosk_API: POST /api/pms/project-sync<br/>(secret, project, room_types, rooms)
 
     Kiosk_API->>Kiosk_API: Verify PMS_SYNC_SECRET
 
@@ -480,8 +477,7 @@ sequenceDiagram
 
     Kiosk_API->>DB_Kiosk: BEGIN TRANSACTION
 
-    Kiosk_API->>DB_Kiosk: UPSERT projects
-    Note right of Kiosk_API: INSERT ... ON CONFLICT (id)<br/>DO UPDATE SET name=?, settings=?
+    Kiosk_API->>DB_Kiosk: UPSERT projects<br/>(INSERT ON CONFLICT UPDATE)
 
     loop For each room_type
         Kiosk_API->>DB_Kiosk: UPSERT room_types
